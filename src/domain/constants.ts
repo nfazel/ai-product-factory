@@ -47,6 +47,8 @@ export const APPROVAL_TYPES = [
   "RELEASE",
   "PRODUCT_DISCOVERY",
   "PRODUCT_DEFINITION",
+  "SOLUTION_ARCHITECTURE",
+  "IMPLEMENTATION_PLAN",
 ] as const;
 export type ApprovalType = (typeof APPROVAL_TYPES)[number];
 
@@ -88,6 +90,18 @@ export const ACTIVITY_TYPES = [
   "SLICE_APPROVED",
   "REQUIREMENT_UPDATED",
   "QUESTION_ANSWERED",
+  "ARCHITECTURE_GENERATED",
+  "ARCHITECTURE_COMMITTED",
+  "ARCHITECTURE_READY_FOR_REVIEW",
+  "ARCHITECTURE_APPROVED",
+  "PLAN_GENERATED",
+  "PLAN_COMMITTED",
+  "PLAN_APPROVED",
+  "ARCHITECTURE_REVIEW_REQUIRED",
+  "PLAN_REVIEW_REQUIRED",
+  "ADR_UPDATED",
+  "CODEBASE_CONTEXT_UPDATED",
+  "ARCHITECTURE_QUESTION_ANSWERED",
 ] as const;
 export type ActivityType = (typeof ACTIVITY_TYPES)[number];
 
@@ -192,7 +206,7 @@ export const STAGE_META: Record<
   },
   BUILD: {
     label: "Build",
-    summary: "Implement the product against the backlog.",
+    summary: "Agree the technical approach, then implement the approved slice.",
   },
   PROVE: {
     label: "Prove",
@@ -259,6 +273,8 @@ export const APPROVAL_TYPE_LABEL: Record<ApprovalType, string> = {
   RELEASE: "Release",
   PRODUCT_DISCOVERY: "Product discovery",
   PRODUCT_DEFINITION: "Product definition",
+  SOLUTION_ARCHITECTURE: "Solution architecture",
+  IMPLEMENTATION_PLAN: "Implementation plan",
 };
 
 export const ACTIVITY_TYPE_LABEL: Record<ActivityType, string> = {
@@ -290,6 +306,18 @@ export const ACTIVITY_TYPE_LABEL: Record<ActivityType, string> = {
   SLICE_APPROVED: "First slice approved",
   REQUIREMENT_UPDATED: "Requirement updated",
   QUESTION_ANSWERED: "Question answered",
+  ARCHITECTURE_GENERATED: "Architecture generated",
+  ARCHITECTURE_COMMITTED: "Architecture committed",
+  ARCHITECTURE_READY_FOR_REVIEW: "Architecture ready for review",
+  ARCHITECTURE_APPROVED: "Architecture approved",
+  PLAN_GENERATED: "Implementation plan generated",
+  PLAN_COMMITTED: "Implementation plan committed",
+  PLAN_APPROVED: "Implementation plan approved",
+  ARCHITECTURE_REVIEW_REQUIRED: "Architecture review required",
+  PLAN_REVIEW_REQUIRED: "Implementation plan review required",
+  ADR_UPDATED: "Architecture decision updated",
+  CODEBASE_CONTEXT_UPDATED: "Codebase context updated",
+  ARCHITECTURE_QUESTION_ANSWERED: "Architecture question answered",
 };
 
 export const DISCOVERY_STATUS_LABEL: Record<DiscoveryStatus, string> = {
@@ -546,7 +574,8 @@ export const AGENT_CATALOG: Record<
   },
   ARCHITECTURE: {
     name: "Architecture Agent",
-    responsibility: "Propose structure, boundaries, and technical options.",
+    responsibility:
+      "Propose a solution architecture and an implementation plan for an approved product slice. It does not write production code.",
   },
   SECURITY: {
     name: "Security Agent",
@@ -569,6 +598,193 @@ export const AGENT_CATALOG: Record<
     responsibility: "Review changes and surface risks before release.",
   },
 };
+
+export const COMPONENT_TYPES = [
+  "USER_INTERFACE",
+  "SERVICE",
+  "API",
+  "DATABASE",
+  "QUEUE",
+  "CACHE",
+  "EXTERNAL_SYSTEM",
+  "AI_SERVICE",
+  "IDENTITY",
+  "STORAGE",
+  "OBSERVABILITY",
+  "OTHER",
+] as const;
+export type ComponentTypeName = (typeof COMPONENT_TYPES)[number];
+
+export const COMPONENT_TYPE_LABEL: Record<ComponentTypeName, string> = {
+  USER_INTERFACE: "User interface",
+  SERVICE: "Service",
+  API: "API",
+  DATABASE: "Database",
+  QUEUE: "Queue",
+  CACHE: "Cache",
+  EXTERNAL_SYSTEM: "External system",
+  AI_SERVICE: "AI service",
+  IDENTITY: "Identity",
+  STORAGE: "Storage",
+  OBSERVABILITY: "Observability",
+  OTHER: "Other",
+};
+
+export const RELATIONSHIP_TYPES = [
+  "CALLS",
+  "READS_FROM",
+  "WRITES_TO",
+  "PUBLISHES_TO",
+  "SUBSCRIBES_TO",
+  "AUTHENTICATES_WITH",
+  "INTEGRATES_WITH",
+] as const;
+export type RelationshipTypeName = (typeof RELATIONSHIP_TYPES)[number];
+
+export const RELATIONSHIP_TYPE_LABEL: Record<RelationshipTypeName, string> = {
+  CALLS: "Calls",
+  READS_FROM: "Reads from",
+  WRITES_TO: "Writes to",
+  PUBLISHES_TO: "Publishes to",
+  SUBSCRIBES_TO: "Subscribes to",
+  AUTHENTICATES_WITH: "Authenticates with",
+  INTEGRATES_WITH: "Integrates with",
+};
+
+export const ADR_STATUSES = ["PROPOSED", "ACCEPTED", "REJECTED", "SUPERSEDED"] as const;
+export type AdrStatusName = (typeof ADR_STATUSES)[number];
+
+export const ADR_STATUS_LABEL: Record<AdrStatusName, string> = {
+  PROPOSED: "Proposed",
+  ACCEPTED: "Accepted",
+  REJECTED: "Rejected",
+  SUPERSEDED: "Superseded",
+};
+
+export const ARCHITECTURE_STATUSES = [
+  "DRAFT",
+  "READY_FOR_REVIEW",
+  "APPROVED",
+  "SUPERSEDED",
+] as const;
+export type ArchitectureStatusName = (typeof ARCHITECTURE_STATUSES)[number];
+
+export const ARCHITECTURE_STATUS_LABEL: Record<ArchitectureStatusName, string> = {
+  DRAFT: "Draft",
+  READY_FOR_REVIEW: "Ready for review",
+  APPROVED: "Approved",
+  SUPERSEDED: "Superseded",
+};
+
+export const SECURITY_AREAS = [
+  "AUTHENTICATION",
+  "AUTHORISATION",
+  "SENSITIVE_DATA",
+  "ENCRYPTION",
+  "SECRETS",
+  "AUDITABILITY",
+  "EXTERNAL_INTEGRATIONS",
+  "DATA_RETENTION",
+  "PRIVACY",
+  "THREATS",
+  "COMPLIANCE",
+] as const;
+export type SecurityAreaName = (typeof SECURITY_AREAS)[number];
+
+export const SECURITY_AREA_LABEL: Record<SecurityAreaName, string> = {
+  AUTHENTICATION: "Authentication",
+  AUTHORISATION: "Authorisation",
+  SENSITIVE_DATA: "Sensitive data",
+  ENCRYPTION: "Encryption",
+  SECRETS: "Secrets",
+  AUDITABILITY: "Auditability",
+  EXTERNAL_INTEGRATIONS: "External integrations",
+  DATA_RETENTION: "Data retention",
+  PRIVACY: "Privacy",
+  THREATS: "Threat considerations",
+  COMPLIANCE: "Compliance considerations",
+};
+
+export const SECURITY_CLASSIFICATIONS = [
+  "INFORMATION",
+  "CONCERN",
+  "DECISION_REQUIRED",
+  "BLOCKER",
+] as const;
+export type SecurityClassificationName = (typeof SECURITY_CLASSIFICATIONS)[number];
+
+export const SECURITY_CLASSIFICATION_LABEL: Record<SecurityClassificationName, string> = {
+  INFORMATION: "Information",
+  CONCERN: "Concern",
+  DECISION_REQUIRED: "Decision required",
+  BLOCKER: "Blocker",
+};
+
+export const DATA_CLASSIFICATIONS = [
+  "PUBLIC",
+  "INTERNAL",
+  "CONFIDENTIAL",
+  "RESTRICTED",
+] as const;
+export type DataClassificationName = (typeof DATA_CLASSIFICATIONS)[number];
+
+export const INTEGRATION_DIRECTIONS = ["INBOUND", "OUTBOUND", "BIDIRECTIONAL"] as const;
+export type IntegrationDirectionName = (typeof INTEGRATION_DIRECTIONS)[number];
+
+export const TASK_COMPLEXITIES = ["SMALL", "MEDIUM", "LARGE", "UNKNOWN"] as const;
+export type TaskComplexityName = (typeof TASK_COMPLEXITIES)[number];
+
+export const IMPLEMENTATION_TASK_STATUSES = [
+  "PROPOSED",
+  "APPROVED",
+  "IN_PROGRESS",
+  "COMPLETED",
+  "BLOCKED",
+] as const;
+export type ImplementationTaskStatusName = (typeof IMPLEMENTATION_TASK_STATUSES)[number];
+
+export const SYSTEM_KINDS = ["GREENFIELD", "EXISTING_SYSTEM"] as const;
+export type SystemKindName = (typeof SYSTEM_KINDS)[number];
+
+export const SYSTEM_KIND_LABEL: Record<SystemKindName, string> = {
+  GREENFIELD: "Greenfield",
+  EXISTING_SYSTEM: "Existing system",
+};
+
+export const CODEBASE_SOURCES = ["MANUAL", "DEMO", "LOCAL_ANALYSIS", "FUTURE_GITHUB"] as const;
+export type CodebaseSourceName = (typeof CODEBASE_SOURCES)[number];
+
+export const ARCHITECTURE_SECTIONS = [
+  "summary",
+  "components",
+  "security",
+  "data",
+  "tasks",
+  "alternatives",
+] as const;
+export type ArchitectureSection = (typeof ARCHITECTURE_SECTIONS)[number];
+
+export const ARCHITECTURE_SECTION_LABEL: Record<ArchitectureSection, string> = {
+  summary: "Architecture summary",
+  components: "Components and relationships",
+  security: "Security assessment",
+  data: "Data architecture",
+  tasks: "Implementation tasks",
+  alternatives: "Architecture alternatives",
+};
+
+export const TECHNICAL_READINESS_AREAS = [
+  { key: "architectureClarity", label: "Architecture clarity" },
+  { key: "technologyDecisions", label: "Technology decisions" },
+  { key: "dataDesign", label: "Data design" },
+  { key: "integrationDesign", label: "Integration design" },
+  { key: "securityConsiderations", label: "Security considerations" },
+  { key: "nfrCoverage", label: "NFR coverage" },
+  { key: "openQuestions", label: "Open architecture questions" },
+  { key: "taskQuality", label: "Implementation task quality" },
+  { key: "taskDependencies", label: "Task dependencies" },
+  { key: "validationStrategy", label: "Validation strategy" },
+] as const;
 
 /** Parents allowed for each work item type. Null means a parent is forbidden. */
 export const ALLOWED_PARENTS: Record<WorkItemType, WorkItemType[] | null> = {

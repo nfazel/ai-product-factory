@@ -8,6 +8,7 @@ import {
 } from "@/domain/constants";
 import { parentPlacementError } from "@/domain/rules";
 import { recordActivity } from "@/modules/activity/service";
+import { noteRequirementChange } from "@/modules/architecture/impact";
 import { DomainError } from "@/modules/shared/errors";
 import { findProductRow } from "@/modules/product/repository";
 import {
@@ -115,6 +116,12 @@ export async function updateWorkItem(input: UpdateWorkItemInput) {
       type: "WORK_ITEM_UPDATED",
       description: `Updated ${changes.join(", ")}.`,
     });
+    if (changes.includes("title") || changes.includes("description")) {
+      await noteRequirementChange(
+        item.productId,
+        `Architecture review required. Requirement "${item.title}" changed after the solution architecture was approved.`,
+      );
+    }
   }
   return item;
 }

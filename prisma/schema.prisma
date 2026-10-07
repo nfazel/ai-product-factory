@@ -97,6 +97,12 @@ model Product {
   nonFunctionalRequirements NonFunctionalRequirement[]
   requirementQuestions RequirementQuestion[]
   requirementAssumptions RequirementAssumption[]
+  codebaseContext CodebaseContext?
+  solutionArchitectures SolutionArchitecture[]
+  architectureDecisions ArchitectureDecisionRecord[]
+  architectureQuestions ArchitectureQuestion[]
+  implementationPlans ImplementationPlan[]
+  architectureProposals ArchitectureProposal[]
 
   @@index([status])
   @@index([updatedAt])
@@ -134,6 +140,8 @@ model WorkItem {
   acceptanceCriteria AcceptanceCriterion[]
   requirementQuestions RequirementQuestion[]
   requirementAssumptions RequirementAssumption[]
+  componentTraces ComponentTrace[]
+  implementationTasks ImplementationTask[]
   decisions          Decision[]
   approvals          Approval[]
   activities         Activity[]
@@ -536,6 +544,7 @@ model ProductCapability {
   product  Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
   outcome  ProductOutcome @relation(fields: [outcomeId], references: [id], onDelete: Cascade)
   workItems WorkItem[]
+  componentTraces ComponentTrace[]
 
   @@index([productId])
   @@index([outcomeId])
@@ -556,6 +565,8 @@ model ProductSlice {
 
   product   Product    @relation(fields: [productId], references: [id], onDelete: Cascade)
   workItems WorkItem[]
+  solutionArchitectures SolutionArchitecture[]
+  implementationPlans ImplementationPlan[]
 
   @@index([productId])
   @@index([status])
@@ -575,6 +586,8 @@ model NonFunctionalRequirement {
   updatedAt   DateTime              @updatedAt
 
   product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  coverages NfrCoverage[]
+  componentTraces ComponentTrace[]
 
   @@index([productId])
   @@index([category])
@@ -622,4 +635,480 @@ model RequirementAssumption {
   @@index([workItemId])
   @@index([status])
   @@index([impact])
+}
+
+enum CodebaseSource {
+  MANUAL
+  DEMO
+  LOCAL_ANALYSIS
+  FUTURE_GITHUB
+}
+
+enum SystemKind {
+  GREENFIELD
+  EXISTING_SYSTEM
+}
+
+enum ArchitectureStatus {
+  DRAFT
+  READY_FOR_REVIEW
+  APPROVED
+  SUPERSEDED
+}
+
+enum ComponentType {
+  USER_INTERFACE
+  SERVICE
+  API
+  DATABASE
+  QUEUE
+  CACHE
+  EXTERNAL_SYSTEM
+  AI_SERVICE
+  IDENTITY
+  STORAGE
+  OBSERVABILITY
+  OTHER
+}
+
+enum RelationshipType {
+  CALLS
+  READS_FROM
+  WRITES_TO
+  PUBLISHES_TO
+  SUBSCRIBES_TO
+  AUTHENTICATES_WITH
+  INTEGRATES_WITH
+}
+
+enum AdrStatus {
+  PROPOSED
+  ACCEPTED
+  REJECTED
+  SUPERSEDED
+}
+
+enum SecurityArea {
+  AUTHENTICATION
+  AUTHORISATION
+  SENSITIVE_DATA
+  ENCRYPTION
+  SECRETS
+  AUDITABILITY
+  EXTERNAL_INTEGRATIONS
+  DATA_RETENTION
+  PRIVACY
+  THREATS
+  COMPLIANCE
+}
+
+enum SecurityClassification {
+  INFORMATION
+  CONCERN
+  DECISION_REQUIRED
+  BLOCKER
+}
+
+enum DataClassification {
+  PUBLIC
+  INTERNAL
+  CONFIDENTIAL
+  RESTRICTED
+}
+
+enum IntegrationDirection {
+  INBOUND
+  OUTBOUND
+  BIDIRECTIONAL
+}
+
+enum PlanStatus {
+  DRAFT
+  READY_FOR_REVIEW
+  APPROVED
+  SUPERSEDED
+}
+
+enum ImplementationTaskStatus {
+  PROPOSED
+  APPROVED
+  IN_PROGRESS
+  COMPLETED
+  BLOCKED
+}
+
+enum TaskComplexity {
+  SMALL
+  MEDIUM
+  LARGE
+  UNKNOWN
+}
+
+enum ArchitectureProposalKind {
+  ARCHITECTURE
+  IMPLEMENTATION_PLAN
+}
+
+model CodebaseContext {
+  id                   String         @id @default(cuid())
+  productId            String         @unique
+  repositoryName       String         @default("")
+  repositoryUrl        String         @default("")
+  defaultBranch        String         @default("")
+  systemKind           SystemKind     @default(GREENFIELD)
+  languages            Json           @default("[]")
+  frameworks           Json           @default("[]")
+  databaseTechnologies Json           @default("[]")
+  infrastructure       String         @default("")
+  deploymentPlatform   String         @default("")
+  architectureSummary  String         @default("")
+  keyDirectories       Json           @default("[]")
+  keyComponents        Json           @default("[]")
+  knownIntegrations    Json           @default("[]")
+  constraints          String         @default("")
+  observations         String         @default("")
+  source               CodebaseSource @default(MANUAL)
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+}
+
+model SolutionArchitecture {
+  id                    String             @id @default(cuid())
+  productId             String
+  productSliceId        String?
+  version               Int
+  status                ArchitectureStatus @default(DRAFT)
+  systemKind            SystemKind         @default(GREENFIELD)
+  architectureStyle     String             @default("")
+  summary               String             @default("")
+  rationale             String             @default("")
+  frontendApproach      String             @default("")
+  backendApproach       String             @default("")
+  dataApproach          String             @default("")
+  integrationApproach   String             @default("")
+  securityApproach      String             @default("")
+  deploymentApproach    String             @default("")
+  observabilityApproach String             @default("")
+  seededDemo            Boolean            @default(false)
+  humanLocked           Boolean            @default(false)
+  reviewRequired        Boolean            @default(false)
+  reviewReason          String             @default("")
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+
+  product       Product                     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  productSlice  ProductSlice?               @relation(fields: [productSliceId], references: [id], onDelete: SetNull)
+  components    ArchitectureComponent[]
+  relationships ArchitectureRelationship[]
+  decisions     ArchitectureDecisionRecord[]
+  questions     ArchitectureQuestion[]
+  findings      SecurityFinding[]
+  dataEntities  DataEntity[]
+  integrations  IntegrationDesign[]
+  technologies  TechnologyChoice[]
+  nfrCoverages  NfrCoverage[]
+  plans         ImplementationPlan[]
+
+  @@unique([productId, version])
+  @@index([productId])
+  @@index([status])
+  @@index([productSliceId])
+}
+
+model ArchitectureComponent {
+  id                     String        @id @default(cuid())
+  solutionArchitectureId String
+  name                   String
+  type                   ComponentType
+  description            String        @default("")
+  responsibilities       String        @default("")
+  technology             String        @default("")
+  rationale              String        @default("")
+  humanLocked            Boolean       @default(false)
+  createdAt              DateTime      @default(now())
+  updatedAt              DateTime      @updatedAt
+
+  architecture SolutionArchitecture         @relation(fields: [solutionArchitectureId], references: [id], onDelete: Cascade)
+  outgoing     ArchitectureRelationship[]   @relation("RelationshipSource")
+  incoming     ArchitectureRelationship[]   @relation("RelationshipTarget")
+  traces       ComponentTrace[]
+  nfrCoverages NfrCoverage[]
+  taskLinks    ImplementationTaskComponent[]
+
+  @@index([solutionArchitectureId])
+  @@index([type])
+}
+
+model ArchitectureRelationship {
+  id                     String           @id @default(cuid())
+  solutionArchitectureId String
+  sourceComponentId      String
+  targetComponentId      String
+  relationshipType       RelationshipType
+  description            String           @default("")
+  createdAt              DateTime         @default(now())
+
+  architecture    SolutionArchitecture  @relation(fields: [solutionArchitectureId], references: [id], onDelete: Cascade)
+  sourceComponent ArchitectureComponent @relation("RelationshipSource", fields: [sourceComponentId], references: [id], onDelete: Cascade)
+  targetComponent ArchitectureComponent @relation("RelationshipTarget", fields: [targetComponentId], references: [id], onDelete: Cascade)
+
+  @@index([solutionArchitectureId])
+  @@index([sourceComponentId])
+  @@index([targetComponentId])
+}
+
+model ArchitectureDecisionRecord {
+  id                     String    @id @default(cuid())
+  productId              String
+  solutionArchitectureId String
+  title                  String
+  context                String    @default("")
+  decision               String    @default("")
+  rationale              String    @default("")
+  alternatives           String    @default("")
+  consequences           String    @default("")
+  status                 AdrStatus @default(PROPOSED)
+  humanLocked            Boolean   @default(false)
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  product      Product                @relation(fields: [productId], references: [id], onDelete: Cascade)
+  architecture SolutionArchitecture   @relation(fields: [solutionArchitectureId], references: [id], onDelete: Cascade)
+  traces       ComponentTrace[]
+  nfrCoverages NfrCoverage[]
+
+  @@index([productId])
+  @@index([solutionArchitectureId])
+  @@index([status])
+}
+
+model TechnologyChoice {
+  id                     String   @id @default(cuid())
+  solutionArchitectureId String
+  choice                 String
+  reason                 String   @default("")
+  alternatives           String   @default("")
+  tradeoffs              String   @default("")
+  relevantConstraint     String   @default("")
+  humanLocked            Boolean  @default(false)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  architecture SolutionArchitecture @relation(fields: [solutionArchitectureId], references: [id], onDelete: Cascade)
+
+  @@index([solutionArchitectureId])
+}
+
+model DataEntity {
+  id                     String             @id @default(cuid())
+  solutionArchitectureId String
+  name                   String
+  description            String             @default("")
+  owner                  String             @default("")
+  classification         DataClassification @default(INTERNAL)
+  retention              String             @default("")
+  relationships          String             @default("")
+  externalSource         String             @default("")
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
+
+  architecture SolutionArchitecture @relation(fields: [solutionArchitectureId], references: [id], onDelete: Cascade)
+
+  @@index([solutionArchitectureId])
+}
+
+model IntegrationDesign {
+  id                       String               @id @default(cuid())
+  solutionArchitectureId   String
+  name                     String
+  purpose                  String               @default("")
+  direction                IntegrationDirection @default(OUTBOUND)
+  protocol                 String               @default("")
+  authenticationAssumption String               @default("")
+  dataExchanged            String               @default("")
+  failureConsiderations    String               @default("")
+  createdAt                DateTime             @default(now())
+  updatedAt                DateTime             @updatedAt
+
+  architecture SolutionArchitecture @relation(fields: [solutionArchitectureId], references: [id], onDelete: Cascade)
+
+  @@index([solutionArchitectureId])
+}
+
+model SecurityFinding {
+  id                     String                 @id @default(cuid())
+  solutionArchitectureId String
+  area                   SecurityArea
+  classification         SecurityClassification
+  title                  String
+  description            String                 @default("")
+  createdAt              DateTime               @default(now())
+  updatedAt              DateTime               @updatedAt
+
+  architecture SolutionArchitecture @relation(fields: [solutionArchitectureId], references: [id], onDelete: Cascade)
+
+  @@index([solutionArchitectureId])
+  @@index([classification])
+}
+
+model ArchitectureQuestion {
+  id                     String           @id @default(cuid())
+  productId              String
+  solutionArchitectureId String?
+  question               String
+  reason                 String           @default("")
+  impact                 AssumptionImpact @default(MEDIUM)
+  status                 QuestionStatus   @default(OPEN)
+  answer                 String           @default("")
+  answeredBy             String           @default("")
+  createdAt              DateTime         @default(now())
+  resolvedAt             DateTime?
+
+  product      Product               @relation(fields: [productId], references: [id], onDelete: Cascade)
+  architecture SolutionArchitecture? @relation(fields: [solutionArchitectureId], references: [id], onDelete: SetNull)
+
+  @@index([productId])
+  @@index([solutionArchitectureId])
+  @@index([status])
+}
+
+model NfrCoverage {
+  id                     String   @id @default(cuid())
+  solutionArchitectureId String
+  nfrId                  String
+  componentId            String?
+  adrId                  String?
+  mechanism              String   @default("")
+  createdAt              DateTime @default(now())
+
+  architecture SolutionArchitecture        @relation(fields: [solutionArchitectureId], references: [id], onDelete: Cascade)
+  nfr          NonFunctionalRequirement    @relation(fields: [nfrId], references: [id], onDelete: Cascade)
+  component    ArchitectureComponent?      @relation(fields: [componentId], references: [id], onDelete: SetNull)
+  adr          ArchitectureDecisionRecord? @relation(fields: [adrId], references: [id], onDelete: SetNull)
+
+  @@index([solutionArchitectureId])
+  @@index([nfrId])
+}
+
+model ComponentTrace {
+  id           String   @id @default(cuid())
+  componentId  String
+  capabilityId String?
+  workItemId   String?
+  nfrId        String?
+  adrId        String?
+  createdAt    DateTime @default(now())
+
+  component  ArchitectureComponent       @relation(fields: [componentId], references: [id], onDelete: Cascade)
+  capability ProductCapability?          @relation(fields: [capabilityId], references: [id], onDelete: SetNull)
+  workItem   WorkItem?                   @relation(fields: [workItemId], references: [id], onDelete: SetNull)
+  nfr        NonFunctionalRequirement?   @relation(fields: [nfrId], references: [id], onDelete: SetNull)
+  adr        ArchitectureDecisionRecord? @relation(fields: [adrId], references: [id], onDelete: SetNull)
+
+  @@index([componentId])
+  @@index([capabilityId])
+  @@index([workItemId])
+}
+
+model ImplementationPlan {
+  id                     String     @id @default(cuid())
+  productId              String
+  productSliceId         String?
+  solutionArchitectureId String
+  version                Int
+  status                 PlanStatus @default(DRAFT)
+  summary                String     @default("")
+  seededDemo             Boolean    @default(false)
+  humanLocked            Boolean    @default(false)
+  reviewRequired         Boolean    @default(false)
+  reviewReason           String     @default("")
+  createdAt              DateTime   @default(now())
+  updatedAt              DateTime   @updatedAt
+
+  product      Product              @relation(fields: [productId], references: [id], onDelete: Cascade)
+  productSlice ProductSlice?        @relation(fields: [productSliceId], references: [id], onDelete: SetNull)
+  architecture SolutionArchitecture @relation(fields: [solutionArchitectureId], references: [id], onDelete: Cascade)
+  tasks        ImplementationTask[]
+
+  @@unique([productId, version])
+  @@index([productId])
+  @@index([solutionArchitectureId])
+  @@index([status])
+}
+
+model ImplementationTask {
+  id                     String                   @id @default(cuid())
+  implementationPlanId   String
+  workItemId             String?
+  title                  String
+  description            String                   @default("")
+  objective              String                   @default("")
+  verticalSlice          String                   @default("")
+  guidance               String                   @default("")
+  validation             String                   @default("")
+  risks                  String                   @default("")
+  filesLikely            String                   @default("")
+  sequence               Int                      @default(1)
+  parallelisable         Boolean                  @default(false)
+  dependenciesIdentified Boolean                  @default(false)
+  status                 ImplementationTaskStatus @default(PROPOSED)
+  complexity             TaskComplexity           @default(UNKNOWN)
+  humanLocked            Boolean                  @default(false)
+  createdAt              DateTime                 @default(now())
+  updatedAt              DateTime                 @updatedAt
+
+  plan         ImplementationPlan            @relation(fields: [implementationPlanId], references: [id], onDelete: Cascade)
+  workItem     WorkItem?                     @relation(fields: [workItemId], references: [id], onDelete: SetNull)
+  components   ImplementationTaskComponent[]
+  dependencies ImplementationTaskDependency[] @relation("TaskDependent")
+  dependents   ImplementationTaskDependency[] @relation("TaskDependency")
+
+  @@index([implementationPlanId])
+  @@index([workItemId])
+  @@index([sequence])
+}
+
+model ImplementationTaskComponent {
+  id          String @id @default(cuid())
+  taskId      String
+  componentId String
+
+  task      ImplementationTask    @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  component ArchitectureComponent @relation(fields: [componentId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, componentId])
+  @@index([componentId])
+}
+
+model ImplementationTaskDependency {
+  id          String   @id @default(cuid())
+  taskId      String
+  dependsOnId String
+  createdAt   DateTime @default(now())
+
+  task      ImplementationTask @relation("TaskDependent", fields: [taskId], references: [id], onDelete: Cascade)
+  dependsOn ImplementationTask @relation("TaskDependency", fields: [dependsOnId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, dependsOnId])
+  @@index([dependsOnId])
+}
+
+model ArchitectureProposal {
+  id         String                   @id @default(cuid())
+  productId  String
+  agentRunId String?
+  kind       ArchitectureProposalKind
+  status     ProposalStatus           @default(OPEN)
+  summary    String                   @default("")
+  payload    Json
+  seededDemo Boolean                  @default(false)
+  createdAt  DateTime                 @default(now())
+  updatedAt  DateTime                 @updatedAt
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId, createdAt])
+  @@index([kind, status])
 }

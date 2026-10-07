@@ -4,7 +4,7 @@ AI Product Factory is the foundation of an AI-native software product developmen
 
 **Explore → Define → Build → Prove → Ship → Learn**
 
-This repository is the product factory with two agents enabled. Product Discovery turns an incomplete idea into a Product Brief during Explore. The Requirements Agent turns an approved brief into an outcome-driven product definition during Define. Architecture, coding, and testing agents are not implemented. GitHub integration is not implemented.
+This repository is the product factory with three agents enabled. Product Discovery turns an incomplete idea into a Product Brief during Explore. The Requirements Agent turns an approved brief into an outcome-driven product definition during Define. The Architecture Agent, inside Build, turns an approved definition and an approved first slice into a solution architecture and an implementation plan. Security, coding, and testing agents are not implemented. GitHub integration is not implemented.
 
 Humans remain in control of stage changes, decisions, and approval gates. Neither agent can approve its own work or move the product stage.
 
@@ -31,11 +31,13 @@ prisma/                  Schema, migrations, and demo seed
 src/app/                 Routes, layouts, and HTTP API
 src/components/          Shared interface components
 src/domain/              Stages, labels, hierarchy rules, backlog tree
-src/modules/             Product, discovery, requirements, AI, work item, approval, activity, agent, identity
+src/modules/             Product, discovery, requirements, architecture, AI, work item, approval, activity, agent, identity
 src/server/              Server actions and API helpers
 docs/architecture.md     Modular design
 docs/product-discovery-agent.md  Discovery agent, prompt, and approval gate
 docs/requirements-agent.md       Requirements agent, proposal workflow, and approval gate
+docs/architecture-agent.md       Architecture agent, solution model, and approval gate
+docs/implementation-planning.md  Vertical-slice implementation plans
 docs/traceability.md     Outcome to story links
 ```
 
@@ -75,8 +77,9 @@ cp .env.example .env
 | Variable | Purpose |
 | --- | --- |
 | `DATABASE_URL` | PostgreSQL connection string used by Prisma and the Next.js server |
-| `OPENAI_API_KEY` | Server-only key for Product Discovery and the Requirements Agent. Leave empty to run without model calls |
+| `OPENAI_API_KEY` | Server-only key for Product Discovery, the Requirements Agent, and the Architecture Agent. Leave empty to run without model calls |
 | `OPENAI_MODEL` | Optional. Defaults to `gpt-4.1-mini` |
+| `CODEBASE_CONTEXT_ROOT` | Optional absolute path. When set, Build can read that directory's `package.json` and top-level folder names. It cannot browse an arbitrary path |
 
 The key is read only on the server. The browser never receives it. If it is missing, the app still runs and Discovery says that AI is not configured.
 
@@ -111,7 +114,7 @@ npm run db:seed
 
 The seed replaces existing factory data with one sample product, **Claims Management Platform**, in the Define stage. It includes an epic, features, a customer claim story, acceptance criteria, a task, a defect, decisions, approvals, and an activity history.
 
-It also includes a **demo** discovery session and product brief, plus demo outcomes, capabilities, a first product slice, non-functional requirements, an open question, and an open definition proposal. That content is labelled demo data. The seed does not create agent runs and does not pretend a model wrote the brief or the definition. The sample brief is ready for review and not approved, so **Generate Product Definition** stays closed until a person approves the brief.
+It also includes a **demo** discovery session and product brief, plus demo outcomes, capabilities, a first product slice, non-functional requirements, an open question, and an open definition proposal. The Build tab shows a demo solution architecture, architecture decisions, an initial security assessment, and an implementation plan for that slice. That content is labelled demo data. The seed does not create agent runs and does not pretend a model wrote the brief, the definition, or the architecture. The sample brief is ready for review and not approved, the definition is not approved, and the slice is still proposed, so **Generate architecture** stays closed until a person approves those gates and moves the product to Build.
 
 ## Product Discovery
 
@@ -125,6 +128,14 @@ Open a product and choose Definition. **Generate Product Definition** runs only 
 
 Tests mock the provider. They do not call OpenAI.
 
+## Build
+
+Open a product and choose Build. Architecture and implementation planning happen here. They are not a new pipeline stage.
+
+**Generate architecture** runs only in Build, and only when the product brief, the product definition, and the first product slice are approved, and `OPENAI_API_KEY` is set. The result is a proposal. A person accepts, edits, or rejects it, then commits a draft. Approve architecture is a separate human action. **Generate implementation plan** stays closed until that approval exists. Approve the plan yourself. Coding readiness stays **NOT READY** until both approvals exist. There is no coding control yet.
+
+If an approved requirement changes after the architecture is approved, the page says **Architecture review required** and keeps the approval. If the architecture changes after the plan is approved, the page says **Implementation Plan review required** and keeps that approval.
+
 ## Later agents
 
-Architecture, coding, and testing agents are not registered. `POST /api/agent-runs` still refuses those types. Authentication will replace `getCurrentActor()` and the pass-through `src/proxy.ts` without rewriting the domain model.
+Security, coding, and testing agents are not registered. `POST /api/agent-runs` still refuses those types. Authentication will replace `getCurrentActor()` and the pass-through `src/proxy.ts` without rewriting the domain model.

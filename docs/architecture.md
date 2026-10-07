@@ -83,9 +83,10 @@ The catalogue in `src/domain/constants.ts` names the agents:
 
 - Product Discovery — implemented
 - Requirements — implemented
-- Architecture, Security, Planning, Coding, Testing, and Review — not configured
+- Architecture — implemented, inside Build
+- Security, Planning, Coding, Testing, and Review — not configured
 
-Product Discovery and the Requirements Agent are **CONFIGURED** only when `OPENAI_API_KEY` is set on the server, or when a test supplies a provider. Every other agent stays **NOT CONFIGURED**. The control centre reads run counts, completed runs, failed runs, and average duration from `AgentRun` for both implemented agents. Token counts are stored when the provider returns them. Cost is left empty rather than guessed.
+Product Discovery, the Requirements Agent, and the Architecture Agent are **CONFIGURED** only when `OPENAI_API_KEY` is set on the server, or when a test supplies a provider. Every other agent stays **NOT CONFIGURED**. The control centre reads run counts, completed runs, failed runs, and average duration from `AgentRun` for the implemented agents. Token counts are stored when the provider returns them. Cost is left empty rather than guessed.
 
 A runner implements:
 
@@ -100,7 +101,7 @@ type AgentRunner = {
 }
 ```
 
-`ensureAgentsRegistered()` adds the Product Discovery and Requirements runners. `executeAgent` looks up the runner for the requested type. If it is missing or not configured, it throws `AgentNotConfiguredError` before inserting an `AgentRun`. `POST /api/agent-runs` returns that refusal and does not fabricate output.
+`ensureAgentsRegistered()` adds the Product Discovery, Requirements, and Architecture runners. `executeAgent` looks up the runner for the requested type. If it is missing or not configured, it throws `AgentNotConfiguredError` before inserting an `AgentRun`. `POST /api/agent-runs` returns that refusal and does not fabricate output.
 
 When a configured runner executes:
 
@@ -114,6 +115,8 @@ The discovery runner may update the product brief and assumptions. It cannot app
 
 The requirements runner writes an uncommitted proposal. It does not approve outcomes, the first slice, or the product definition, and it does not change `currentStage`. Human-confirmed records are not overwritten. See [requirements-agent.md](requirements-agent.md) and [traceability.md](traceability.md).
 
+The architecture runner also writes an uncommitted proposal. It does not approve the solution architecture, an architecture decision, or the implementation plan, and it does not change `currentStage`. An approved architecture is not overwritten by a later proposal. See [architecture-agent.md](architecture-agent.md) and [implementation-planning.md](implementation-planning.md).
+
 ## Product brief storage
 
 Assumptions are their own table. Each one has impact, confidence, and a status a person can change (`UNVALIDATED`, `VALIDATED`, `INVALIDATED`). That lifecycle does not fit a JSON blob.
@@ -122,8 +125,8 @@ The other multi-value brief sections are ordered notes without their own workflo
 
 ## What this application does not do
 
-- No Architecture, Coding, or Testing agent
-- No GitHub integration
+- No Security, Coding, or Testing agent
+- No GitHub integration or repository cloning
 - No autonomous coding
 - No automated test execution of the product under construction
 - No authentication requirement for local use

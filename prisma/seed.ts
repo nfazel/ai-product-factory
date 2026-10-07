@@ -20,6 +20,23 @@ function daysAgo(days: number, hours = 10) {
 }
 
 async function main() {
+  await prisma.implementationTaskDependency.deleteMany();
+  await prisma.implementationTaskComponent.deleteMany();
+  await prisma.implementationTask.deleteMany();
+  await prisma.implementationPlan.deleteMany();
+  await prisma.nfrCoverage.deleteMany();
+  await prisma.componentTrace.deleteMany();
+  await prisma.architectureRelationship.deleteMany();
+  await prisma.architectureQuestion.deleteMany();
+  await prisma.securityFinding.deleteMany();
+  await prisma.dataEntity.deleteMany();
+  await prisma.integrationDesign.deleteMany();
+  await prisma.technologyChoice.deleteMany();
+  await prisma.architectureDecisionRecord.deleteMany();
+  await prisma.architectureComponent.deleteMany();
+  await prisma.solutionArchitecture.deleteMany();
+  await prisma.architectureProposal.deleteMany();
+  await prisma.codebaseContext.deleteMany();
   await prisma.assumption.deleteMany();
   await prisma.discoveryMessage.deleteMany();
   await prisma.productBrief.deleteMany();
@@ -806,33 +823,42 @@ async function seedDefinitionDemo(input: {
     data: { capabilityId: submission.id, sliceId: slice.id },
   });
 
-  await prisma.nonFunctionalRequirement.createMany({
-    data: [
-      {
-        productId: input.productId,
-        category: "ACCESSIBILITY",
-        title: "Online first notice can be completed with a keyboard and a screen reader",
-        description:
-          "A customer who does not use a pointer can enter the mandatory notice fields and submit.",
-        measure: "Confirm the accessibility standard with the team. No numeric target is invented here.",
-        status: "PROPOSED",
-        source: "AI_PROPOSAL",
-        createdAt,
-        updatedAt: createdAt,
-      },
-      {
-        productId: input.productId,
-        category: "SECURITY",
-        title: "A notice must not expose another customer's policy details",
-        description:
-          "Searching or submitting with a policy number shows only the data that customer is allowed to see.",
-        measure: "Exact session and authentication rules remain an open question.",
-        status: "PROPOSED",
-        source: "AI_PROPOSAL",
-        createdAt,
-        updatedAt: createdAt,
-      },
-    ],
+  const accessibility = await prisma.nonFunctionalRequirement.create({
+    data: {
+      productId: input.productId,
+      category: "ACCESSIBILITY",
+      title: "Online first notice can be completed with a keyboard and a screen reader",
+      description:
+        "A customer who does not use a pointer can enter the mandatory notice fields and submit.",
+      measure: "Confirm the accessibility standard with the team. No numeric target is invented here.",
+      status: "PROPOSED",
+      source: "AI_PROPOSAL",
+      createdAt,
+      updatedAt: createdAt,
+    },
+  });
+  const security = await prisma.nonFunctionalRequirement.create({
+    data: {
+      productId: input.productId,
+      category: "SECURITY",
+      title: "A notice must not expose another customer's policy details",
+      description:
+        "Searching or submitting with a policy number shows only the data that customer is allowed to see.",
+      measure: "Exact session and authentication rules remain an open question.",
+      status: "PROPOSED",
+      source: "AI_PROPOSAL",
+      createdAt,
+      updatedAt: createdAt,
+    },
+  });
+  await seedArchitectureDemo({
+    productId: input.productId,
+    sliceId: slice.id,
+    capabilityId: submission.id,
+    storyId: input.storyId,
+    accessibilityId: accessibility.id,
+    securityId: security.id,
+    createdAt,
   });
 
   await prisma.requirementQuestion.create({
@@ -970,6 +996,375 @@ async function seedDefinitionDemo(input: {
         "Demo data. Prepared sample outcomes, capabilities, a first slice, and an open proposal. Not a Requirements Agent run.",
       actor: "Demo seed",
       createdAt,
+    },
+  });
+}
+
+async function seedArchitectureDemo(input: {
+  productId: string;
+  sliceId: string;
+  capabilityId: string;
+  storyId: string;
+  accessibilityId: string;
+  securityId: string;
+  createdAt: Date;
+}) {
+  await prisma.codebaseContext.create({
+    data: {
+      productId: input.productId,
+      repositoryName: "claims-demo",
+      systemKind: "GREENFIELD",
+      languages: ["TypeScript"],
+      frameworks: ["Next.js"],
+      databaseTechnologies: ["PostgreSQL"],
+      architectureSummary:
+        "Demo context. There is no existing claims codebase connected. GitHub integration is not configured.",
+      keyComponents: ["Customer notice", "Claim record"],
+      constraints: "Do not invent a second identity system for the sample.",
+      source: "DEMO",
+      createdAt: input.createdAt,
+      updatedAt: input.createdAt,
+    },
+  });
+
+  const architecture = await prisma.solutionArchitecture.create({
+    data: {
+      productId: input.productId,
+      productSliceId: input.sliceId,
+      version: 1,
+      status: "DRAFT",
+      systemKind: "GREENFIELD",
+      architectureStyle: "Modular monolith",
+      summary:
+        "Demo architecture. A customer web application submits a straightforward claim through a claims API and claims service into a claims database. A notification service can confirm receipt, and an identity provider is assumed but not chosen.",
+      rationale:
+        "The first slice is one customer journey. A modular monolith is enough. This record was seeded for the sample and was not produced by an Architecture Agent run.",
+      frontendApproach: "A customer web application for the notice and the confirmation.",
+      backendApproach: "A claims API in front of a claims service.",
+      dataApproach: "A claims database holds the notice and its reference.",
+      integrationApproach: "Identity is an open question. Notification is inside the same application for the first slice.",
+      securityApproach: "Initial assessment only. The customer must not see another customer's notice.",
+      deploymentApproach: "One application deployment for the first slice.",
+      observabilityApproach: "Log submission success and failure with the claim reference.",
+      seededDemo: true,
+      createdAt: input.createdAt,
+      updatedAt: input.createdAt,
+    },
+  });
+
+  const web = await prisma.architectureComponent.create({
+    data: {
+      solutionArchitectureId: architecture.id,
+      name: "Customer Web Application",
+      type: "USER_INTERFACE",
+      description: "The customer enters a straightforward claim and sees the confirmation.",
+      responsibilities: "Collect the notice and show the claim reference.",
+      technology: "Web application",
+      rationale: "The approved slice is a customer journey.",
+      createdAt: input.createdAt,
+      updatedAt: input.createdAt,
+    },
+  });
+  const api = await prisma.architectureComponent.create({
+    data: {
+      solutionArchitectureId: architecture.id,
+      name: "Claims API",
+      type: "API",
+      description: "Application boundary for submitting a claim.",
+      responsibilities: "Accept a valid notice and return a claim reference.",
+      technology: "HTTP API",
+      rationale: "The screen needs a stable boundary.",
+      createdAt: input.createdAt,
+      updatedAt: input.createdAt,
+    },
+  });
+  const service = await prisma.architectureComponent.create({
+    data: {
+      solutionArchitectureId: architecture.id,
+      name: "Claims Service",
+      type: "SERVICE",
+      description: "Creates the claim and keeps the submission rules.",
+      responsibilities: "Validate the notice and store it.",
+      technology: "Application service",
+      rationale: "Rules should not live only in the screen.",
+      createdAt: input.createdAt,
+      updatedAt: input.createdAt,
+    },
+  });
+  const database = await prisma.architectureComponent.create({
+    data: {
+      solutionArchitectureId: architecture.id,
+      name: "Claims Database",
+      type: "DATABASE",
+      description: "Stores the claim notice.",
+      responsibilities: "Persist the claim and its reference.",
+      technology: "PostgreSQL",
+      rationale: "The notice is structured relational data.",
+      createdAt: input.createdAt,
+      updatedAt: input.createdAt,
+    },
+  });
+  const notification = await prisma.architectureComponent.create({
+    data: {
+      solutionArchitectureId: architecture.id,
+      name: "Notification Service",
+      type: "SERVICE",
+      description: "Tells the customer that the notice was received.",
+      responsibilities: "Send the claim reference after a successful submission.",
+      technology: "In-process notification",
+      rationale: "Confirmation is part of the first slice.",
+      createdAt: input.createdAt,
+      updatedAt: input.createdAt,
+    },
+  });
+  const identity = await prisma.architectureComponent.create({
+    data: {
+      solutionArchitectureId: architecture.id,
+      name: "Identity Provider",
+      type: "IDENTITY",
+      description: "The provider that will identify the customer. It is not chosen.",
+      responsibilities: "Authenticate the customer before showing another person's data.",
+      technology: "Not chosen",
+      rationale: "Authentication changes the design, so it stays a question.",
+      createdAt: input.createdAt,
+      updatedAt: input.createdAt,
+    },
+  });
+
+  await prisma.architectureRelationship.createMany({
+    data: [
+      {
+        solutionArchitectureId: architecture.id,
+        sourceComponentId: web.id,
+        targetComponentId: api.id,
+        relationshipType: "CALLS",
+        description: "The screen submits the notice.",
+      },
+      {
+        solutionArchitectureId: architecture.id,
+        sourceComponentId: api.id,
+        targetComponentId: service.id,
+        relationshipType: "CALLS",
+        description: "The API delegates to the claims service.",
+      },
+      {
+        solutionArchitectureId: architecture.id,
+        sourceComponentId: service.id,
+        targetComponentId: database.id,
+        relationshipType: "WRITES_TO",
+        description: "The service stores the claim.",
+      },
+      {
+        solutionArchitectureId: architecture.id,
+        sourceComponentId: service.id,
+        targetComponentId: notification.id,
+        relationshipType: "CALLS",
+        description: "The service asks for a receipt notification.",
+      },
+      {
+        solutionArchitectureId: architecture.id,
+        sourceComponentId: web.id,
+        targetComponentId: identity.id,
+        relationshipType: "AUTHENTICATES_WITH",
+        description: "The screen will authenticate once a provider is chosen.",
+      },
+    ],
+  });
+
+  const monolith = await prisma.architectureDecisionRecord.create({
+    data: {
+      productId: input.productId,
+      solutionArchitectureId: architecture.id,
+      title: "Use a modular monolith for the first claim slice",
+      context: "The first slice is one customer journey.",
+      decision: "Keep the web application, API, and claims service in one deployable application.",
+      rationale: "Complexity must be justified. Several services would not help this slice.",
+      alternatives: "A separate frontend deployment and a separate claims service.",
+      consequences: "The service boundary can be split later if the product earns that cost.",
+      status: "PROPOSED",
+      createdAt: input.createdAt,
+      updatedAt: input.createdAt,
+    },
+  });
+  await prisma.architectureDecisionRecord.create({
+    data: {
+      productId: input.productId,
+      solutionArchitectureId: architecture.id,
+      title: "Use PostgreSQL as the primary data store",
+      context: "The notice is a structured claim record.",
+      decision: "Store claims in PostgreSQL.",
+      rationale: "The sample factory already runs on PostgreSQL and the notice fits rows.",
+      alternatives: "A document database.",
+      consequences: "Unusual attachments can wait until a later slice.",
+      status: "PROPOSED",
+      createdAt: input.createdAt,
+      updatedAt: input.createdAt,
+    },
+  });
+
+  await prisma.technologyChoice.create({
+    data: {
+      solutionArchitectureId: architecture.id,
+      choice: "PostgreSQL",
+      reason: "The claim notice is structured and does not need a second database for the first slice.",
+      alternatives: "A document store.",
+      tradeoffs: "Relational constraints help the notice and are less flexible for arbitrary evidence.",
+      relevantConstraint: "Keep the first slice operable without a new operational platform.",
+      createdAt: input.createdAt,
+      updatedAt: input.createdAt,
+    },
+  });
+  await prisma.dataEntity.create({
+    data: {
+      solutionArchitectureId: architecture.id,
+      name: "Claim",
+      description: "The straightforward notice and its confirmation reference.",
+      owner: "Claims service",
+      classification: "CONFIDENTIAL",
+      retention: "Retention period is not confirmed.",
+      relationships: "A claim has one submitting customer and one reference.",
+      createdAt: input.createdAt,
+      updatedAt: input.createdAt,
+    },
+  });
+  await prisma.integrationDesign.create({
+    data: {
+      solutionArchitectureId: architecture.id,
+      name: "Identity provider",
+      purpose: "Identify the customer before showing claim data.",
+      direction: "OUTBOUND",
+      protocol: "Not chosen",
+      authenticationAssumption: "The provider is an open architecture question.",
+      dataExchanged: "A subject identifier.",
+      failureConsiderations: "If identity is unavailable, another customer's data must not be shown.",
+      createdAt: input.createdAt,
+      updatedAt: input.createdAt,
+    },
+  });
+
+  const findings = [
+    ["AUTHENTICATION", "DECISION_REQUIRED", "The identity provider is not chosen"],
+    ["AUTHORISATION", "CONCERN", "A customer must not open another customer's notice"],
+    ["SENSITIVE_DATA", "INFORMATION", "Policy numbers and contact details are confidential"],
+    ["ENCRYPTION", "INFORMATION", "Protect the notice in transit and at rest"],
+    ["SECRETS", "INFORMATION", "Keep database credentials off the customer screen"],
+    ["AUDITABILITY", "INFORMATION", "Record that a notice was submitted"],
+    ["PRIVACY", "CONCERN", "Confirm where customer data must be stored"],
+  ] as const;
+  for (const [area, classification, title] of findings) {
+    await prisma.securityFinding.create({
+      data: {
+        solutionArchitectureId: architecture.id,
+        area,
+        classification,
+        title,
+        description:
+          "Initial Architecture Security Assessment for the demo. This is not a full security review.",
+        createdAt: input.createdAt,
+        updatedAt: input.createdAt,
+      },
+    });
+  }
+
+  await prisma.nfrCoverage.createMany({
+    data: [
+      {
+        solutionArchitectureId: architecture.id,
+        nfrId: input.accessibilityId,
+        componentId: web.id,
+        mechanism: "The customer web application is the surface that must work with a keyboard and a screen reader.",
+      },
+      {
+        solutionArchitectureId: architecture.id,
+        nfrId: input.securityId,
+        componentId: api.id,
+        adrId: monolith.id,
+        mechanism: "The claims API scopes each notice to the authenticated customer.",
+      },
+    ],
+  });
+  await prisma.componentTrace.createMany({
+    data: [
+      { componentId: web.id, capabilityId: input.capabilityId, workItemId: input.storyId },
+      { componentId: api.id, capabilityId: input.capabilityId, workItemId: input.storyId },
+      { componentId: service.id, capabilityId: input.capabilityId, workItemId: input.storyId },
+      { componentId: web.id, nfrId: input.accessibilityId },
+      { componentId: api.id, nfrId: input.securityId, adrId: monolith.id },
+    ],
+  });
+  await prisma.architectureQuestion.create({
+    data: {
+      productId: input.productId,
+      solutionArchitectureId: architecture.id,
+      question: "What identity provider must the product integrate with?",
+      reason: "The answer changes authentication and the first integration.",
+      impact: "HIGH",
+      status: "OPEN",
+      createdAt: input.createdAt,
+    },
+  });
+
+  const plan = await prisma.implementationPlan.create({
+    data: {
+      productId: input.productId,
+      productSliceId: input.sliceId,
+      solutionArchitectureId: architecture.id,
+      version: 1,
+      status: "DRAFT",
+      summary:
+        "Demo plan for the first slice: submit a simple claim end to end. Not an Architecture Agent run.",
+      seededDemo: true,
+      createdAt: input.createdAt,
+      updatedAt: input.createdAt,
+    },
+  });
+  const taskData = [
+    ["Add the claim creation domain model", "Claims Service", service.id, [] as string[]],
+    ["Implement the claim submission service", "Claims Service", service.id, [] as string[]],
+    ["Expose the claim submission endpoint", "Claims API", api.id, [] as string[]],
+    ["Create the claim submission screen", "Customer Web Application", web.id, [] as string[]],
+    ["Verify the slice end to end", "Customer Web Application", web.id, [] as string[]],
+  ];
+  const createdTasks: string[] = [];
+  for (const [index, task] of taskData.entries()) {
+    const created = await prisma.implementationTask.create({
+      data: {
+        implementationPlanId: plan.id,
+        workItemId: input.storyId,
+        title: task[0] as string,
+        description: "Demo task for the submit-simple-claim slice.",
+        objective: task[0] as string,
+        verticalSlice: "Submit simple claim",
+        guidance: "Follow the approved story. Do not treat this seed as generated code.",
+        validation: "Check the story acceptance criteria for this slice.",
+        sequence: index + 1,
+        parallelisable: false,
+        dependenciesIdentified: true,
+        status: "PROPOSED",
+        complexity: "MEDIUM",
+        createdAt: input.createdAt,
+        updatedAt: input.createdAt,
+      },
+    });
+    createdTasks.push(created.id);
+    await prisma.implementationTaskComponent.create({
+      data: { taskId: created.id, componentId: task[2] as string },
+    });
+  }
+  for (let index = 1; index < createdTasks.length; index += 1) {
+    await prisma.implementationTaskDependency.create({
+      data: { taskId: createdTasks[index], dependsOnId: createdTasks[index - 1] },
+    });
+  }
+
+  await prisma.activity.create({
+    data: {
+      productId: input.productId,
+      type: "ARCHITECTURE_GENERATED",
+      description:
+        "Demo data. Prepared a sample architecture, security assessment, and implementation plan. Not an Architecture Agent run.",
+      actor: "Demo seed",
+      createdAt: input.createdAt,
     },
   });
 }

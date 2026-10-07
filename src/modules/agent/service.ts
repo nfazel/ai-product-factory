@@ -28,7 +28,9 @@ export class AgentNotConfiguredError extends DomainError {
         ? "Product Discovery is not configured. Add OPENAI_API_KEY on the server. No response was generated."
         : agentType === "REQUIREMENTS"
           ? "The Requirements Agent is not configured. Add OPENAI_API_KEY on the server. No product definition was generated."
-          : `${agentType} is not configured. AI agents will be introduced progressively as the Product Factory capabilities are enabled.`,
+          : agentType === "ARCHITECTURE"
+            ? "The Architecture Agent is not configured. Add OPENAI_API_KEY on the server. No architecture was generated."
+            : `${agentType} is not configured. AI agents will be introduced progressively as the Product Factory capabilities are enabled.`,
       "INVALID",
     );
     this.name = "AgentNotConfiguredError";
