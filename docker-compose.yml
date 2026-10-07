@@ -1,0 +1,14 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: apf
+      POSTGRES_PASSWORD: apf_dev_password
+      POSTGRES_DB: ai_product_factory
+    ports:
+      - "5432:5432"
+    volumes:
+      - apf_postgres:/var/lib/postgresql/data
+
+volumes:
+  apf_postgres:
