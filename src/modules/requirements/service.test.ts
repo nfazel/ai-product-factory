@@ -9,6 +9,7 @@ import {
   commitProductDefinition,
   generateProductDefinition,
   moveDefinitionToBuild,
+  reviewProposalItem,
 } from "@/modules/requirements/service";
 import { toStoredProposal } from "@/modules/requirements/schema";
 import { requirementsFixture } from "@/modules/requirements/testing";
@@ -187,6 +188,35 @@ describe("requirements commit and traceability", () => {
       where: { productId: product.id, approvalType: "PRODUCT_DEFINITION" },
     });
     expect(definitionApproval).toBe(0);
+  });
+
+  it("commits an outcome after that outcome is accepted on its own", async () => {
+    const product = await tempProduct("DEFINE");
+    const brief = await approvedBrief(product.id);
+    const stored = toStoredProposal(requirementsFixture());
+    const proposal = await db.definitionProposal.create({
+      data: {
+        productId: product.id,
+        status: "OPEN",
+        summary: stored.assistantSummary,
+        payload: stored,
+      },
+    });
+
+    await reviewProposalItem({
+      productId: product.id,
+      proposalId: proposal.id,
+      section: "outcomes",
+      tempId: "outcome-1",
+      decision: "ACCEPTED",
+    });
+    await commitProductDefinition(product.id, proposal.id);
+
+    const outcome = await db.productOutcome.findFirst({ where: { productId: product.id } });
+    expect(outcome?.title).toBe(stored.outcomes[0].title);
+    expect(outcome?.sourceBriefId).toBe(brief.id);
+    expect(outcome?.status).toBe("PROPOSED");
+    expect(await db.workItem.count({ where: { productId: product.id } })).toBe(0);
   });
 
   it("does not commit a partial backlog when an accepted child has no accepted parent", async () => {
