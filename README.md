@@ -4,9 +4,9 @@ AI Product Factory is the foundation of an AI-native software product developmen
 
 **Explore → Define → Build → Prove → Ship → Learn**
 
-This repository is the application foundation. Specialised agents, model calls, GitHub integration, autonomous coding, and automated test agents are extension points only. They are not implemented.
+This repository is the product factory with the first agent enabled: Product Discovery. It turns an incomplete idea into a Product Brief during Explore. Requirements, architecture, coding, and testing agents are not implemented. GitHub integration is not implemented.
 
-Humans remain in control of stage changes, decisions, and approval gates.
+Humans remain in control of stage changes, decisions, and approval gates. The discovery agent cannot approve its own brief or move Explore to Define.
 
 ## Technology stack
 
@@ -22,7 +22,7 @@ Authentication is structured so it can be added later. The app runs without a lo
 
 Each domain module exposes a service. Repositories are the only code that talks to Prisma. Pages and API routes call services. Future agents should call those same services, then wait for a person at an approval gate.
 
-See [docs/architecture.md](docs/architecture.md) for the module boundaries and the agent extension point.
+See [docs/architecture.md](docs/architecture.md) for the module boundaries and [docs/product-discovery-agent.md](docs/product-discovery-agent.md) for the discovery agent.
 
 ## Project structure
 
@@ -31,9 +31,10 @@ prisma/                  Schema, migrations, and demo seed
 src/app/                 Routes, layouts, and HTTP API
 src/components/          Shared interface components
 src/domain/              Stages, labels, hierarchy rules, backlog tree
-src/modules/             Product, work item, approval, activity, agent, identity
+src/modules/             Product, discovery, AI, work item, approval, activity, agent, identity
 src/server/              Server actions and API helpers
-docs/architecture.md     Modular design and future agents
+docs/architecture.md     Modular design
+docs/product-discovery-agent.md  Discovery agent, prompt, and approval gate
 ```
 
 ## Database setup
@@ -72,8 +73,10 @@ cp .env.example .env
 | Variable | Purpose |
 | --- | --- |
 | `DATABASE_URL` | PostgreSQL connection string used by Prisma and the Next.js server |
+| `OPENAI_API_KEY` | Server-only key for Product Discovery. Leave empty to run without model calls |
+| `OPENAI_MODEL` | Optional. Defaults to `gpt-4.1-mini` |
 
-No API keys are required. There is no model provider configured.
+The key is read only on the server. The browser never receives it. If it is missing, the app still runs and Discovery says that AI is not configured.
 
 ## Run locally
 
@@ -93,6 +96,7 @@ Other commands:
 ```bash
 npm run typecheck
 npm run lint
+npm run test
 npm run build
 npm run db:validate
 ```
@@ -105,10 +109,16 @@ npm run db:seed
 
 The seed replaces existing factory data with one sample product, **Claims Management Platform**, in the Define stage. It includes an epic, features, a customer claim story, acceptance criteria, a task, a defect, decisions, approvals, and an activity history.
 
-Agent runs are intentionally empty.
+It also includes a **demo** discovery session and product brief so the Discovery tab can be reviewed without a live model. That transcript is labelled demo data. The seed does not create agent runs and does not pretend a model wrote the brief.
 
-## Future architecture
+## Product Discovery
 
-Agents will be registered against `registerAgentRunner` and will call the existing services. `POST /api/agent-runs` refuses until a runner exists, and it does not invent output. Approval records stay the human gate between a proposal and a change to the product.
+Open a product and choose Discovery. With `OPENAI_API_KEY` set, Start Discovery sends the idea to the Product Discovery Agent and builds a brief. Without the key, the page explains that AI is not configured.
 
-Authentication will replace `getCurrentActor()` and the pass-through `src/proxy.ts` without rewriting the domain model.
+A person edits the brief, confirms assumptions, and approves it. Approval does not change the product stage. Move to Define is a separate human action, and only from Explore.
+
+Tests mock the provider. They do not call OpenAI.
+
+## Later agents
+
+Requirements, architecture, coding, and testing agents are not registered. `POST /api/agent-runs` still refuses those types. Authentication will replace `getCurrentActor()` and the pass-through `src/proxy.ts` without rewriting the domain model.

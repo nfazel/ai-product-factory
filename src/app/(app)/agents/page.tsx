@@ -24,28 +24,57 @@ async function Agents() {
       <PageHeader
         eyebrow="Agents"
         title="Agent control centre"
-        description="AI agents will be introduced progressively as the Product Factory capabilities are enabled."
+        description="Product Discovery runs when OPENAI_API_KEY is set on the server. Other agents remain unavailable until their stages are introduced."
       />
       <div className="grid gap-4 md:grid-cols-2">
         {agents.map((agent) => (
           <article key={agent.agentType} className="rounded-2xl border bg-card p-5">
             <div className="flex items-start justify-between gap-3">
               <h2 className="text-base font-semibold">{agent.name}</h2>
-              <span className="rounded-full bg-stone-100 px-2.5 py-1 text-xs font-medium text-stone-700">
-                Not configured
+              <span
+                className={
+                  agent.configured
+                    ? "rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-800"
+                    : "rounded-full bg-stone-100 px-2.5 py-1 text-xs font-medium text-stone-700"
+                }
+              >
+                {agent.configured ? "CONFIGURED" : "NOT CONFIGURED"}
               </span>
             </div>
             <p className="mt-2 text-sm leading-6 text-muted-foreground">
               {agent.responsibility}
             </p>
-            <p className="mt-4 text-xs text-muted-foreground">
-              {agent.runCount === 0
-                ? "No runs recorded."
-                : `${agent.runCount} historical runs.`}
-            </p>
+            {agent.agentType === "PRODUCT_DISCOVERY" ? (
+              <dl className="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+                <div>
+                  <dt className="text-xs text-muted-foreground">Runs</dt>
+                  <dd className="font-medium">{agent.runCount}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-muted-foreground">Completed</dt>
+                  <dd className="font-medium">{agent.completedCount}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-muted-foreground">Failed</dt>
+                  <dd className="font-medium">{agent.failedCount}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-muted-foreground">Average duration</dt>
+                  <dd className="font-medium">{formatDuration(agent.averageDurationMs)}</dd>
+                </div>
+              </dl>
+            ) : (
+              <p className="mt-4 text-xs text-muted-foreground">No runs recorded.</p>
+            )}
           </article>
         ))}
       </div>
     </div>
   );
+}
+
+function formatDuration(durationMs: number | null) {
+  if (durationMs == null) return "—";
+  if (durationMs < 1000) return `${durationMs} ms`;
+  return `${(durationMs / 1000).toFixed(1)} s`;
 }

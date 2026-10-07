@@ -1,9 +1,5 @@
 import type { AgentRunStatus, AgentType } from "@/domain/constants";
 
-/**
- * Extension point for a future agent runtime.
- * Runners are registered in-process. None are registered in this foundation.
- */
 export type AgentExecutionRequest = {
   productId: string;
   workItemId?: string;
@@ -13,9 +9,12 @@ export type AgentExecutionRequest = {
 
 export type AgentRunner = {
   agentType: AgentType;
-  execute: (
-    request: AgentExecutionRequest,
-  ) => Promise<{ output: Record<string, unknown> }>;
+  /** True only when this agent can make a real model call. */
+  isConfigured: () => boolean;
+  execute: (request: AgentExecutionRequest) => Promise<{
+    output: Record<string, unknown>;
+    estimatedCost?: string | null;
+  }>;
 };
 
 export type AgentCatalogueEntry = {
@@ -24,6 +23,9 @@ export type AgentCatalogueEntry = {
   responsibility: string;
   configured: boolean;
   runCount: number;
+  completedCount: number;
+  failedCount: number;
+  averageDurationMs: number | null;
   latestStatus: AgentRunStatus | null;
 };
 

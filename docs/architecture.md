@@ -27,12 +27,14 @@ Rules:
 | --- | --- |
 | Identity | `getCurrentActor()`. The only place a future session is read. |
 | Product | Product definition, status, and current stage. |
+| Discovery | Discovery sessions, messages, product briefs, and assumptions. |
+| AI | Provider interface. The OpenAI implementation is server-side only. |
 | Work item | Backlog items, hierarchy, and dependencies. |
 | Acceptance | Criteria on a work item, including pass and fail. |
 | Decision | Human decisions, optionally tied to a work item. |
-| Approval | Pending, approved, and rejected gates. |
+| Approval | Pending, approved, and rejected gates, including product discovery. |
 | Activity | Append-only audit history and filters. |
-| Agent | Catalogue, run records, and the runner registry. |
+| Agent | Catalogue, run records, runner registry, and run lifecycle. |
 | Dashboard | Read model composed from the modules above. |
 
 Public imports go through each module's `index.ts`. Pages may also import a focused read function such as `getProductOverview` when that keeps a service from depending on the UI.
@@ -57,6 +59,8 @@ Work item hierarchy:
 These actions write an activity record:
 
 - Product created or updated
+- Discovery started, brief updated or edited, assumption updated, ready for review, or approved
+- Agent run completed or failed
 - Work item created or updated
 - Acceptance criterion added or updated
 - Approval requested, approved, or rejected
@@ -69,48 +73,51 @@ The log stores the actor name. Until authentication exists, that name is **Local
 
 `src/proxy.ts` runs before the request and currently continues it. `getCurrentActor()` returns a local actor. A future login replaces those two pieces. Services already accept the actor name when they write history, so they do not need to know the provider.
 
-## How future agents will interact
+## Agents
 
-Agents are not connected to a model in this foundation.
+The catalogue in `src/domain/constants.ts` names the agents:
 
-The catalogue in `src/domain/constants.ts` names the agents that will exist:
+- Product Discovery — implemented
+- Requirements, Architecture, Security, Planning, Coding, Testing, and Review — not configured
 
-- Product Discovery
-- Requirements
-- Architecture
-- Security
-- Planning
-- Coding
-- Testing
-- Review
+Product Discovery is **CONFIGURED** only when `OPENAI_API_KEY` is set on the server, or when a test supplies a provider. Every other agent stays **NOT CONFIGURED**. The control centre reads run counts, completed runs, failed runs, and average duration from `AgentRun`. Token counts are stored when the provider returns them. Cost is left empty rather than guessed.
 
-Each one is **Not configured**. The control centre reads run counts from `AgentRun`. There are no seeded runs and no generated responses.
-
-A future runner implements:
+A runner implements:
 
 ```ts
 type AgentRunner = {
   agentType: AgentType
-  execute(request: AgentExecutionRequest): Promise<{ output: Record<string, unknown> }>
+  isConfigured(): boolean
+  execute(request: AgentExecutionRequest): Promise<{
+    output: Record<string, unknown>
+    estimatedCost?: string | null
+  }>
 }
 ```
 
-and is added with `registerAgentRunner`. `executeAgent` looks up that runner. If none is registered it throws `AgentNotConfiguredError` before inserting an `AgentRun`. `POST /api/agent-runs` returns that refusal. It does not fabricate output.
+`ensureAgentsRegistered()` adds the Product Discovery runner. `executeAgent` looks up that runner. If it is missing or not configured, it throws `AgentNotConfiguredError` before inserting an `AgentRun`. `POST /api/agent-runs` returns that refusal and does not fabricate output.
 
-When a runner does exist, the intended path is:
+When a configured runner executes:
 
-1. Create an `AgentRun` with the input, status, and timestamps.
-2. Call domain services to propose work items, criteria, or decisions. Do not write SQL from the agent.
-3. Where the change is a gate (stage, requirements, architecture, security, release), create an `Approval` in `PENDING`.
-4. Stop. A person approves or rejects in the approval centre.
-5. Store the real output on the `AgentRun` and append an activity record.
+1. Create an `AgentRun` with status `RUNNING` and the structured input.
+2. Call the provider through `AIProvider.generate`. The key never leaves the server.
+3. Validate the response with Zod. On failure, store a redacted error, set status `FAILED`, and leave the product brief unchanged.
+4. On success, store the structured output, duration, and token usage. `estimatedCost` stays null.
+5. Append an activity record.
 
-That keeps the domain model stable if an agent later moves to its own process: it would call the same HTTP API the UI already uses.
+The discovery runner may update the product brief and assumptions. It cannot approve them, change `currentStage`, or delete a human confirmation. See [product-discovery-agent.md](product-discovery-agent.md).
 
-## What this foundation does not do
+## Product brief storage
 
-- No model provider and no fake agent replies
+Assumptions are their own table. Each one has impact, confidence, and a status a person can change (`UNVALIDATED`, `VALIDATED`, `INVALIDATED`). That lifecycle does not fit a JSON blob.
+
+The other multi-value brief sections are ordered notes without their own workflow. They are JSON arrays of `{ id, text, origin }`. Prose fields keep their origin in `fieldOrigins`. Origin is `AI_PROPOSAL`, `HUMAN_CONFIRMED`, or `UNRESOLVED`. Confirmed prose and validated or invalidated assumptions are kept when a later agent turn arrives.
+
+## What this application does not do
+
+- No Requirements, Architecture, Coding, or Testing agent
 - No GitHub integration
 - No autonomous coding
-- No automated test execution
+- No automated test execution of the product under construction
 - No authentication requirement for local use
+- No invented model response when `OPENAI_API_KEY` is missing

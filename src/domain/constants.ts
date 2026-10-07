@@ -45,6 +45,7 @@ export const APPROVAL_TYPES = [
   "ARCHITECTURE",
   "SECURITY",
   "RELEASE",
+  "PRODUCT_DISCOVERY",
 ] as const;
 export type ApprovalType = (typeof APPROVAL_TYPES)[number];
 
@@ -69,6 +70,14 @@ export const ACTIVITY_TYPES = [
   "APPROVAL_REJECTED",
   "DECISION_RECORDED",
   "DEPENDENCY_ADDED",
+  "DISCOVERY_STARTED",
+  "DISCOVERY_BRIEF_UPDATED",
+  "DISCOVERY_BRIEF_EDITED",
+  "ASSUMPTION_UPDATED",
+  "DISCOVERY_READY_FOR_REVIEW",
+  "DISCOVERY_APPROVED",
+  "AGENT_RUN_COMPLETED",
+  "AGENT_RUN_FAILED",
 ] as const;
 export type ActivityType = (typeof ACTIVITY_TYPES)[number];
 
@@ -83,6 +92,81 @@ export const AGENT_TYPES = [
   "REVIEW",
 ] as const;
 export type AgentType = (typeof AGENT_TYPES)[number];
+
+export const DISCOVERY_STATUSES = [
+  "NOT_STARTED",
+  "IN_PROGRESS",
+  "READY_FOR_REVIEW",
+  "APPROVED",
+] as const;
+export type DiscoveryStatus = (typeof DISCOVERY_STATUSES)[number];
+
+export const DISCOVERY_MESSAGE_ROLES = ["USER", "ASSISTANT", "SYSTEM"] as const;
+export type DiscoveryMessageRole = (typeof DISCOVERY_MESSAGE_ROLES)[number];
+
+export const PRODUCT_BRIEF_STATUSES = [
+  "DRAFT",
+  "READY_FOR_REVIEW",
+  "APPROVED",
+  "SUPERSEDED",
+] as const;
+export type ProductBriefStatus = (typeof PRODUCT_BRIEF_STATUSES)[number];
+
+export const SIGNAL_LEVELS = ["LOW", "MEDIUM", "HIGH"] as const;
+export type SignalLevel = (typeof SIGNAL_LEVELS)[number];
+
+export const ASSUMPTION_STATUSES = [
+  "UNVALIDATED",
+  "VALIDATED",
+  "INVALIDATED",
+] as const;
+export type AssumptionStatus = (typeof ASSUMPTION_STATUSES)[number];
+
+export const ASSUMPTION_IMPACTS = ["LOW", "MEDIUM", "HIGH"] as const;
+export type AssumptionImpact = (typeof ASSUMPTION_IMPACTS)[number];
+
+export const BRIEF_ORIGINS = [
+  "AI_PROPOSAL",
+  "HUMAN_CONFIRMED",
+  "UNRESOLVED",
+] as const;
+export type BriefOrigin = (typeof BRIEF_ORIGINS)[number];
+
+export const BRIEF_SECTIONS = [
+  "problemStatement",
+  "productVision",
+  "targetUsers",
+  "userNeeds",
+  "desiredOutcomes",
+  "valueProposition",
+  "inScope",
+  "outOfScope",
+  "constraints",
+  "risks",
+  "successMeasures",
+  "openQuestions",
+] as const;
+export type BriefSection = (typeof BRIEF_SECTIONS)[number];
+
+export const PROSE_BRIEF_SECTIONS = [
+  "problemStatement",
+  "productVision",
+  "valueProposition",
+] as const;
+export type ProseBriefSection = (typeof PROSE_BRIEF_SECTIONS)[number];
+
+export const LIST_BRIEF_SECTIONS = [
+  "targetUsers",
+  "userNeeds",
+  "desiredOutcomes",
+  "inScope",
+  "outOfScope",
+  "constraints",
+  "risks",
+  "successMeasures",
+  "openQuestions",
+] as const;
+export type ListBriefSection = (typeof LIST_BRIEF_SECTIONS)[number];
 
 export const STAGE_META: Record<
   ProductStage,
@@ -163,6 +247,7 @@ export const APPROVAL_TYPE_LABEL: Record<ApprovalType, string> = {
   ARCHITECTURE: "Architecture",
   SECURITY: "Security",
   RELEASE: "Release",
+  PRODUCT_DISCOVERY: "Product discovery",
 };
 
 export const ACTIVITY_TYPE_LABEL: Record<ActivityType, string> = {
@@ -177,7 +262,70 @@ export const ACTIVITY_TYPE_LABEL: Record<ActivityType, string> = {
   APPROVAL_REJECTED: "Approval rejected",
   DECISION_RECORDED: "Decision recorded",
   DEPENDENCY_ADDED: "Dependency added",
+  DISCOVERY_STARTED: "Discovery started",
+  DISCOVERY_BRIEF_UPDATED: "Discovery brief updated",
+  DISCOVERY_BRIEF_EDITED: "Discovery brief edited",
+  ASSUMPTION_UPDATED: "Assumption updated",
+  DISCOVERY_READY_FOR_REVIEW: "Discovery ready for review",
+  DISCOVERY_APPROVED: "Discovery approved",
+  AGENT_RUN_COMPLETED: "Agent run completed",
+  AGENT_RUN_FAILED: "Agent run failed",
 };
+
+export const DISCOVERY_STATUS_LABEL: Record<DiscoveryStatus, string> = {
+  NOT_STARTED: "Not started",
+  IN_PROGRESS: "In progress",
+  READY_FOR_REVIEW: "Ready for review",
+  APPROVED: "Approved",
+};
+
+export const PRODUCT_BRIEF_STATUS_LABEL: Record<ProductBriefStatus, string> = {
+  DRAFT: "Draft",
+  READY_FOR_REVIEW: "Ready for review",
+  APPROVED: "Approved",
+  SUPERSEDED: "Superseded",
+};
+
+export const SIGNAL_LEVEL_LABEL: Record<SignalLevel, string> = {
+  LOW: "Low",
+  MEDIUM: "Medium",
+  HIGH: "High",
+};
+
+export const ASSUMPTION_STATUS_LABEL: Record<AssumptionStatus, string> = {
+  UNVALIDATED: "Unvalidated",
+  VALIDATED: "Validated",
+  INVALIDATED: "Invalidated",
+};
+
+export const BRIEF_ORIGIN_LABEL: Record<BriefOrigin, string> = {
+  AI_PROPOSAL: "Proposed",
+  HUMAN_CONFIRMED: "Confirmed",
+  UNRESOLVED: "Unresolved",
+};
+
+export const BRIEF_SECTION_LABEL: Record<BriefSection, string> = {
+  problemStatement: "Problem",
+  productVision: "Vision",
+  targetUsers: "Target users",
+  userNeeds: "User needs",
+  desiredOutcomes: "Desired outcomes",
+  valueProposition: "Value proposition",
+  inScope: "Scope",
+  outOfScope: "Out of scope",
+  constraints: "Constraints",
+  risks: "Risks",
+  successMeasures: "Success measures",
+  openQuestions: "Open questions",
+};
+
+export const CLARITY_AREAS = [
+  { key: "problemClarity", label: "Problem clarity" },
+  { key: "userClarity", label: "User clarity" },
+  { key: "outcomeClarity", label: "Outcome clarity" },
+  { key: "scopeClarity", label: "Scope clarity" },
+  { key: "riskClarity", label: "Risk clarity" },
+] as const;
 
 export const AGENT_CATALOG: Record<
   AgentType,

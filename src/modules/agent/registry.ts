@@ -12,5 +12,6 @@ export function getAgentRunner(agentType: AgentType) {
 }
 
 export function isAgentConfigured(agentType: AgentType) {
-  return runners.has(agentType);
+  const runner = runners.get(agentType);
+  return runner ? runner.isConfigured() : false;
 }

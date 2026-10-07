@@ -82,11 +82,13 @@ model Product {
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
 
-  workItems  WorkItem[]
-  decisions  Decision[]
-  approvals  Approval[]
-  activities Activity[]
-  agentRuns  AgentRun[]
+  workItems         WorkItem[]
+  decisions         Decision[]
+  approvals         Approval[]
+  activities        Activity[]
+  agentRuns         AgentRun[]
+  discoverySessions DiscoverySession[]
+  productBriefs     ProductBrief[]
 
   @@index([status])
   @@index([updatedAt])
@@ -228,4 +230,142 @@ model AgentRun {
   @@index([workItemId])
   @@index([agentType])
   @@index([status])
+}
+
+enum DiscoveryStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  READY_FOR_REVIEW
+  APPROVED
+}
+
+enum DiscoveryMessageRole {
+  USER
+  ASSISTANT
+  SYSTEM
+}
+
+enum ProductBriefStatus {
+  DRAFT
+  READY_FOR_REVIEW
+  APPROVED
+  SUPERSEDED
+}
+
+enum SignalLevel {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum AssumptionStatus {
+  UNVALIDATED
+  VALIDATED
+  INVALIDATED
+}
+
+enum AssumptionImpact {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum BriefOrigin {
+  AI_PROPOSAL
+  HUMAN_CONFIRMED
+  UNRESOLVED
+}
+
+model DiscoverySession {
+  id               String          @id @default(cuid())
+  productId        String          @unique
+  status           DiscoveryStatus @default(NOT_STARTED)
+  initialIdea      String          @default("")
+  optionalContext  String          @default("")
+  knownConstraints String          @default("")
+  knownUsers       String          @default("")
+  desiredOutcome   String          @default("")
+  seededDemo       Boolean         @default(false)
+  startedAt        DateTime?
+  completedAt      DateTime?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  product  Product            @relation(fields: [productId], references: [id], onDelete: Cascade)
+  messages DiscoveryMessage[]
+  briefs   ProductBrief[]
+
+  @@index([status])
+}
+
+model DiscoveryMessage {
+  id        String               @id @default(cuid())
+  sessionId String
+  role      DiscoveryMessageRole
+  content   String
+  createdAt DateTime             @default(now())
+
+  session DiscoverySession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, createdAt])
+}
+
+model ProductBrief {
+  id               String             @id @default(cuid())
+  productId        String
+  sessionId        String?
+  version          Int
+  problemStatement String             @default("")
+  productVision    String             @default("")
+  valueProposition String             @default("")
+  // Ordered notes. Each item is { id, text, origin }.
+  // Assumptions are a separate entity because they have their own lifecycle.
+  targetUsers      Json               @default("[]")
+  userNeeds        Json               @default("[]")
+  desiredOutcomes  Json               @default("[]")
+  constraints      Json               @default("[]")
+  risks            Json               @default("[]")
+  openQuestions    Json               @default("[]")
+  inScope          Json               @default("[]")
+  outOfScope       Json               @default("[]")
+  successMeasures  Json               @default("[]")
+  // Origin of the three prose fields: problemStatement, productVision, valueProposition.
+  fieldOrigins     Json               @default("{}")
+  problemClarity   SignalLevel        @default(LOW)
+  userClarity      SignalLevel        @default(LOW)
+  outcomeClarity   SignalLevel        @default(LOW)
+  scopeClarity     SignalLevel        @default(LOW)
+  riskClarity      SignalLevel        @default(LOW)
+  readyForReview   Boolean            @default(false)
+  readinessReason  String             @default("")
+  status           ProductBriefStatus @default(DRAFT)
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  product     Product           @relation(fields: [productId], references: [id], onDelete: Cascade)
+  session     DiscoverySession? @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  assumptions Assumption[]
+
+  @@unique([productId, version])
+  @@index([productId])
+  @@index([sessionId])
+  @@index([status])
+}
+
+model Assumption {
+  id          String           @id @default(cuid())
+  briefId     String
+  description String
+  impact      AssumptionImpact @default(MEDIUM)
+  confidence  SignalLevel      @default(LOW)
+  status      AssumptionStatus @default(UNVALIDATED)
+  origin      BriefOrigin      @default(AI_PROPOSAL)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  brief ProductBrief @relation(fields: [briefId], references: [id], onDelete: Cascade)
+
+  @@index([briefId])
+  @@index([status])
+  @@index([impact])
 }
