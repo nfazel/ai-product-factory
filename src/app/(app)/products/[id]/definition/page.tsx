@@ -106,8 +106,6 @@ async function Definition({ params }: { params: Promise<{ id: string }> }) {
           </div>
           <DefinitionControls
             productId={workspace.product.id}
-            configured={workspace.configured}
-            canGenerate={workspace.entryReasons.length === 0}
             showReview={showReview}
             approved={approved}
           />

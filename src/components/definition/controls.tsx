@@ -40,37 +40,29 @@ function GateButton({
 
 export function DefinitionControls({
   productId,
-  configured,
-  canGenerate,
   showReview,
   approved,
 }: {
   productId: string;
-  configured: boolean;
-  canGenerate: boolean;
   showReview: boolean;
   approved: boolean;
 }) {
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap gap-2">
-        {canGenerate && configured ? (
-          <GateButton
-            productId={productId}
-            action={generateDefinitionAction}
-            label="Generate Product Definition"
-            pendingLabel="Generating definition…"
-          />
-        ) : null}
-        {canGenerate && configured ? (
-          <GateButton
-            productId={productId}
-            action={requestDefinitionReviewAction}
-            label="Request AI Review"
-            pendingLabel="Reviewing…"
-            variant="outline"
-          />
-        ) : null}
+        <GateButton
+          productId={productId}
+          action={generateDefinitionAction}
+          label="Generate Product Definition"
+          pendingLabel="Generating definition…"
+        />
+        <GateButton
+          productId={productId}
+          action={requestDefinitionReviewAction}
+          label="Request AI Review"
+          pendingLabel="Reviewing…"
+          variant="outline"
+        />
         <GateButton
           productId={productId}
           action={reviewDefinitionAction}
