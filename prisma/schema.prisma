@@ -1,0 +1,231 @@
+// AI Product Factory domain model.
+// Modules own these entities through repositories. UI code does not query Prisma directly.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum ProductStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  ARCHIVED
+}
+
+enum ProductStage {
+  EXPLORE
+  DEFINE
+  BUILD
+  PROVE
+  SHIP
+  LEARN
+}
+
+enum WorkItemType {
+  EPIC
+  FEATURE
+  STORY
+  TASK
+  DEFECT
+}
+
+enum WorkItemStatus {
+  DRAFT
+  READY
+  IN_PROGRESS
+  BLOCKED
+  REVIEW
+  DONE
+}
+
+enum Priority {
+  CRITICAL
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum AcceptanceCriterionStatus {
+  PENDING
+  PASSED
+  FAILED
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum AgentRunStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+model Product {
+  id               String        @id @default(cuid())
+  name             String
+  description      String
+  vision           String
+  problemStatement String
+  targetUsers      String
+  status           ProductStatus @default(DRAFT)
+  currentStage     ProductStage  @default(EXPLORE)
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  workItems  WorkItem[]
+  decisions  Decision[]
+  approvals  Approval[]
+  activities Activity[]
+  agentRuns  AgentRun[]
+
+  @@index([status])
+  @@index([updatedAt])
+}
+
+model WorkItem {
+  id          String         @id @default(cuid())
+  productId   String
+  parentId    String?
+  title       String
+  description String         @default("")
+  type        WorkItemType
+  status      WorkItemStatus @default(DRAFT)
+  stage       ProductStage   @default(EXPLORE)
+  priority    Priority       @default(MEDIUM)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  product    Product    @relation(fields: [productId], references: [id], onDelete: Cascade)
+  parent     WorkItem?  @relation("WorkItemHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children   WorkItem[] @relation("WorkItemHierarchy")
+
+  acceptanceCriteria AcceptanceCriterion[]
+  decisions          Decision[]
+  approvals          Approval[]
+  activities         Activity[]
+  agentRuns          AgentRun[]
+  dependencies       WorkItemDependency[] @relation("DependentItem")
+  dependents         WorkItemDependency[] @relation("DependencyTarget")
+
+  @@index([productId])
+  @@index([parentId])
+  @@index([status])
+  @@index([type])
+  @@index([updatedAt])
+}
+
+model WorkItemDependency {
+  id          String   @id @default(cuid())
+  workItemId  String
+  dependsOnId String
+  createdAt   DateTime @default(now())
+
+  workItem  WorkItem @relation("DependentItem", fields: [workItemId], references: [id], onDelete: Cascade)
+  dependsOn WorkItem @relation("DependencyTarget", fields: [dependsOnId], references: [id], onDelete: Cascade)
+
+  @@unique([workItemId, dependsOnId])
+  @@index([dependsOnId])
+}
+
+model AcceptanceCriterion {
+  id          String                    @id @default(cuid())
+  workItemId  String
+  description String
+  status      AcceptanceCriterionStatus @default(PENDING)
+  createdAt   DateTime                  @default(now())
+  updatedAt   DateTime                  @updatedAt
+
+  workItem WorkItem @relation(fields: [workItemId], references: [id], onDelete: Cascade)
+
+  @@index([workItemId])
+}
+
+model Decision {
+  id            String   @id @default(cuid())
+  productId     String
+  workItemId    String?
+  title         String
+  description   String
+  decision      String
+  reason        String
+  decisionMaker String
+  createdAt     DateTime @default(now())
+
+  product  Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  workItem WorkItem? @relation(fields: [workItemId], references: [id], onDelete: SetNull)
+
+  @@index([productId, createdAt])
+  @@index([workItemId])
+}
+
+model Approval {
+  id           String         @id @default(cuid())
+  productId    String
+  workItemId   String?
+  approvalType String
+  status       ApprovalStatus @default(PENDING)
+  requestedAt  DateTime       @default(now())
+  resolvedAt   DateTime?
+  approvedBy   String?
+  comments     String         @default("")
+
+  product  Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  workItem WorkItem? @relation(fields: [workItemId], references: [id], onDelete: SetNull)
+
+  @@index([status])
+  @@index([productId])
+  @@index([workItemId])
+  @@index([requestedAt])
+}
+
+model Activity {
+  id          String   @id @default(cuid())
+  productId   String
+  workItemId  String?
+  type        String
+  description String
+  actor       String
+  createdAt   DateTime @default(now())
+
+  product  Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  workItem WorkItem? @relation(fields: [workItemId], references: [id], onDelete: SetNull)
+
+  @@index([productId, createdAt])
+  @@index([workItemId])
+  @@index([type])
+  @@index([actor])
+  @@index([createdAt])
+}
+
+model AgentRun {
+  id            String         @id @default(cuid())
+  productId     String
+  workItemId    String?
+  agentType     String
+  status        AgentRunStatus @default(PENDING)
+  input         Json?
+  output        Json?
+  startedAt     DateTime?
+  completedAt   DateTime?
+  duration      Int?
+  estimatedCost Decimal?       @db.Decimal(12, 4)
+  createdAt     DateTime       @default(now())
+
+  product  Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  workItem WorkItem? @relation(fields: [workItemId], references: [id], onDelete: SetNull)
+
+  @@index([productId])
+  @@index([workItemId])
+  @@index([agentType])
+  @@index([status])
+}
