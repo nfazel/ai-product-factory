@@ -8,6 +8,7 @@ import { cn } from "cn";
 const TABS = [
   { slug: "", label: "Overview" },
   { slug: "/discovery", label: "Discovery" },
+  { slug: "/definition", label: "Definition" },
   { slug: "/backlog", label: "Backlog" },
   { slug: "/architecture", label: "Architecture" },
   { slug: "/build", label: "Build" },

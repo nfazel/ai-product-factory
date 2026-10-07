@@ -24,14 +24,22 @@ async function main() {
   await prisma.discoveryMessage.deleteMany();
   await prisma.productBrief.deleteMany();
   await prisma.discoverySession.deleteMany();
+  await prisma.requirementQuestion.deleteMany();
+  await prisma.requirementAssumption.deleteMany();
   await prisma.workItemDependency.deleteMany();
   await prisma.acceptanceCriterion.deleteMany();
   await prisma.decision.deleteMany();
   await prisma.approval.deleteMany();
   await prisma.activity.deleteMany();
   await prisma.agentRun.deleteMany();
-  await prisma.workItem.updateMany({ data: { parentId: null } });
+  await prisma.definitionProposal.deleteMany();
+  await prisma.workItem.updateMany({ data: { parentId: null, capabilityId: null, sliceId: null } });
   await prisma.workItem.deleteMany();
+  await prisma.productCapability.deleteMany();
+  await prisma.productOutcome.deleteMany();
+  await prisma.productSlice.deleteMany();
+  await prisma.nonFunctionalRequirement.deleteMany();
+  await prisma.productDefinition.deleteMany();
   await prisma.product.deleteMany();
 
   const product = await prisma.product.create({
@@ -111,6 +119,13 @@ async function main() {
       status: "REVIEW",
       stage: "DEFINE",
       priority: "HIGH",
+      persona: "policyholder",
+      userNeed: "submit a claim online",
+      userValue: "begin the claims process without calling the contact centre",
+      priorityAssigned: true,
+      dependenciesIdentified: true,
+      assumptionsNoted: true,
+      provenance: "HUMAN_CREATED",
       createdAt: daysAgo(14, 10),
       updatedAt: daysAgo(1, 9),
     },
@@ -438,7 +453,15 @@ async function main() {
     ],
   });
 
-  await seedDiscoveryDemo(product.id);
+  const briefId = await seedDiscoveryDemo(product.id);
+  await seedDefinitionDemo({
+    productId: product.id,
+    briefId,
+    epicId: epic.id,
+    createClaimId: createClaim.id,
+    trackClaimId: trackClaim.id,
+    storyId: story.id,
+  });
 
   console.log(`Seeded ${product.name} (${product.id}).`);
 }
@@ -658,6 +681,296 @@ async function seedDiscoveryDemo(productId: string) {
         createdAt: daysAgo(2, 15),
       },
     ],
+  });
+
+  return brief.id;
+}
+
+async function seedDefinitionDemo(input: {
+  productId: string;
+  briefId: string;
+  epicId: string;
+  createClaimId: string;
+  trackClaimId: string;
+  storyId: string;
+}) {
+  const createdAt = daysAgo(2, 12);
+  await prisma.productDefinition.create({
+    data: {
+      productId: input.productId,
+      status: "IN_PROGRESS",
+      seededDemo: true,
+      reviewSummary:
+        "Demo data. This definition was prepared so the Define workspace can be reviewed. It was not produced by a Requirements Agent run.",
+      createdAt,
+      updatedAt: daysAgo(1, 11),
+    },
+  });
+
+  const effort = await prisma.productOutcome.create({
+    data: {
+      productId: input.productId,
+      title: "Reduce customer effort when opening a straightforward claim",
+      description:
+        "A policyholder can start a simple motor or property claim without calling the contact centre.",
+      successMeasure:
+        "Share of straightforward new notices submitted without handler assistance.",
+      targetValue: "",
+      status: "PROPOSED",
+      sourceBriefId: input.briefId,
+      origin: "AI_PROPOSAL",
+      createdAt,
+      updatedAt: createdAt,
+    },
+  });
+
+  const contacts = await prisma.productOutcome.create({
+    data: {
+      productId: input.productId,
+      title: "Reduce customer contacts requesting claim status",
+      description:
+        "Customers can see that a submitted claim was received, so they do not need to call for a receipt.",
+      successMeasure: "Fewer status calls in the first day after a digital notice.",
+      targetValue: "",
+      status: "PROPOSED",
+      sourceBriefId: input.briefId,
+      origin: "AI_PROPOSAL",
+      createdAt,
+      updatedAt: createdAt,
+    },
+  });
+
+  const submission = await prisma.productCapability.create({
+    data: {
+      productId: input.productId,
+      outcomeId: effort.id,
+      name: "Digital Claim Submission",
+      description:
+        "Lets a policyholder submit the policy number, incident date, loss type, and a contact method.",
+      status: "PROPOSED",
+      priority: "HIGH",
+      origin: "AI_PROPOSAL",
+      createdAt,
+      updatedAt: createdAt,
+    },
+  });
+
+  const tracking = await prisma.productCapability.create({
+    data: {
+      productId: input.productId,
+      outcomeId: contacts.id,
+      name: "Claim Status Tracking",
+      description: "Lets a customer see that the notice entered the working queue.",
+      status: "PROPOSED",
+      priority: "MEDIUM",
+      origin: "AI_PROPOSAL",
+      createdAt,
+      updatedAt: createdAt,
+    },
+  });
+
+  const slice = await prisma.productSlice.create({
+    data: {
+      productId: input.productId,
+      name: "Submit a simple claim and receive confirmation",
+      description:
+        "A customer can submit a straightforward claim and see a claim reference that confirms it was received.",
+      rationale:
+        "This is the smallest journey that serves a real customer, tests whether people will finish first notice online, and can be demonstrated end to end.",
+      status: "PROPOSED",
+      origin: "AI_PROPOSAL",
+      createdAt,
+      updatedAt: createdAt,
+    },
+  });
+
+  await prisma.workItem.update({
+    where: { id: input.epicId },
+    data: { capabilityId: submission.id, priorityAssigned: true, provenance: "HUMAN_CREATED" },
+  });
+  await prisma.workItem.update({
+    where: { id: input.createClaimId },
+    data: {
+      capabilityId: submission.id,
+      sliceId: slice.id,
+      priorityAssigned: true,
+      provenance: "HUMAN_CREATED",
+    },
+  });
+  await prisma.workItem.update({
+    where: { id: input.trackClaimId },
+    data: { capabilityId: tracking.id, priorityAssigned: true, provenance: "HUMAN_CREATED" },
+  });
+  await prisma.workItem.update({
+    where: { id: input.storyId },
+    data: { capabilityId: submission.id, sliceId: slice.id },
+  });
+
+  await prisma.nonFunctionalRequirement.createMany({
+    data: [
+      {
+        productId: input.productId,
+        category: "ACCESSIBILITY",
+        title: "Online first notice can be completed with a keyboard and a screen reader",
+        description:
+          "A customer who does not use a pointer can enter the mandatory notice fields and submit.",
+        measure: "Confirm the accessibility standard with the team. No numeric target is invented here.",
+        status: "PROPOSED",
+        source: "AI_PROPOSAL",
+        createdAt,
+        updatedAt: createdAt,
+      },
+      {
+        productId: input.productId,
+        category: "SECURITY",
+        title: "A notice must not expose another customer's policy details",
+        description:
+          "Searching or submitting with a policy number shows only the data that customer is allowed to see.",
+        measure: "Exact session and authentication rules remain an open question.",
+        status: "PROPOSED",
+        source: "AI_PROPOSAL",
+        createdAt,
+        updatedAt: createdAt,
+      },
+    ],
+  });
+
+  await prisma.requirementQuestion.create({
+    data: {
+      productId: input.productId,
+      workItemId: input.storyId,
+      question:
+        "What share of straightforward notices must be completed without handler assistance before this slice is worth continuing?",
+      reason:
+        "The brief names a 70% illustration, and nobody has confirmed that number as the decision threshold.",
+      impact: "HIGH",
+      status: "OPEN",
+      createdAt,
+    },
+  });
+
+  const pending = {
+    reviewStatus: "PENDING",
+    edited: false,
+    committedId: null,
+    replacesId: null,
+  };
+  await prisma.definitionProposal.create({
+    data: {
+      productId: input.productId,
+      status: "OPEN",
+      seededDemo: true,
+      summary:
+        "Demo proposal for evidence upload. It was not produced by a Requirements Agent run. Accept or reject it before anything reaches the backlog.",
+      createdAt,
+      updatedAt: createdAt,
+      payload: {
+        assistantSummary:
+          "Demo proposal. A customer may need to attach one photograph so the handler does not call back for the same damage. This was not generated by a live model.",
+        outcomes: [
+          {
+            tempId: "outcome-1",
+            title: "Reduce repeat contacts about missing damage evidence",
+            description: "Handlers receive enough visual evidence with the first notice to avoid an immediate callback.",
+            successMeasure: "Fewer same-day callbacks that exist only to ask for a photograph.",
+            targetValue: "",
+            ...pending,
+          },
+        ],
+        capabilities: [
+          {
+            tempId: "capability-1",
+            outcomeTempId: "outcome-1",
+            name: "Evidence Upload",
+            description: "Lets a customer attach a photograph of the damage while submitting a straightforward claim.",
+            priority: "MEDIUM",
+            ...pending,
+          },
+        ],
+        epics: [
+          {
+            tempId: "epic-1",
+            capabilityTempId: "capability-1",
+            title: "Evidence with the first notice",
+            description: "The first notice can carry the evidence a handler needs before they trust it.",
+            priority: "MEDIUM",
+            ...pending,
+          },
+        ],
+        features: [
+          {
+            tempId: "feature-1",
+            epicTempId: "epic-1",
+            title: "Attach a photograph",
+            description: "A customer can add one photograph before submitting a straightforward claim.",
+            priority: "MEDIUM",
+            inFirstSlice: false,
+            ...pending,
+          },
+        ],
+        stories: [
+          {
+            tempId: "story-1",
+            featureTempId: "feature-1",
+            title: "As a policyholder I want to attach a photograph so that a handler can see the damage without calling me back.",
+            description: "The photograph is optional for the first submission and is stored with the notice.",
+            persona: "policyholder",
+            need: "attach a photograph of the damage",
+            value: "a handler can see the damage without an immediate callback",
+            priority: "MEDIUM",
+            inFirstSlice: false,
+            ...pending,
+          },
+        ],
+        acceptanceCriteria: [
+          {
+            tempId: "ac-1",
+            storyTempId: "story-1",
+            description:
+              "GIVEN a customer has entered the mandatory claim information WHEN they attach one photograph and submit THEN the notice is created and the photograph is available to the handler with the claim reference.",
+            ...pending,
+          },
+        ],
+        nfrs: [],
+        firstSlice: null,
+        assumptions: [
+          {
+            tempId: "assumption-1",
+            description: "Customers have a photograph available at the moment they open the claim.",
+            impact: "MEDIUM",
+            confidence: "LOW",
+            storyTempId: "story-1",
+            ...pending,
+          },
+        ],
+        dependencies: [],
+        questions: [
+          {
+            tempId: "question-1",
+            storyTempId: "",
+            question: "Is a photograph required before submission, or only encouraged?",
+            reason: "The brief does not say whether missing evidence blocks the notice.",
+            impact: "MEDIUM",
+            ...pending,
+          },
+        ],
+        readinessAssessment: {
+          summary: "Demo assessment only. Not a live model judgement.",
+          notes: ["Do not treat this proposal as an agent run."],
+        },
+      },
+    },
+  });
+
+  await prisma.activity.create({
+    data: {
+      productId: input.productId,
+      type: "DEFINITION_GENERATED",
+      description:
+        "Demo data. Prepared sample outcomes, capabilities, a first slice, and an open proposal. Not a Requirements Agent run.",
+      actor: "Demo seed",
+      createdAt,
+    },
   });
 }
 

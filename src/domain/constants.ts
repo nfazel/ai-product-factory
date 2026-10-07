@@ -46,6 +46,7 @@ export const APPROVAL_TYPES = [
   "SECURITY",
   "RELEASE",
   "PRODUCT_DISCOVERY",
+  "PRODUCT_DEFINITION",
 ] as const;
 export type ApprovalType = (typeof APPROVAL_TYPES)[number];
 
@@ -78,6 +79,15 @@ export const ACTIVITY_TYPES = [
   "DISCOVERY_APPROVED",
   "AGENT_RUN_COMPLETED",
   "AGENT_RUN_FAILED",
+  "DEFINITION_GENERATED",
+  "DEFINITION_COMMITTED",
+  "DEFINITION_READY_FOR_REVIEW",
+  "DEFINITION_APPROVED",
+  "OUTCOME_CONFIRMED",
+  "CAPABILITY_UPDATED",
+  "SLICE_APPROVED",
+  "REQUIREMENT_UPDATED",
+  "QUESTION_ANSWERED",
 ] as const;
 export type ActivityType = (typeof ACTIVITY_TYPES)[number];
 
@@ -248,6 +258,7 @@ export const APPROVAL_TYPE_LABEL: Record<ApprovalType, string> = {
   SECURITY: "Security",
   RELEASE: "Release",
   PRODUCT_DISCOVERY: "Product discovery",
+  PRODUCT_DEFINITION: "Product definition",
 };
 
 export const ACTIVITY_TYPE_LABEL: Record<ActivityType, string> = {
@@ -270,6 +281,15 @@ export const ACTIVITY_TYPE_LABEL: Record<ActivityType, string> = {
   DISCOVERY_APPROVED: "Discovery approved",
   AGENT_RUN_COMPLETED: "Agent run completed",
   AGENT_RUN_FAILED: "Agent run failed",
+  DEFINITION_GENERATED: "Definition generated",
+  DEFINITION_COMMITTED: "Definition committed",
+  DEFINITION_READY_FOR_REVIEW: "Definition ready for review",
+  DEFINITION_APPROVED: "Definition approved",
+  OUTCOME_CONFIRMED: "Outcome confirmed",
+  CAPABILITY_UPDATED: "Capability updated",
+  SLICE_APPROVED: "First slice approved",
+  REQUIREMENT_UPDATED: "Requirement updated",
+  QUESTION_ANSWERED: "Question answered",
 };
 
 export const DISCOVERY_STATUS_LABEL: Record<DiscoveryStatus, string> = {
@@ -298,10 +318,194 @@ export const ASSUMPTION_STATUS_LABEL: Record<AssumptionStatus, string> = {
   INVALIDATED: "Invalidated",
 };
 
+export const OUTCOME_STATUSES = [
+  "PROPOSED",
+  "CONFIRMED",
+  "ACHIEVED",
+  "RETIRED",
+] as const;
+export type OutcomeStatus = (typeof OUTCOME_STATUSES)[number];
+
+export const CAPABILITY_STATUSES = ["PROPOSED", "CONFIRMED", "REJECTED"] as const;
+export type CapabilityStatus = (typeof CAPABILITY_STATUSES)[number];
+
+export const SLICE_STATUSES = [
+  "PROPOSED",
+  "APPROVED",
+  "IN_PROGRESS",
+  "COMPLETED",
+] as const;
+export type SliceStatus = (typeof SLICE_STATUSES)[number];
+
+export const NFR_CATEGORIES = [
+  "PERFORMANCE",
+  "SECURITY",
+  "PRIVACY",
+  "ACCESSIBILITY",
+  "AVAILABILITY",
+  "SCALABILITY",
+  "AUDITABILITY",
+  "COMPLIANCE",
+  "USABILITY",
+  "OTHER",
+] as const;
+export type NfrCategory = (typeof NFR_CATEGORIES)[number];
+
+export const REQUIREMENT_ITEM_STATUSES = [
+  "PROPOSED",
+  "CONFIRMED",
+  "REJECTED",
+] as const;
+export type RequirementItemStatus = (typeof REQUIREMENT_ITEM_STATUSES)[number];
+
+export const QUESTION_STATUSES = ["OPEN", "ANSWERED", "CLOSED"] as const;
+export type QuestionStatus = (typeof QUESTION_STATUSES)[number];
+
+export const DEFINITION_STATUSES = [
+  "NOT_STARTED",
+  "IN_PROGRESS",
+  "READY_FOR_REVIEW",
+  "APPROVED",
+] as const;
+export type DefinitionStatus = (typeof DEFINITION_STATUSES)[number];
+
+export const PROPOSAL_STATUSES = [
+  "OPEN",
+  "PARTIALLY_COMMITTED",
+  "COMMITTED",
+  "REJECTED",
+  "SUPERSEDED",
+] as const;
+export type ProposalStatus = (typeof PROPOSAL_STATUSES)[number];
+
+export const WORK_ITEM_PROVENANCE = [
+  "HUMAN_CREATED",
+  "AI_PROPOSAL",
+  "AI_ACCEPTED",
+] as const;
+export type WorkItemProvenance = (typeof WORK_ITEM_PROVENANCE)[number];
+
+export const REQUIREMENT_ORIGINS = [
+  "AI_PROPOSAL",
+  "HUMAN_CONFIRMED",
+  "HUMAN_CREATED",
+] as const;
+export type RequirementOrigin = (typeof REQUIREMENT_ORIGINS)[number];
+
+export const DEFINITION_SECTIONS = [
+  "outcomes",
+  "capabilities",
+  "epics",
+  "features",
+  "stories",
+  "acceptanceCriteria",
+  "nfrs",
+  "firstSlice",
+  "assumptions",
+  "questions",
+  "dependencies",
+] as const;
+export type DefinitionSection = (typeof DEFINITION_SECTIONS)[number];
+
+export const REVIEW_STATUSES = ["PENDING", "ACCEPTED", "REJECTED"] as const;
+export type ReviewStatus = (typeof REVIEW_STATUSES)[number];
+
+export const READINESS_AREAS = [
+  { key: "outcomeClarity", label: "Outcome clarity" },
+  { key: "capabilityCoverage", label: "Capability coverage" },
+  { key: "scopeClarity", label: "Scope clarity" },
+  { key: "storyQuality", label: "Story quality" },
+  { key: "acceptanceQuality", label: "Acceptance criteria quality" },
+  { key: "dependencies", label: "Dependencies" },
+  { key: "openQuestions", label: "Open questions" },
+  { key: "assumptions", label: "Assumptions" },
+  { key: "nonFunctional", label: "Non-functional requirements" },
+  { key: "firstSlice", label: "First-slice coherence" },
+] as const;
+export type ReadinessAreaKey = (typeof READINESS_AREAS)[number]["key"];
+
 export const BRIEF_ORIGIN_LABEL: Record<BriefOrigin, string> = {
   AI_PROPOSAL: "Proposed",
   HUMAN_CONFIRMED: "Confirmed",
   UNRESOLVED: "Unresolved",
+};
+
+export const OUTCOME_STATUS_LABEL: Record<OutcomeStatus, string> = {
+  PROPOSED: "Proposed",
+  CONFIRMED: "Confirmed",
+  ACHIEVED: "Achieved",
+  RETIRED: "Retired",
+};
+
+export const CAPABILITY_STATUS_LABEL: Record<CapabilityStatus, string> = {
+  PROPOSED: "Proposed",
+  CONFIRMED: "Confirmed",
+  REJECTED: "Rejected",
+};
+
+export const SLICE_STATUS_LABEL: Record<SliceStatus, string> = {
+  PROPOSED: "Proposed",
+  APPROVED: "Approved",
+  IN_PROGRESS: "In progress",
+  COMPLETED: "Completed",
+};
+
+export const NFR_CATEGORY_LABEL: Record<NfrCategory, string> = {
+  PERFORMANCE: "Performance",
+  SECURITY: "Security",
+  PRIVACY: "Privacy",
+  ACCESSIBILITY: "Accessibility",
+  AVAILABILITY: "Availability",
+  SCALABILITY: "Scalability",
+  AUDITABILITY: "Auditability",
+  COMPLIANCE: "Compliance",
+  USABILITY: "Usability",
+  OTHER: "Other",
+};
+
+export const REQUIREMENT_ITEM_STATUS_LABEL: Record<RequirementItemStatus, string> = {
+  PROPOSED: "Proposed",
+  CONFIRMED: "Confirmed",
+  REJECTED: "Rejected",
+};
+
+export const QUESTION_STATUS_LABEL: Record<QuestionStatus, string> = {
+  OPEN: "Open",
+  ANSWERED: "Answered",
+  CLOSED: "Closed",
+};
+
+export const DEFINITION_STATUS_LABEL: Record<DefinitionStatus, string> = {
+  NOT_STARTED: "Not started",
+  IN_PROGRESS: "In progress",
+  READY_FOR_REVIEW: "Ready for review",
+  APPROVED: "Approved",
+};
+
+export const PROVENANCE_LABEL: Record<WorkItemProvenance, string> = {
+  HUMAN_CREATED: "Human created",
+  AI_PROPOSAL: "AI proposed",
+  AI_ACCEPTED: "AI generated, human accepted",
+};
+
+export const REQUIREMENT_ORIGIN_LABEL: Record<RequirementOrigin, string> = {
+  AI_PROPOSAL: "AI proposed",
+  HUMAN_CONFIRMED: "Human confirmed",
+  HUMAN_CREATED: "Human created",
+};
+
+export const DEFINITION_SECTION_LABEL: Record<DefinitionSection, string> = {
+  outcomes: "Outcomes",
+  capabilities: "Capabilities",
+  epics: "Epics",
+  features: "Features",
+  stories: "Stories",
+  acceptanceCriteria: "Acceptance criteria",
+  nfrs: "Non-functional requirements",
+  firstSlice: "First product slice",
+  assumptions: "Assumptions",
+  questions: "Open questions",
+  dependencies: "Dependencies",
 };
 
 export const BRIEF_SECTION_LABEL: Record<BriefSection, string> = {
@@ -337,7 +541,8 @@ export const AGENT_CATALOG: Record<
   },
   REQUIREMENTS: {
     name: "Requirements Agent",
-    responsibility: "Draft requirements and acceptance criteria for review.",
+    responsibility:
+      "Turn an approved product brief into an outcome-driven, traceable product definition.",
   },
   ARCHITECTURE: {
     name: "Architecture Agent",

@@ -20,6 +20,16 @@ function toSummary(row: {
   status: WorkItemSummary["status"];
   stage: WorkItemSummary["stage"];
   priority: WorkItemSummary["priority"];
+  provenance: WorkItemSummary["provenance"];
+  persona: string;
+  userNeed: string;
+  userValue: string;
+  priorityAssigned: boolean;
+  dependenciesIdentified: boolean;
+  assumptionsNoted: boolean;
+  humanLocked: boolean;
+  capabilityId: string | null;
+  sliceId: string | null;
   createdAt: Date;
   updatedAt: Date;
   product: { name: string };
@@ -35,6 +45,16 @@ function toSummary(row: {
     status: row.status,
     stage: row.stage,
     priority: row.priority,
+    provenance: row.provenance,
+    persona: row.persona,
+    userNeed: row.userNeed,
+    userValue: row.userValue,
+    priorityAssigned: row.priorityAssigned,
+    dependenciesIdentified: row.dependenciesIdentified,
+    assumptionsNoted: row.assumptionsNoted,
+    humanLocked: row.humanLocked,
+    capabilityId: row.capabilityId,
+    sliceId: row.sliceId,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -78,6 +98,8 @@ export async function insertWorkItem(input: CreateWorkItemInput) {
       status: input.status ?? "DRAFT",
       stage: input.stage,
       priority: input.priority ?? "MEDIUM",
+      priorityAssigned: true,
+      provenance: "HUMAN_CREATED",
     },
     include: summaryInclude,
   });
@@ -93,6 +115,8 @@ export async function saveWorkItem(input: UpdateWorkItemInput) {
       status: input.status,
       stage: input.stage,
       priority: input.priority,
+      priorityAssigned: true,
+      humanLocked: true,
     },
     include: summaryInclude,
   });
@@ -176,5 +200,12 @@ export async function queryDependencyEdges(
 export async function insertDependency(workItemId: string, dependsOnId: string) {
   await db.workItemDependency.create({
     data: { workItemId, dependsOnId },
+  });
+}
+
+export async function markDependenciesIdentified(workItemId: string) {
+  await db.workItem.update({
+    where: { id: workItemId },
+    data: { dependenciesIdentified: true },
   });
 }

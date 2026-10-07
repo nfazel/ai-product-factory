@@ -1,6 +1,7 @@
 import type {
   Priority,
   ProductStage,
+  WorkItemProvenance,
   WorkItemStatus,
   WorkItemType,
 } from "@/domain/constants";
@@ -16,6 +17,16 @@ export type WorkItemSummary = {
   status: WorkItemStatus;
   stage: ProductStage;
   priority: Priority;
+  provenance: WorkItemProvenance;
+  persona: string;
+  userNeed: string;
+  userValue: string;
+  priorityAssigned: boolean;
+  dependenciesIdentified: boolean;
+  assumptionsNoted: boolean;
+  humanLocked: boolean;
+  capabilityId: string | null;
+  sliceId: string | null;
   createdAt: Date;
   updatedAt: Date;
 };

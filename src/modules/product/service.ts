@@ -5,6 +5,7 @@ import {
   STAGE_META,
 } from "@/domain/constants";
 import { recordActivity } from "@/modules/activity/service";
+import { buildProgressionBlockers } from "@/modules/requirements/gates";
 import { DomainError } from "@/modules/shared/errors";
 import {
   countProducts,
@@ -62,6 +63,12 @@ export async function updateProduct(input: UpdateProductInput) {
     changes.push(`status to ${PRODUCT_STATUS_LABEL[input.status]}`);
   }
   if (existing.currentStage !== input.currentStage) {
+    if (input.currentStage === "BUILD") {
+      const gate = await buildProgressionBlockers(existing.id);
+      if (gate.reasons.length > 0) {
+        throw new DomainError(gate.reasons.join(" "));
+      }
+    }
     changes.push(`stage to ${STAGE_META[input.currentStage].label}`);
   }
 

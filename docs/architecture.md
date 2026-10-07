@@ -28,6 +28,7 @@ Rules:
 | Identity | `getCurrentActor()`. The only place a future session is read. |
 | Product | Product definition, status, and current stage. |
 | Discovery | Discovery sessions, messages, product briefs, and assumptions. |
+| Requirements | Outcomes, capabilities, proposals, the first slice, readiness, and the requirements runner. |
 | AI | Provider interface. The OpenAI implementation is server-side only. |
 | Work item | Backlog items, hierarchy, and dependencies. |
 | Acceptance | Criteria on a work item, including pass and fail. |
@@ -49,10 +50,13 @@ A stage before the product's current stage is completed. The current stage is hi
 
 Work item hierarchy:
 
-- An epic has no parent.
+- An epic has no parent. It can point at a product capability.
 - A feature belongs to an epic.
 - A story belongs to a feature.
 - A task or defect may sit under an epic, feature, story, or, for a defect, a task.
+- A capability belongs to an outcome. An outcome can point at the product brief that justified it.
+
+Moving the product to Build is refused until the current brief is approved, a product-definition approval is approved, and a first product slice is approved. That check lives in the product update path as well as the Definition page.
 
 ## Activity
 
@@ -78,9 +82,10 @@ The log stores the actor name. Until authentication exists, that name is **Local
 The catalogue in `src/domain/constants.ts` names the agents:
 
 - Product Discovery — implemented
-- Requirements, Architecture, Security, Planning, Coding, Testing, and Review — not configured
+- Requirements — implemented
+- Architecture, Security, Planning, Coding, Testing, and Review — not configured
 
-Product Discovery is **CONFIGURED** only when `OPENAI_API_KEY` is set on the server, or when a test supplies a provider. Every other agent stays **NOT CONFIGURED**. The control centre reads run counts, completed runs, failed runs, and average duration from `AgentRun`. Token counts are stored when the provider returns them. Cost is left empty rather than guessed.
+Product Discovery and the Requirements Agent are **CONFIGURED** only when `OPENAI_API_KEY` is set on the server, or when a test supplies a provider. Every other agent stays **NOT CONFIGURED**. The control centre reads run counts, completed runs, failed runs, and average duration from `AgentRun` for both implemented agents. Token counts are stored when the provider returns them. Cost is left empty rather than guessed.
 
 A runner implements:
 
@@ -95,7 +100,7 @@ type AgentRunner = {
 }
 ```
 
-`ensureAgentsRegistered()` adds the Product Discovery runner. `executeAgent` looks up that runner. If it is missing or not configured, it throws `AgentNotConfiguredError` before inserting an `AgentRun`. `POST /api/agent-runs` returns that refusal and does not fabricate output.
+`ensureAgentsRegistered()` adds the Product Discovery and Requirements runners. `executeAgent` looks up the runner for the requested type. If it is missing or not configured, it throws `AgentNotConfiguredError` before inserting an `AgentRun`. `POST /api/agent-runs` returns that refusal and does not fabricate output.
 
 When a configured runner executes:
 
@@ -107,6 +112,8 @@ When a configured runner executes:
 
 The discovery runner may update the product brief and assumptions. It cannot approve them, change `currentStage`, or delete a human confirmation. See [product-discovery-agent.md](product-discovery-agent.md).
 
+The requirements runner writes an uncommitted proposal. It does not approve outcomes, the first slice, or the product definition, and it does not change `currentStage`. Human-confirmed records are not overwritten. See [requirements-agent.md](requirements-agent.md) and [traceability.md](traceability.md).
+
 ## Product brief storage
 
 Assumptions are their own table. Each one has impact, confidence, and a status a person can change (`UNVALIDATED`, `VALIDATED`, `INVALIDATED`). That lifecycle does not fit a JSON blob.
@@ -115,7 +122,7 @@ The other multi-value brief sections are ordered notes without their own workflo
 
 ## What this application does not do
 
-- No Requirements, Architecture, Coding, or Testing agent
+- No Architecture, Coding, or Testing agent
 - No GitHub integration
 - No autonomous coding
 - No automated test execution of the product under construction

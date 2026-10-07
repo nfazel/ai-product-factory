@@ -6,6 +6,7 @@ import {
   WorkItemStatusBadge,
   WorkItemTypeBadge,
 } from "@/components/status/badges";
+import { PROVENANCE_LABEL } from "@/domain/constants";
 import type { WorkItemSummary } from "@/modules/work-item/types";
 
 export function WorkItemRow({
@@ -27,6 +28,9 @@ export function WorkItemRow({
         ) : null}
       </div>
       <div className="flex flex-wrap items-center gap-1.5">
+        <span className="rounded-full bg-stone-100 px-2 py-0.5 text-xs text-stone-700">
+          {PROVENANCE_LABEL[item.provenance]}
+        </span>
         <WorkItemTypeBadge type={item.type} />
         <WorkItemStatusBadge status={item.status} />
         <PriorityBadge priority={item.priority} />

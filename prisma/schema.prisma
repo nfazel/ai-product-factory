@@ -89,6 +89,14 @@ model Product {
   agentRuns         AgentRun[]
   discoverySessions DiscoverySession[]
   productBriefs     ProductBrief[]
+  definition        ProductDefinition?
+  definitionProposals DefinitionProposal[]
+  outcomes          ProductOutcome[]
+  capabilities      ProductCapability[]
+  slices            ProductSlice[]
+  nonFunctionalRequirements NonFunctionalRequirement[]
+  requirementQuestions RequirementQuestion[]
+  requirementAssumptions RequirementAssumption[]
 
   @@index([status])
   @@index([updatedAt])
@@ -104,14 +112,28 @@ model WorkItem {
   status      WorkItemStatus @default(DRAFT)
   stage       ProductStage   @default(EXPLORE)
   priority    Priority       @default(MEDIUM)
+  capabilityId String?
+  sliceId      String?
+  provenance   WorkItemProvenance @default(HUMAN_CREATED)
+  persona      String             @default("")
+  userNeed     String             @default("")
+  userValue    String             @default("")
+  priorityAssigned Boolean        @default(false)
+  dependenciesIdentified Boolean  @default(false)
+  assumptionsNoted Boolean        @default(false)
+  humanLocked  Boolean            @default(false)
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
 
   product    Product    @relation(fields: [productId], references: [id], onDelete: Cascade)
   parent     WorkItem?  @relation("WorkItemHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
   children   WorkItem[] @relation("WorkItemHierarchy")
+  capability ProductCapability? @relation(fields: [capabilityId], references: [id], onDelete: SetNull)
+  slice      ProductSlice?      @relation(fields: [sliceId], references: [id], onDelete: SetNull)
 
   acceptanceCriteria AcceptanceCriterion[]
+  requirementQuestions RequirementQuestion[]
+  requirementAssumptions RequirementAssumption[]
   decisions          Decision[]
   approvals          Approval[]
   activities         Activity[]
@@ -124,6 +146,8 @@ model WorkItem {
   @@index([status])
   @@index([type])
   @@index([updatedAt])
+  @@index([capabilityId])
+  @@index([sliceId])
 }
 
 model WorkItemDependency {
@@ -345,6 +369,7 @@ model ProductBrief {
   product     Product           @relation(fields: [productId], references: [id], onDelete: Cascade)
   session     DiscoverySession? @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   assumptions Assumption[]
+  outcomes    ProductOutcome[]
 
   @@unique([productId, version])
   @@index([productId])
@@ -366,6 +391,235 @@ model Assumption {
   brief ProductBrief @relation(fields: [briefId], references: [id], onDelete: Cascade)
 
   @@index([briefId])
+  @@index([status])
+  @@index([impact])
+}
+
+enum OutcomeStatus {
+  PROPOSED
+  CONFIRMED
+  ACHIEVED
+  RETIRED
+}
+
+enum CapabilityStatus {
+  PROPOSED
+  CONFIRMED
+  REJECTED
+}
+
+enum SliceStatus {
+  PROPOSED
+  APPROVED
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum NfrCategory {
+  PERFORMANCE
+  SECURITY
+  PRIVACY
+  ACCESSIBILITY
+  AVAILABILITY
+  SCALABILITY
+  AUDITABILITY
+  COMPLIANCE
+  USABILITY
+  OTHER
+}
+
+enum RequirementItemStatus {
+  PROPOSED
+  CONFIRMED
+  REJECTED
+}
+
+enum QuestionStatus {
+  OPEN
+  ANSWERED
+  CLOSED
+}
+
+enum DefinitionStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  READY_FOR_REVIEW
+  APPROVED
+}
+
+enum ProposalStatus {
+  OPEN
+  PARTIALLY_COMMITTED
+  COMMITTED
+  REJECTED
+  SUPERSEDED
+}
+
+enum WorkItemProvenance {
+  HUMAN_CREATED
+  AI_PROPOSAL
+  AI_ACCEPTED
+}
+
+enum RequirementOrigin {
+  AI_PROPOSAL
+  HUMAN_CONFIRMED
+  HUMAN_CREATED
+}
+
+model ProductDefinition {
+  id            String           @id @default(cuid())
+  productId     String           @unique
+  status        DefinitionStatus @default(NOT_STARTED)
+  seededDemo    Boolean          @default(false)
+  reviewSummary String           @default("")
+  approvedAt    DateTime?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+}
+
+model DefinitionProposal {
+  id         String         @id @default(cuid())
+  productId  String
+  agentRunId String?
+  status     ProposalStatus @default(OPEN)
+  summary    String         @default("")
+  payload    Json
+  seededDemo Boolean        @default(false)
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId, createdAt])
+  @@index([status])
+}
+
+model ProductOutcome {
+  id             String        @id @default(cuid())
+  productId      String
+  title          String
+  description    String        @default("")
+  successMeasure String        @default("")
+  targetValue    String        @default("")
+  status         OutcomeStatus @default(PROPOSED)
+  sourceBriefId  String?
+  humanLocked    Boolean       @default(false)
+  origin         RequirementOrigin @default(AI_PROPOSAL)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  product      Product             @relation(fields: [productId], references: [id], onDelete: Cascade)
+  sourceBrief  ProductBrief?       @relation(fields: [sourceBriefId], references: [id], onDelete: SetNull)
+  capabilities ProductCapability[]
+
+  @@index([productId])
+  @@index([status])
+  @@index([sourceBriefId])
+}
+
+model ProductCapability {
+  id          String           @id @default(cuid())
+  productId   String
+  outcomeId   String
+  name        String
+  description String           @default("")
+  status      CapabilityStatus @default(PROPOSED)
+  priority    Priority         @default(MEDIUM)
+  humanLocked Boolean          @default(false)
+  origin      RequirementOrigin @default(AI_PROPOSAL)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  product  Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
+  outcome  ProductOutcome @relation(fields: [outcomeId], references: [id], onDelete: Cascade)
+  workItems WorkItem[]
+
+  @@index([productId])
+  @@index([outcomeId])
+  @@index([status])
+}
+
+model ProductSlice {
+  id          String      @id @default(cuid())
+  productId   String
+  name        String
+  description String      @default("")
+  rationale   String      @default("")
+  status      SliceStatus @default(PROPOSED)
+  humanLocked Boolean     @default(false)
+  origin      RequirementOrigin @default(AI_PROPOSAL)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  product   Product    @relation(fields: [productId], references: [id], onDelete: Cascade)
+  workItems WorkItem[]
+
+  @@index([productId])
+  @@index([status])
+}
+
+model NonFunctionalRequirement {
+  id          String                @id @default(cuid())
+  productId   String
+  category    NfrCategory
+  title       String
+  description String                @default("")
+  measure     String                @default("")
+  status      RequirementItemStatus @default(PROPOSED)
+  source      RequirementOrigin     @default(AI_PROPOSAL)
+  humanLocked Boolean               @default(false)
+  createdAt   DateTime              @default(now())
+  updatedAt   DateTime              @updatedAt
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+  @@index([category])
+  @@index([status])
+}
+
+model RequirementQuestion {
+  id          String           @id @default(cuid())
+  productId   String
+  workItemId  String?
+  question    String
+  reason      String           @default("")
+  impact      AssumptionImpact @default(MEDIUM)
+  status      QuestionStatus   @default(OPEN)
+  answer      String           @default("")
+  answeredBy  String           @default("")
+  createdAt   DateTime         @default(now())
+  resolvedAt  DateTime?
+
+  product  Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  workItem WorkItem? @relation(fields: [workItemId], references: [id], onDelete: SetNull)
+
+  @@index([productId])
+  @@index([workItemId])
+  @@index([status])
+  @@index([impact])
+}
+
+model RequirementAssumption {
+  id          String           @id @default(cuid())
+  productId   String
+  workItemId  String?
+  description String
+  impact      AssumptionImpact @default(MEDIUM)
+  confidence  SignalLevel      @default(LOW)
+  status      AssumptionStatus @default(UNVALIDATED)
+  origin      RequirementOrigin @default(AI_PROPOSAL)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  product  Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  workItem WorkItem? @relation(fields: [workItemId], references: [id], onDelete: SetNull)
+
+  @@index([productId])
+  @@index([workItemId])
   @@index([status])
   @@index([impact])
 }

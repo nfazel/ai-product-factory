@@ -21,6 +21,7 @@ import {
   UpdateWorkItemForm,
 } from "@/components/work-items/work-item-forms";
 import { formatDateTime } from "@/lib/format";
+import { getStoryTraceability } from "@/modules/requirements/service";
 import { getWorkItemDetail } from "@/modules/work-item/detail";
 import { markDynamic } from "@/server/dynamic";
 
@@ -46,6 +47,10 @@ async function WorkItem({ params }: { params: Promise<{ id: string }> }) {
 
   const { item, criteria, dependencies, decisions, approvals, activity, agentRuns, productItems } =
     detail;
+  const trace =
+    item.type === "STORY" || item.type === "FEATURE" || item.type === "EPIC"
+      ? await getStoryTraceability(item.id)
+      : null;
 
   return (
     <div className="space-y-6">
@@ -73,7 +78,22 @@ async function WorkItem({ params }: { params: Promise<{ id: string }> }) {
             </p>
           </header>
 
-          <Section title="Acceptance criteria" description="Added by a person. Generation comes later.">
+          {trace ? (
+            <Section
+              title="Traceability"
+              description="Why this item exists, from the story back to the outcome."
+            >
+              <ol className="space-y-2 text-sm">
+                <TraceStep label="Product outcome" value={trace.outcome?.title} href={trace.outcome ? `/products/${item.productId}/definition#outcome-${trace.outcome.id}` : undefined} />
+                <TraceStep label="Capability" value={trace.capability?.name} href={trace.capability ? `/products/${item.productId}/definition#capability-${trace.capability.id}` : undefined} />
+                <TraceStep label="Epic" value={trace.epic?.title} href={trace.epic ? `/work-items/${trace.epic.id}` : undefined} />
+                <TraceStep label="Feature" value={trace.feature?.title} href={trace.feature ? `/work-items/${trace.feature.id}` : undefined} />
+                <TraceStep label="Story" value={trace.story?.title} href={trace.story ? `/work-items/${trace.story.id}` : undefined} />
+              </ol>
+            </Section>
+          ) : null}
+
+          <Section title="Acceptance criteria" description="Observable behaviour a person can test.">
             {criteria.length === 0 ? (
               <p className="text-sm text-muted-foreground">
                 No acceptance criteria yet.
@@ -237,6 +257,29 @@ async function WorkItem({ params }: { params: Promise<{ id: string }> }) {
         </aside>
       </div>
     </div>
+  );
+}
+
+function TraceStep({
+  label,
+  value,
+  href,
+}: {
+  label: string;
+  value?: string | null;
+  href?: string;
+}) {
+  return (
+    <li>
+      <p className="text-xs text-muted-foreground">{label}</p>
+      {value && href ? (
+        <Link href={href} className="font-medium hover:underline">
+          {value}
+        </Link>
+      ) : (
+        <p className="text-muted-foreground">{value || "Not linked yet."}</p>
+      )}
+    </li>
   );
 }
 

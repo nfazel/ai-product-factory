@@ -16,6 +16,7 @@ import {
   findWorkItemRow,
   insertDependency,
   insertWorkItem,
+  markDependenciesIdentified,
   queryAttentionItems,
   queryDependencies,
   queryDependencyEdges,
@@ -173,6 +174,7 @@ export async function addWorkItemDependency(
   }
 
   await insertDependency(workItemId, dependsOnId);
+  await markDependenciesIdentified(workItemId);
   await recordActivity({
     productId: item.productId,
     workItemId: item.id,
