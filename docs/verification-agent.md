@@ -117,4 +117,4 @@ Product Prove Readiness does not move the stage. For the approved slice it check
 
 ## What it does not do
 
-The agent does not push, merge, deploy, scan for vulnerabilities, run a performance harness, drive a browser, or ask the Coding Agent to fix a defect. Those steps come later. A future feedback loop is defect, human triage, a coding task, a fix, then a new independent verification.
+The agent does not push, merge, deploy, scan for vulnerabilities, run a performance harness, drive a browser, or ask the Coding Agent to fix a defect. A later commit makes the verification stale. A pull request whose head does not match the verified commit is not treated as verified. See [pull-request-lifecycle.md](pull-request-lifecycle.md). A future feedback loop is defect, human triage, a coding task, a fix, then a new independent verification.

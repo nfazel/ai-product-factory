@@ -20,6 +20,13 @@ function daysAgo(days: number, hours = 10) {
 }
 
 async function main() {
+  await prisma.sourceControlEvidence.deleteMany();
+  await prisma.pullRequestComment.deleteMany();
+  await prisma.pullRequestReview.deleteMany();
+  await prisma.pullRequestCheck.deleteMany();
+  await prisma.pullRequestRecord.deleteMany();
+  await prisma.publishedChange.deleteMany();
+  await prisma.sourceControlConnection.deleteMany();
   await prisma.verificationApproval.deleteMany();
   await prisma.verificationEvidence.deleteMany();
   await prisma.verificationExecution.deleteMany();
@@ -1833,6 +1840,101 @@ async function seedVerificationDemo(input: {
       description:
         "Demo data. Prepared a sample verification for the simple claim slice. Not a Testing & Verification Agent run.",
       actor: "Demo seed",
+      createdAt: input.createdAt,
+    },
+  });
+  const repository = await prisma.repository.create({
+    data: {
+      productId: input.productId,
+      name: "claims-demo",
+      provider: "LOCAL",
+      owner: "demo-owner",
+      repositoryName: "claims-demo",
+      localPath: "",
+      defaultBranch: "main",
+      status: "UNAVAILABLE",
+      connectionStatus: "UNAVAILABLE",
+      connectionMessage: "Demo data. This repository was not connected to GitHub.",
+      createdAt: input.createdAt,
+      updatedAt: input.createdAt,
+    },
+  });
+  const published = await prisma.publishedChange.create({
+    data: {
+      productId: input.productId,
+      implementationTaskId: input.taskId,
+      repositoryId: repository.id,
+      localBranch: "demo/submit-claim",
+      remoteBranch: "demo/submit-claim",
+      localCommitSha: "",
+      remoteCommitSha: "",
+      status: "PUBLISHED",
+      demo: true,
+      publishedBy: "Demo seed",
+      publishedAt: input.createdAt,
+      createdAt: input.createdAt,
+      updatedAt: input.createdAt,
+    },
+  });
+  const pullRequest = await prisma.pullRequestRecord.create({
+    data: {
+      productId: input.productId,
+      repositoryId: repository.id,
+      publishedChangeId: published.id,
+      providerPullRequestId: "demo-pr",
+      number: 7,
+      url: "",
+      title: "Demo: submit a simple claim",
+      body: "DEMO DATA. This pull request was not created on GitHub.",
+      baseBranch: "main",
+      headBranch: "demo/submit-claim",
+      state: "OPEN",
+      author: "Demo reviewer",
+      protection: {
+        requiredApprovals: 1,
+        requiredChecks: ["build"],
+        conversationResolution: false,
+        restrictions: "",
+      },
+      demo: true,
+      createdAt: input.createdAt,
+      updatedAt: input.createdAt,
+    },
+  });
+  await prisma.pullRequestCheck.create({
+    data: {
+      pullRequestRecordId: pullRequest.id,
+      providerCheckId: "demo-build",
+      name: "build",
+      status: "COMPLETED",
+      conclusion: "SUCCESS",
+      detailsUrl: "",
+      source: "DEMO",
+      createdAt: input.createdAt,
+      updatedAt: input.createdAt,
+    },
+  });
+  await prisma.pullRequestReview.create({
+    data: {
+      pullRequestRecordId: pullRequest.id,
+      providerReviewId: "demo-review",
+      reviewer: "Demo reviewer",
+      state: "APPROVED",
+      body: "DEMO DATA. This review was not submitted on GitHub.",
+      submittedAt: input.createdAt,
+      createdAt: input.createdAt,
+      updatedAt: input.createdAt,
+    },
+  });
+  await prisma.sourceControlEvidence.create({
+    data: {
+      productId: input.productId,
+      publishedChangeId: published.id,
+      pullRequestRecordId: pullRequest.id,
+      type: "PULL_REQUEST_CREATED",
+      source: "DEMO",
+      description: "DEMO DATA. Seeded pull request for the simple claim slice. GitHub was not contacted.",
+      result: "DEMO",
       createdAt: input.createdAt,
     },
   });

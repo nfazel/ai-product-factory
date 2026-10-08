@@ -4,7 +4,7 @@ AI Product Factory is the foundation of an AI-native software product developmen
 
 **Explore → Define → Build → Prove → Ship → Learn**
 
-This repository is the product factory with six agents enabled. Product Discovery turns an incomplete idea into a Product Brief during Explore. The Requirements Agent turns an approved brief into an outcome-driven product definition during Define. The Architecture Agent, inside Build, turns an approved definition and an approved first slice into a solution architecture and an implementation plan. The Security & Engineering Governance Agent, also inside Build, independently reviews that approved architecture and plan before coding. The Coding Agent, still inside Build, executes one approved implementation task in an isolated Git worktree. The Testing & Verification Agent independently checks that completed work against the approved acceptance criteria. Task-level verification can start during Build. Prove is where the approved product slice is assessed as a whole. The review agent is not implemented. GitHub integration, push, and merge are not implemented.
+This repository is the product factory with six agents enabled. Product Discovery turns an incomplete idea into a Product Brief during Explore. The Requirements Agent turns an approved brief into an outcome-driven product definition during Define. The Architecture Agent, inside Build, turns an approved definition and an approved first slice into a solution architecture and an implementation plan. The Security & Engineering Governance Agent, also inside Build, independently reviews that approved architecture and plan before coding. The Coding Agent, still inside Build, executes one approved implementation task in an isolated Git worktree. The Testing & Verification Agent independently checks that completed work against the approved acceptance criteria. Task-level verification can start during Build. Prove is where the approved product slice is assessed as a whole. The review agent is not implemented. GitHub publication is a human-triggered integration. Automatic merge is not implemented.
 
 Humans remain in control of stage changes, decisions, and approval gates. No agent can approve its own work or move the product stage.
 
@@ -41,6 +41,8 @@ docs/implementation-planning.md  Vertical-slice implementation plans
 docs/traceability.md     Outcome to verification links
 docs/verification-agent.md       Independent verification, workspace, and verdict
 docs/verification-evidence.md    Coverage, evidence, and what is not claimed
+docs/github-integration.md       GitHub connection, publication, and evidence
+docs/pull-request-lifecycle.md   Pull request readiness and human merge
 ```
 
 ## Database setup
@@ -84,6 +86,11 @@ cp .env.example .env
 | `CODEBASE_CONTEXT_ROOT` | Optional absolute path. When set, Build can read that directory's `package.json` and top-level folder names. It cannot browse an arbitrary path |
 | `PRODUCT_REPOSITORY_ROOT` | Optional absolute path to a local Git repository the Coding Agent and the Testing & Verification Agent may use. The browser cannot set this |
 | `PRODUCT_REPOSITORY_ALLOW_FACTORY` | Optional. Set to `true` only when a local demo should use this application's own source tree |
+| `GITHUB_TOKEN` | Optional local personal access token. Server-only. Never put this in the browser |
+| `GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`, `GITHUB_APP_PRIVATE_KEY` | Optional GitHub App credentials. Preferred for a real installation. Server-only |
+| `GITHUB_OWNER`, `GITHUB_REPOSITORY` | Repository the factory may publish to after **Validate Connection** |
+| `GITHUB_MINIMUM_HUMAN_APPROVALS` | Optional. Defaults to 1. Branch protection can require more |
+| `GITHUB_SERVICE_ACCOUNT` | Optional login that must not count as a human reviewer |
 
 The key is read only on the server. The browser never receives it. If it is missing, the app still runs and Discovery says that AI is not configured.
 
@@ -174,4 +181,6 @@ Add `PRODUCT_REPOSITORY_ROOT` to `.env`, then restart the server. Approve the up
 
 ## Later agents
 
-The review agent is not registered. GitHub, push, pull requests, merge, deployment, browser automation, vulnerability scanning, and performance infrastructure are not implemented. Authentication will replace `getCurrentActor()` and the pass-through `src/proxy.ts` without rewriting the domain model.
+The review agent is not registered. GitHub publication and pull requests are a human-triggered integration: the factory can publish an approved branch and open a pull request, and a person merges it on GitHub. Automatic merge, deployment, browser automation, vulnerability scanning, and performance infrastructure are not implemented. Authentication will replace `getCurrentActor()` and the pass-through `src/proxy.ts` without rewriting the domain model.
+
+See [docs/github-integration.md](docs/github-integration.md) and [docs/pull-request-lifecycle.md](docs/pull-request-lifecycle.md).

@@ -14,7 +14,7 @@ Before use, the application resolves the real path and checks that:
 - path segments do not contain `..`
 - a symbolic link does not resolve outside the registered root
 
-The stored `Repository` row uses provider `LOCAL`. `GITHUB_FUTURE` is reserved and unused. Status is `CONFIGURED`, `UNAVAILABLE`, or `DISABLED`.
+The stored `Repository` row uses provider `LOCAL` until a person validates GitHub. Provider `GITHUB` is the delivery integration described in [github-integration.md](github-integration.md). Status is `CONFIGURED`, `UNAVAILABLE`, or `DISABLED`. Connection status is separate and is `CONNECTED` only after validation.
 
 `PRODUCT_REPOSITORY_WORKTREE_ROOT` optionally chooses where worktrees are created. It defaults to a directory under the system temp folder, outside both the factory and the target repository. A worktree inside the repository working tree is rejected.
 

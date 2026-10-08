@@ -1,5 +1,11 @@
+import { Suspense } from "react";
+
+import { PageSkeleton } from "@/components/feedback/states";
 import { PageHeader } from "@/components/layout/page-header";
+import { ValidateConnectionButton } from "@/components/source-control/source-control-controls";
 import { getCurrentActor } from "@/modules/identity/actor";
+import { getConnectionSummary } from "@/modules/source-control/service";
+import { markDynamic } from "@/server/dynamic";
 
 export const metadata = { title: "Settings" };
 
@@ -15,7 +21,17 @@ const modules = [
 ];
 
 export default function SettingsPage() {
+  return (
+    <Suspense fallback={<PageSkeleton />}>
+      <Settings />
+    </Suspense>
+  );
+}
+
+async function Settings() {
+  await markDynamic();
   const actor = getCurrentActor();
+  const connection = await getConnectionSummary();
 
   return (
     <div className="space-y-6">
@@ -50,6 +66,42 @@ export default function SettingsPage() {
             stay with people. Future agents may draft work and request
             approval. They will not approve their own output.
           </p>
+        </article>
+        <article className="rounded-2xl border bg-card p-5 lg:col-span-2">
+          <h2 className="text-base font-semibold">Source control</h2>
+          <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
+            <div>
+              <dt className="text-xs text-muted-foreground">Provider</dt>
+              <dd className="mt-1 font-medium">{connection.provider}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-muted-foreground">Connection</dt>
+              <dd className="mt-1 font-medium">{connection.status === "CONNECTED" ? "CONNECTED" : "NOT CONNECTED"}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-muted-foreground">Owner</dt>
+              <dd className="mt-1 font-medium">{connection.owner || "Not configured"}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-muted-foreground">Repository</dt>
+              <dd className="mt-1 font-medium">{connection.repositoryName || "Not configured"}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-muted-foreground">Default branch</dt>
+              <dd className="mt-1 font-medium">{connection.defaultBranch || "Not validated"}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-muted-foreground">Status detail</dt>
+              <dd className="mt-1 font-medium">{connection.status}</dd>
+            </div>
+          </dl>
+          <p className="mt-3 text-sm leading-6 text-muted-foreground">{connection.message}</p>
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">
+            Credentials stay in server environment variables. This page cannot show or edit a token.
+          </p>
+          <div className="mt-4">
+            <ValidateConnectionButton />
+          </div>
         </article>
         <article className="rounded-2xl border bg-card p-5 lg:col-span-2">
           <h2 className="text-base font-semibold">Modules</h2>

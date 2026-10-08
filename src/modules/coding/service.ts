@@ -422,6 +422,10 @@ export async function createCodingCommit(productId: string, workspaceId: string)
     where: { id: workspace.implementationTaskId },
     data: { status: "COMPLETED" },
   });
+  await db.codeChangeApproval.update({
+    where: { id: approval.id },
+    data: { headCommit: sha },
+  });
   await noteVerificationCommitChanged(workspace.implementationTaskId, sha);
   await recordActivity({
     productId,

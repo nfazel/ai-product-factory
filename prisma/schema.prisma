@@ -110,6 +110,9 @@ model Product {
   repositoryWorkspaces RepositoryWorkspace[]
   verificationSessions VerificationSession[]
   integratedVerifications IntegratedVerificationSession[]
+  publishedChanges PublishedChange[]
+  pullRequests PullRequestRecord[]
+  sourceControlEvidence SourceControlEvidence[]
 
   @@index([status])
   @@index([updatedAt])
@@ -1091,6 +1094,7 @@ model ImplementationTask {
   workspaces   RepositoryWorkspace[]
   codingContracts CodingExecutionContract[]
   verificationSessions VerificationSession[]
+  publishedChanges PublishedChange[]
 
   @@index([implementationPlanId])
   @@index([workItemId])
@@ -1474,7 +1478,67 @@ model GovernanceProposal {
 
 enum RepositoryProvider {
   LOCAL
-  GITHUB_FUTURE
+  GITHUB
+}
+
+enum SourceControlConnectionStatus {
+  CONNECTED
+  MISCONFIGURED
+  UNAVAILABLE
+}
+
+enum PublishedChangeStatus {
+  READY
+  PUBLISHED
+  DIVERGED
+  FAILED
+  SUPERSEDED
+}
+
+enum PullRequestState {
+  DRAFT
+  OPEN
+  CLOSED
+  MERGED
+}
+
+enum PullRequestCheckStatus {
+  QUEUED
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum PullRequestCheckConclusion {
+  SUCCESS
+  FAILURE
+  NEUTRAL
+  CANCELLED
+  SKIPPED
+  TIMED_OUT
+  ACTION_REQUIRED
+  UNKNOWN
+}
+
+enum PullRequestReviewState {
+  APPROVED
+  CHANGES_REQUESTED
+  COMMENTED
+  DISMISSED
+  UNKNOWN
+}
+
+enum SourceControlEvidenceType {
+  BRANCH_PUBLISHED
+  REMOTE_COMMIT
+  PULL_REQUEST_CREATED
+  CI_CHECK
+  HUMAN_REVIEW
+  PULL_REQUEST_MERGED
+}
+
+enum SourceControlEvidenceSource {
+  GITHUB
+  DEMO
 }
 
 enum RepositoryRecordStatus {
@@ -1558,23 +1622,33 @@ enum CodingToolAction {
 }
 
 model Repository {
-  id             String                 @id @default(cuid())
-  productId      String
-  name           String
-  provider       RepositoryProvider     @default(LOCAL)
-  repositoryUrl  String                 @default("")
-  defaultBranch  String                 @default("main")
-  localPath      String
-  status         RepositoryRecordStatus @default(UNAVAILABLE)
-  createdAt      DateTime               @default(now())
-  updatedAt      DateTime               @updatedAt
+  id                    String                         @id @default(cuid())
+  productId             String
+  name                  String
+  provider              RepositoryProvider             @default(LOCAL)
+  owner                 String                         @default("")
+  repositoryName        String                         @default("")
+  repositoryUrl         String                         @default("")
+  defaultBranch         String                         @default("main")
+  remoteName            String                         @default("origin")
+  installationId        String                         @default("")
+  localPath             String
+  status                RepositoryRecordStatus         @default(UNAVAILABLE)
+  connectionStatus      SourceControlConnectionStatus  @default(UNAVAILABLE)
+  connectionMessage     String                         @default("")
+  minimumHumanApprovals Int                            @default(1)
+  createdAt             DateTime                       @default(now())
+  updatedAt             DateTime                       @updatedAt
 
   product    Product               @relation(fields: [productId], references: [id], onDelete: Cascade)
   workspaces RepositoryWorkspace[]
   verificationWorkspaces VerificationWorkspace[]
+  publishedChanges PublishedChange[]
+  pullRequests PullRequestRecord[]
 
   @@unique([productId])
   @@index([status])
+  @@index([connectionStatus])
 }
 
 model RepositoryWorkspace {
@@ -1608,6 +1682,7 @@ model RepositoryWorkspace {
   revisions  CodingRevision[]
   diff       CodingDiff?
   codeApprovals CodeChangeApproval[]
+  publishedChanges PublishedChange[]
 
   @@index([productId, status])
   @@index([repositoryId])
@@ -2122,4 +2197,165 @@ model IntegratedVerificationSession {
 
   @@index([productId])
   @@index([productSliceId])
+}
+
+model SourceControlConnection {
+  id                    String                        @id @default("factory")
+  provider              RepositoryProvider            @default(GITHUB)
+  owner                 String                        @default("")
+  repositoryName        String                        @default("")
+  repositoryUrl         String                        @default("")
+  defaultBranch         String                        @default("")
+  remoteName            String                        @default("origin")
+  installationId        String                        @default("")
+  status                SourceControlConnectionStatus @default(UNAVAILABLE)
+  message               String                        @default("")
+  minimumHumanApprovals Int                           @default(1)
+  checkedAt             DateTime?
+  createdAt             DateTime                      @default(now())
+  updatedAt             DateTime                      @updatedAt
+}
+
+model PublishedChange {
+  id                   String                @id @default(cuid())
+  productId            String
+  implementationTaskId String
+  repositoryId         String
+  workspaceId          String?
+  localBranch          String                @default("")
+  remoteBranch         String                @default("")
+  localCommitSha       String                @default("")
+  remoteCommitSha      String                @default("")
+  status               PublishedChangeStatus @default(READY)
+  demo                 Boolean               @default(false)
+  publishedBy          String                @default("")
+  publishedAt          DateTime?
+  failureMessage       String                @default("")
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+
+  product      Product               @relation(fields: [productId], references: [id], onDelete: Cascade)
+  task         ImplementationTask    @relation(fields: [implementationTaskId], references: [id], onDelete: Cascade)
+  repository   Repository            @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  workspace    RepositoryWorkspace?  @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  pullRequest  PullRequestRecord?
+
+  @@index([productId])
+  @@index([implementationTaskId])
+  @@index([repositoryId])
+  @@index([status])
+}
+
+model PullRequestRecord {
+  id                   String           @id @default(cuid())
+  productId            String
+  repositoryId         String
+  publishedChangeId    String           @unique
+  providerPullRequestId String          @default("")
+  number               Int
+  url                  String           @default("")
+  title                String           @default("")
+  body                 String           @default("")
+  baseBranch           String           @default("")
+  headBranch           String           @default("")
+  headSha              String           @default("")
+  state                PullRequestState @default(OPEN)
+  author               String           @default("")
+  mergeCommitSha       String           @default("")
+  mergedAt             DateTime?
+  mergedBy             String           @default("")
+  protection           Json             @default("{}")
+  demo                 Boolean          @default(false)
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+
+  product         Product          @relation(fields: [productId], references: [id], onDelete: Cascade)
+  repository      Repository       @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  publishedChange PublishedChange  @relation(fields: [publishedChangeId], references: [id], onDelete: Cascade)
+  checks          PullRequestCheck[]
+  reviews         PullRequestReview[]
+  comments        PullRequestComment[]
+
+  @@index([productId])
+  @@index([repositoryId])
+  @@index([state])
+}
+
+model PullRequestCheck {
+  id                  String                      @id @default(cuid())
+  pullRequestRecordId String
+  providerCheckId     String                      @default("")
+  name                String
+  status              PullRequestCheckStatus      @default(QUEUED)
+  conclusion          PullRequestCheckConclusion  @default(UNKNOWN)
+  startedAt           DateTime?
+  completedAt         DateTime?
+  detailsUrl          String                      @default("")
+  source              SourceControlEvidenceSource @default(GITHUB)
+  createdAt           DateTime                    @default(now())
+  updatedAt           DateTime                    @updatedAt
+
+  pullRequest PullRequestRecord @relation(fields: [pullRequestRecordId], references: [id], onDelete: Cascade)
+
+  @@unique([pullRequestRecordId, providerCheckId])
+  @@index([pullRequestRecordId])
+}
+
+model PullRequestReview {
+  id                  String                 @id @default(cuid())
+  pullRequestRecordId String
+  providerReviewId    String                 @default("")
+  reviewer            String                 @default("")
+  state               PullRequestReviewState @default(UNKNOWN)
+  body                String                 @default("")
+  submittedAt         DateTime?
+  createdAt           DateTime               @default(now())
+  updatedAt           DateTime               @updatedAt
+
+  pullRequest PullRequestRecord @relation(fields: [pullRequestRecordId], references: [id], onDelete: Cascade)
+
+  @@unique([pullRequestRecordId, providerReviewId])
+  @@index([pullRequestRecordId])
+}
+
+model PullRequestComment {
+  id                  String   @id @default(cuid())
+  pullRequestRecordId String
+  providerCommentId   String   @default("")
+  author              String   @default("")
+  body                String   @default("")
+  path                String   @default("")
+  line                Int?
+  classification      String   @default("")
+  summary             String   @default("")
+  recommendedAction   String   @default("")
+  affectedFiles       Json     @default("[]")
+  withinContract      Boolean  @default(false)
+  triaged             Boolean  @default(false)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  pullRequest PullRequestRecord @relation(fields: [pullRequestRecordId], references: [id], onDelete: Cascade)
+
+  @@unique([pullRequestRecordId, providerCommentId])
+  @@index([pullRequestRecordId])
+}
+
+model SourceControlEvidence {
+  id                  String                      @id @default(cuid())
+  productId           String
+  publishedChangeId   String?
+  pullRequestRecordId String?
+  type                SourceControlEvidenceType
+  source              SourceControlEvidenceSource
+  description         String                      @default("")
+  result              String                      @default("")
+  createdAt           DateTime                    @default(now())
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+  @@index([publishedChangeId])
+  @@index([pullRequestRecordId])
+  @@index([type])
 }

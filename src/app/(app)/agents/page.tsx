@@ -3,6 +3,7 @@ import { Suspense } from "react";
 import { PageSkeleton } from "@/components/feedback/states";
 import { PageHeader } from "@/components/layout/page-header";
 import { listAgentCatalogue } from "@/modules/agent/service";
+import { getConnectionSummary } from "@/modules/source-control/service";
 import { markDynamic } from "@/server/dynamic";
 
 export const metadata = { title: "Agents" };
@@ -17,7 +18,7 @@ export default function AgentsPage() {
 
 async function Agents() {
   await markDynamic();
-  const agents = await listAgentCatalogue();
+  const [agents, connection] = await Promise.all([listAgentCatalogue(), getConnectionSummary()]);
 
   return (
     <div className="space-y-6">
@@ -26,6 +27,17 @@ async function Agents() {
         title="Agent control centre"
         description="Product Discovery, the Requirements Agent, the Architecture Agent, and the Security & Engineering Governance Agent run when OPENAI_API_KEY is set. The Coding Agent and the Testing & Verification Agent also need PRODUCT_REPOSITORY_ROOT. Review stays unavailable."
       />
+      <section className="rounded-2xl border bg-card p-5">
+        <div className="flex items-start justify-between gap-3">
+          <h2 className="text-base font-semibold">Source control</h2>
+          <span className="rounded-full bg-stone-100 px-2.5 py-1 text-xs font-medium text-stone-700">
+            {connection.status === "CONNECTED" ? "CONNECTED" : "NOT CONNECTED"}
+          </span>
+        </div>
+        <p className="mt-2 text-sm leading-6 text-muted-foreground">
+          GitHub is an integration, not an agent. {connection.message}
+        </p>
+      </section>
       <div className="grid gap-4 md:grid-cols-2">
         {agents.map((agent) => (
           <article key={agent.agentType} className="rounded-2xl border bg-card p-5">

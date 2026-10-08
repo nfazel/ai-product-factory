@@ -59,4 +59,4 @@ A failed run keeps the workspace, the diff, the evidence, the tool log, and the 
 
 ## What it does not do
 
-The agent does not push, open a pull request, merge, deploy, or reach production credentials. GitHub is a future provider value and is not implemented. A later commit on the same task flags existing verification `RE-VERIFICATION REQUIRED`. The Coding Agent does not approve that verification and does not rewrite it.
+The agent does not push, open a pull request, merge, deploy, or reach production credentials. A person publishes an approved commit through the GitHub integration. See [github-integration.md](github-integration.md) and [pull-request-lifecycle.md](pull-request-lifecycle.md). A later commit on the same task flags existing verification `RE-VERIFICATION REQUIRED` and replaces the commit recorded on the code approval. The Coding Agent does not approve that verification and does not rewrite it.

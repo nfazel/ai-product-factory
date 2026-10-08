@@ -128,6 +128,8 @@ The coding runner executes one approved implementation task in a Git worktree. R
 
 The verification runner is a separate agent. It reads the approved acceptance criteria, builds a deterministic verification contract, and executes in its own worktree based on the approved coding commit. It cannot change production code, approve itself, or treat the Coding Agent's self-review as the verdict. See [verification-agent.md](verification-agent.md) and [verification-evidence.md](verification-evidence.md).
 
+GitHub is not an agent. `SourceControlProvider` publishes an approved branch and reads pull request state. No provider method can merge. See [github-integration.md](github-integration.md) and [pull-request-lifecycle.md](pull-request-lifecycle.md).
+
 ## Product brief storage
 
 Assumptions are their own table. Each one has impact, confidence, and a status a person can change (`UNVALIDATED`, `VALIDATED`, `INVALIDATED`). That lifecycle does not fit a JSON blob.
@@ -137,7 +139,7 @@ The other multi-value brief sections are ordered notes without their own workflo
 ## What this application does not do
 
 - No independent Review or Release agent
-- No GitHub integration, clone, push, pull request, or merge
+- No automatic merge, deployment, or background GitHub polling
 - No background scheduler that starts coding without a person
 - No deployment or production access
 - No authentication requirement for local use

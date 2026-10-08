@@ -146,6 +146,17 @@ export const ACTIVITY_TYPES = [
   "VERIFICATION_MANUAL_RESULT",
   "VERIFICATION_DEFECT_CREATED",
   "VERIFICATION_STALE",
+  "GITHUB_CONNECTED",
+  "BRANCH_PUBLISHED",
+  "PULL_REQUEST_CREATED",
+  "PULL_REQUEST_REFRESHED",
+  "CI_CHANGED",
+  "REVIEW_RECEIVED",
+  "CHANGES_REQUESTED",
+  "REVISION_INITIATED",
+  "BRANCH_UPDATED",
+  "PULL_REQUEST_READY",
+  "PULL_REQUEST_MERGED",
 ] as const;
 export type ActivityType = (typeof ACTIVITY_TYPES)[number];
 
@@ -406,6 +417,17 @@ export const ACTIVITY_TYPE_LABEL: Record<ActivityType, string> = {
   VERIFICATION_MANUAL_RESULT: "Manual verification result",
   VERIFICATION_DEFECT_CREATED: "Verification defect recorded",
   VERIFICATION_STALE: "Re-verification required",
+  GITHUB_CONNECTED: "GitHub connected",
+  BRANCH_PUBLISHED: "Branch published",
+  PULL_REQUEST_CREATED: "Pull request created",
+  PULL_REQUEST_REFRESHED: "Pull request refreshed",
+  CI_CHANGED: "CI changed",
+  REVIEW_RECEIVED: "Review received",
+  CHANGES_REQUESTED: "Changes requested",
+  REVISION_INITIATED: "Revision initiated",
+  BRANCH_UPDATED: "Branch updated",
+  PULL_REQUEST_READY: "Pull request ready for human merge",
+  PULL_REQUEST_MERGED: "Pull request merged",
 };
 
 export const DISCOVERY_STATUS_LABEL: Record<DiscoveryStatus, string> = {

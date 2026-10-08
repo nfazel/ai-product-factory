@@ -31,6 +31,7 @@ export function refreshWorkspace(productId?: string, workItemId?: string) {
   revalidatePath("/approvals");
   revalidatePath("/activity");
   revalidatePath("/agents");
+  revalidatePath("/settings");
   if (productId) {
     revalidatePath(`/products/${productId}`, "layout");
   }
