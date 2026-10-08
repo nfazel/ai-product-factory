@@ -94,6 +94,10 @@ export async function agentRunStatsByType() {
   return stats;
 }
 
+export async function countBlockedVerificationSessions() {
+  return db.verificationSession.count({ where: { status: "BLOCKED", demo: false } });
+}
+
 export async function countEscalatedCodingRuns() {
   return db.agentRun.count({
     where: {

@@ -9,6 +9,7 @@ import {
   agentRunStatsByType,
   completeAgentRun,
   countAgentRuns,
+  countBlockedVerificationSessions,
   countEscalatedCodingRuns,
   countRunsByAgentType,
   failAgentRun,
@@ -38,6 +39,10 @@ export class AgentNotConfiguredError extends DomainError {
                 ? codingConfigurationGap() === "repository"
                   ? "The Coding Agent is not configured. Set PRODUCT_REPOSITORY_ROOT to a Git repository that is not this application. No code was changed."
                   : "The Coding Agent is not configured. Add OPENAI_API_KEY on the server. No code was changed."
+                : agentType === "TESTING"
+                  ? codingConfigurationGap() === "repository"
+                    ? "The Testing & Verification Agent is not configured. Set PRODUCT_REPOSITORY_ROOT to a Git repository that is not this application. No verification was started."
+                    : "The Testing & Verification Agent is not configured. Add OPENAI_API_KEY on the server. No verification was started."
                 : `${agentType} is not configured. AI agents will be introduced progressively as the Product Factory capabilities are enabled.`,
       "INVALID",
     );
@@ -58,11 +63,12 @@ export async function listAgentRuns(filters?: {
 
 export async function listAgentCatalogue(): Promise<AgentCatalogueEntry[]> {
   ensureAgentsRegistered();
-  const [counts, latest, stats, escalatedCount] = await Promise.all([
+  const [counts, latest, stats, escalatedCount, blockedCount] = await Promise.all([
     countRunsByAgentType(),
     latestRunByAgentType(),
     agentRunStatsByType(),
     countEscalatedCodingRuns(),
+    countBlockedVerificationSessions(),
   ]);
 
   return AGENT_TYPES.map((agentType) => {
@@ -77,6 +83,7 @@ export async function listAgentCatalogue(): Promise<AgentCatalogueEntry[]> {
       completedCount: agentStats?.completed ?? 0,
       failedCount: agentStats?.failed ?? 0,
       escalatedCount: agentType === "CODING" ? escalatedCount : 0,
+      blockedCount: agentType === "TESTING" ? blockedCount : 0,
       averageDurationMs: agentStats?.averageDurationMs ?? null,
       latestStatus: latest.get(agentType) ?? null,
     };

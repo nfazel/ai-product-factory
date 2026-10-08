@@ -47,7 +47,7 @@ The task moves to `IN_PROGRESS` when the workspace starts, `CODE_REVIEW` when th
 
 Reasoning is validated with Zod before it is stored. Separate schemas cover repository analysis, the execution plan, the change request, the self-review, the completion proposal, and an escalation. Prose does not trigger file or command tools. The change request carries typed operations.
 
-The self-review is `AGENT_ANALYSIS` from `AI_ANALYSIS`. It is not a test result. A completion proposal of `COMPLETED` is ignored when a required check failed, a tool was denied, or an escalation is open.
+The self-review is `AGENT_ANALYSIS` from `AI_ANALYSIS`. It is not a test result and it is not verification. The Testing & Verification Agent starts from the approved acceptance criteria and does not treat this review, the tests written here, or a passing check as proof. See [verification-agent.md](verification-agent.md). A completion proposal of `COMPLETED` is ignored when a required check failed, a tool was denied, or an escalation is open.
 
 ## Escalation
 
@@ -59,4 +59,4 @@ A failed run keeps the workspace, the diff, the evidence, the tool log, and the 
 
 ## What it does not do
 
-The agent does not push, open a pull request, merge, deploy, or reach production credentials. GitHub is a future provider value and is not implemented.
+The agent does not push, open a pull request, merge, deploy, or reach production credentials. GitHub is a future provider value and is not implemented. A later commit on the same task flags existing verification `RE-VERIFICATION REQUIRED`. The Coding Agent does not approve that verification and does not rewrite it.

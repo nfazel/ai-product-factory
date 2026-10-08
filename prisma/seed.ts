@@ -20,6 +20,19 @@ function daysAgo(days: number, hours = 10) {
 }
 
 async function main() {
+  await prisma.verificationApproval.deleteMany();
+  await prisma.verificationEvidence.deleteMany();
+  await prisma.verificationExecution.deleteMany();
+  await prisma.verificationNfrResult.deleteMany();
+  await prisma.verificationCoverage.deleteMany();
+  await prisma.verificationTestCase.deleteMany();
+  await prisma.verificationCondition.deleteMany();
+  await prisma.verificationEscalation.deleteMany();
+  await prisma.verificationDefectLink.deleteMany();
+  await prisma.verificationWorkspace.deleteMany();
+  await prisma.verificationContract.deleteMany();
+  await prisma.integratedVerificationSession.deleteMany();
+  await prisma.verificationSession.deleteMany();
   await prisma.codeChangeApproval.deleteMany();
   await prisma.codingDiff.deleteMany();
   await prisma.codingRevision.deleteMany();
@@ -1651,6 +1664,174 @@ async function seedGovernanceDemo(input: {
       type: "GOVERNANCE_GENERATED",
       description:
         "Demo data. Prepared a sample governance review, threat model, coding risks, and coding policy. Not a Security & Engineering Governance Agent run.",
+      actor: "Demo seed",
+      createdAt: input.createdAt,
+    },
+  });
+  await seedVerificationDemo({
+    productId: input.productId,
+    storyId: input.storyId,
+    taskId: input.taskIds[1] ?? input.taskIds[0],
+    securityNfrId: input.securityNfrId,
+    createdAt: input.createdAt,
+  });
+}
+
+async function seedVerificationDemo(input: {
+  productId: string;
+  storyId: string;
+  taskId: string | undefined;
+  securityNfrId: string;
+  createdAt: Date;
+}) {
+  if (!input.taskId) return;
+  const criteria = await prisma.acceptanceCriterion.findMany({ where: { workItemId: input.storyId } });
+  const reference = criteria.find((item) => item.description.includes("claim reference"));
+  const negative = criteria.find((item) => item.description.includes("validated"));
+  const nfr = await prisma.nonFunctionalRequirement.findUnique({ where: { id: input.securityNfrId } });
+  const session = await prisma.verificationSession.create({
+    data: {
+      productId: input.productId,
+      implementationTaskId: input.taskId,
+      commitSha: "",
+      status: "REVIEW",
+      demo: true,
+      verdictReason: "Demo data. No command was executed.",
+      startedAt: input.createdAt,
+      createdAt: input.createdAt,
+      updatedAt: input.createdAt,
+    },
+  });
+  await prisma.verificationContract.create({
+    data: {
+      sessionId: session.id,
+      objective: "Demo verification of the simple claim slice.",
+      storyTitle: "Submit a simple claim",
+      acceptanceCriteria: reference ? [`${reference.id}: ${reference.description}`] : [],
+      nfrs: nfr ? [`${nfr.id}: ${nfr.title}`] : [],
+      architectureConstraints: "Demo architecture constraint. Not an agent result.",
+      securityConstraints: "Demo security constraint. No scanner was run.",
+      commitSha: "",
+      requiredAreas: [
+        "Acceptance criteria",
+        "Functional behaviour",
+        "Negative paths",
+        "Regression",
+        "Security-relevant behaviour",
+        "NFRs",
+        "Evidence completeness",
+      ],
+      createdAt: input.createdAt,
+      updatedAt: input.createdAt,
+    },
+  });
+  if (reference) {
+    await prisma.verificationCoverage.create({
+      data: {
+        sessionId: session.id,
+        acceptanceCriterionId: reference.id,
+        status: "NOT_TESTED",
+        rationale: "Demo coverage. A command was not run.",
+        createdAt: input.createdAt,
+        updatedAt: input.createdAt,
+      },
+    });
+    const positive = await prisma.verificationTestCase.create({
+      data: {
+        sessionId: session.id,
+        acceptanceCriterionId: reference.id,
+        title: "Submit valid claim",
+        purpose: "Show the evidence shape for a customer who receives a claim reference.",
+        preconditions: "A customer has entered a complete notice.",
+        steps: ["Submit the claim"],
+        expectedResult: "Claim reference returned.",
+        testType: "API",
+        priority: "HIGH",
+        source: "ACCEPTANCE_CRITERION",
+        provenance: "VERIFICATION_AGENT",
+        automated: false,
+        status: "NOT_RUN",
+        createdAt: input.createdAt,
+        updatedAt: input.createdAt,
+      },
+    });
+    await prisma.verificationEvidence.create({
+      data: {
+        sessionId: session.id,
+        testCaseId: positive.id,
+        acceptanceCriterionId: reference.id,
+        type: "MANUAL_CONFIRMATION",
+        source: "HUMAN",
+        description:
+          "DEMO PASS. Seeded sample for the simple claim slice. No command was executed.",
+        result: "DEMO PASS",
+        createdAt: input.createdAt,
+      },
+    });
+  }
+  if (negative) {
+    await prisma.verificationTestCase.create({
+      data: {
+        sessionId: session.id,
+        acceptanceCriterionId: negative.id,
+        title: "Required field missing",
+        purpose: "Negative path. A notice without the required fields is refused.",
+        expectedResult: "The claim is not accepted.",
+        testType: "API",
+        priority: "MEDIUM",
+        source: "ACCEPTANCE_CRITERION",
+        provenance: "VERIFICATION_AGENT",
+        automated: false,
+        status: "NOT_RUN",
+        createdAt: input.createdAt,
+        updatedAt: input.createdAt,
+      },
+    });
+  }
+  if (nfr) {
+    await prisma.verificationNfrResult.create({
+      data: {
+        sessionId: session.id,
+        nfrId: nfr.id,
+        title: nfr.title,
+        status: "NOT_TESTED",
+        note: "Demo untested NFR. REQUIRES MANUAL VERIFICATION. No accessibility or performance tool was run.",
+        createdAt: input.createdAt,
+      },
+    });
+  }
+  const defect = await prisma.workItem.create({
+    data: {
+      productId: input.productId,
+      parentId: input.storyId,
+      title: "Demo: claim reference format is not specified",
+      description:
+        "Demo data. Low-severity sample defect for the simple claim slice. It was not found by a verification run and the Coding Agent was not asked to fix it.",
+      type: "DEFECT",
+      status: "DRAFT",
+      stage: "PROVE",
+      priority: "LOW",
+      provenance: "HUMAN_CREATED",
+      createdAt: input.createdAt,
+      updatedAt: input.createdAt,
+    },
+  });
+  await prisma.verificationDefectLink.create({
+    data: {
+      sessionId: session.id,
+      workItemId: defect.id,
+      acceptanceCriterionId: reference?.id,
+      implementationTaskId: input.taskId,
+      commitSha: "",
+      createdAt: input.createdAt,
+    },
+  });
+  await prisma.activity.create({
+    data: {
+      productId: input.productId,
+      type: "VERIFICATION_STARTED",
+      description:
+        "Demo data. Prepared a sample verification for the simple claim slice. Not a Testing & Verification Agent run.",
       actor: "Demo seed",
       createdAt: input.createdAt,
     },

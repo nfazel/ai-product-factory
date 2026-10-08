@@ -31,6 +31,7 @@ import {
 } from "@/domain/constants";
 import { storedArchitectureSchema } from "@/modules/architecture/schema";
 import { getBuildWorkspace } from "@/modules/architecture/service";
+import { getProveView } from "@/modules/verification/service";
 import { markDynamic } from "@/server/dynamic";
 
 export const metadata = { title: "Build" };
@@ -66,7 +67,7 @@ async function Build({
   await markDynamic();
   const { id } = await params;
   const query = await searchParams;
-  const workspace = await getBuildWorkspace(id);
+  const [workspace, prove] = await Promise.all([getBuildWorkspace(id), getProveView(id)]);
   if (!workspace) notFound();
 
   const architecture = workspace.architecture;
@@ -564,6 +565,17 @@ async function Build({
 
       <GovernancePanel productId={id} governance={workspace.governance} />
       <CodingPanel productId={id} coding={workspace.codingExecution} />
+      <section className="rounded-2xl border bg-card p-5">
+        <p className="text-xs font-medium tracking-wide text-indigo-700">VERIFICATION</p>
+        <h2 className="text-lg font-semibold">Task verification</h2>
+        <p className="mt-2 text-sm leading-6 text-muted-foreground">
+          {prove?.readiness.label ?? "NOT VERIFIED"}
+          {prove?.readiness.reasons[0] ? `. ${prove.readiness.reasons[0]}` : ""}
+        </p>
+        <Link href={`/products/${id}/testing`} className="mt-3 inline-block text-sm font-medium text-indigo-800">
+          Open Prove
+        </Link>
+      </section>
     </div>
   );
 }

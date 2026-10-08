@@ -52,6 +52,7 @@ export const APPROVAL_TYPES = [
   "ENGINEERING_GOVERNANCE",
   "CODING_POLICY",
   "CODE_CHANGE",
+  "VERIFICATION",
 ] as const;
 export type ApprovalType = (typeof APPROVAL_TYPES)[number];
 
@@ -134,6 +135,17 @@ export const ACTIVITY_TYPES = [
   "CODING_CONTRACT_STALE",
   "CODING_TASK_APPROVED",
   "CODING_PLAN_APPROVED",
+  "VERIFICATION_STARTED",
+  "VERIFICATION_COMMAND_EXECUTED",
+  "VERIFICATION_FILE_READ",
+  "VERIFICATION_TEST_CREATED",
+  "VERIFICATION_POLICY_DENIED",
+  "VERIFICATION_APPROVED",
+  "VERIFICATION_CHANGES_REQUESTED",
+  "VERIFICATION_REJECTED",
+  "VERIFICATION_MANUAL_RESULT",
+  "VERIFICATION_DEFECT_CREATED",
+  "VERIFICATION_STALE",
 ] as const;
 export type ActivityType = (typeof ACTIVITY_TYPES)[number];
 
@@ -310,6 +322,7 @@ export const APPROVAL_TYPE_LABEL: Record<ApprovalType, string> = {
   ENGINEERING_GOVERNANCE: "Engineering governance",
   CODING_POLICY: "Coding policy",
   CODE_CHANGE: "Code change",
+  VERIFICATION: "Verification",
 };
 
 export const ACTIVITY_TYPE_LABEL: Record<ActivityType, string> = {
@@ -382,6 +395,17 @@ export const ACTIVITY_TYPE_LABEL: Record<ActivityType, string> = {
   CODING_CONTRACT_STALE: "Execution contract stale",
   CODING_TASK_APPROVED: "Implementation task approved",
   CODING_PLAN_APPROVED: "Coding execution plan approved",
+  VERIFICATION_STARTED: "Verification started",
+  VERIFICATION_COMMAND_EXECUTED: "Verification command executed",
+  VERIFICATION_FILE_READ: "Verification file read",
+  VERIFICATION_TEST_CREATED: "Verification test created",
+  VERIFICATION_POLICY_DENIED: "Verification policy denied",
+  VERIFICATION_APPROVED: "Verification approved",
+  VERIFICATION_CHANGES_REQUESTED: "More testing requested",
+  VERIFICATION_REJECTED: "Verification rejected",
+  VERIFICATION_MANUAL_RESULT: "Manual verification result",
+  VERIFICATION_DEFECT_CREATED: "Verification defect recorded",
+  VERIFICATION_STALE: "Re-verification required",
 };
 
 export const DISCOVERY_STATUS_LABEL: Record<DiscoveryStatus, string> = {
@@ -656,8 +680,9 @@ export const AGENT_CATALOG: Record<
       "Execute one approved implementation task inside an isolated repository workspace. It cannot approve its own code, push, or merge.",
   },
   TESTING: {
-    name: "Testing Agent",
-    responsibility: "Design and report tests against acceptance criteria.",
+    name: "Testing & Verification Agent",
+    responsibility:
+      "Independently verify one completed implementation against the approved acceptance criteria. It does not trust the Coding Agent's self-review, and it cannot approve itself, change production code, push, or merge.",
   },
   REVIEW: {
     name: "Review Agent",

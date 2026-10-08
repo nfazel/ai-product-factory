@@ -3,6 +3,7 @@ import "server-only";
 import { db } from "@/lib/db";
 import { recordActivity } from "@/modules/activity/service";
 import { noteCodingContractStale } from "@/modules/coding/impact";
+import { noteVerificationStale } from "@/modules/verification/impact";
 
 export async function noteGovernanceReviewRequired(productId: string, reason: string) {
   const rows = await db.engineeringGovernanceReview.findMany({
@@ -26,6 +27,7 @@ export async function noteGovernanceReviewRequired(productId: string, reason: st
     description: reason,
   });
   await noteCodingContractStale(productId, reason);
+  await noteVerificationStale(productId, reason);
 }
 
 export async function noteCodingPolicyReapproval(productId: string, policyId: string, reason: string) {
@@ -49,4 +51,5 @@ export async function noteCodingPolicyReapproval(productId: string, policyId: st
     description: reason,
   });
   await noteCodingContractStale(productId, reason);
+  await noteVerificationStale(productId, reason);
 }

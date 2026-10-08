@@ -28,6 +28,7 @@ export type AgentCatalogueEntry = {
   completedCount: number;
   failedCount: number;
   escalatedCount: number;
+  blockedCount: number;
   averageDurationMs: number | null;
   latestStatus: AgentRunStatus | null;
 };

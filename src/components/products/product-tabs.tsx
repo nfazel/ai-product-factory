@@ -12,7 +12,7 @@ const TABS = [
   { slug: "/backlog", label: "Backlog" },
   { slug: "/architecture", label: "Architecture" },
   { slug: "/build", label: "Build" },
-  { slug: "/testing", label: "Testing" },
+  { slug: "/testing", label: "Prove" },
   { slug: "/releases", label: "Releases" },
   { slug: "/metrics", label: "Metrics" },
   { slug: "/activity", label: "Activity" },

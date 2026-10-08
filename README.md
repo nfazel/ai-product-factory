@@ -4,9 +4,9 @@ AI Product Factory is the foundation of an AI-native software product developmen
 
 **Explore → Define → Build → Prove → Ship → Learn**
 
-This repository is the product factory with five agents enabled. Product Discovery turns an incomplete idea into a Product Brief during Explore. The Requirements Agent turns an approved brief into an outcome-driven product definition during Define. The Architecture Agent, inside Build, turns an approved definition and an approved first slice into a solution architecture and an implementation plan. The Security & Engineering Governance Agent, also inside Build, independently reviews that approved architecture and plan before coding. The Coding Agent, still inside Build, executes one approved implementation task in an isolated Git worktree. Testing and review agents are not implemented. GitHub integration, push, and merge are not implemented.
+This repository is the product factory with six agents enabled. Product Discovery turns an incomplete idea into a Product Brief during Explore. The Requirements Agent turns an approved brief into an outcome-driven product definition during Define. The Architecture Agent, inside Build, turns an approved definition and an approved first slice into a solution architecture and an implementation plan. The Security & Engineering Governance Agent, also inside Build, independently reviews that approved architecture and plan before coding. The Coding Agent, still inside Build, executes one approved implementation task in an isolated Git worktree. The Testing & Verification Agent independently checks that completed work against the approved acceptance criteria. Task-level verification can start during Build. Prove is where the approved product slice is assessed as a whole. The review agent is not implemented. GitHub integration, push, and merge are not implemented.
 
-Humans remain in control of stage changes, decisions, and approval gates. Neither agent can approve its own work or move the product stage.
+Humans remain in control of stage changes, decisions, and approval gates. No agent can approve its own work or move the product stage.
 
 ## Technology stack
 
@@ -31,14 +31,16 @@ prisma/                  Schema, migrations, and demo seed
 src/app/                 Routes, layouts, and HTTP API
 src/components/          Shared interface components
 src/domain/              Stages, labels, hierarchy rules, backlog tree
-src/modules/             Product, discovery, requirements, architecture, AI, work item, approval, activity, agent, identity
+src/modules/             Product, discovery, requirements, architecture, governance, coding, verification, AI, work item, approval, activity, agent, identity
 src/server/              Server actions and API helpers
 docs/architecture.md     Modular design
 docs/product-discovery-agent.md  Discovery agent, prompt, and approval gate
 docs/requirements-agent.md       Requirements agent, proposal workflow, and approval gate
 docs/architecture-agent.md       Architecture agent, solution model, and approval gate
 docs/implementation-planning.md  Vertical-slice implementation plans
-docs/traceability.md     Outcome to story links
+docs/traceability.md     Outcome to verification links
+docs/verification-agent.md       Independent verification, workspace, and verdict
+docs/verification-evidence.md    Coverage, evidence, and what is not claimed
 ```
 
 ## Database setup
@@ -77,10 +79,10 @@ cp .env.example .env
 | Variable | Purpose |
 | --- | --- |
 | `DATABASE_URL` | PostgreSQL connection string used by Prisma and the Next.js server |
-| `OPENAI_API_KEY` | Server-only key for Product Discovery, the Requirements Agent, the Architecture Agent, the Security & Engineering Governance Agent, and the Coding Agent. Leave empty to run without model calls |
+| `OPENAI_API_KEY` | Server-only key for Product Discovery, the Requirements Agent, the Architecture Agent, the Security & Engineering Governance Agent, the Coding Agent, and the Testing & Verification Agent. Leave empty to run without model calls |
 | `OPENAI_MODEL` | Optional. Defaults to `gpt-4.1-mini` |
 | `CODEBASE_CONTEXT_ROOT` | Optional absolute path. When set, Build can read that directory's `package.json` and top-level folder names. It cannot browse an arbitrary path |
-| `PRODUCT_REPOSITORY_ROOT` | Optional absolute path to a local Git repository the Coding Agent may change. The browser cannot set this |
+| `PRODUCT_REPOSITORY_ROOT` | Optional absolute path to a local Git repository the Coding Agent and the Testing & Verification Agent may use. The browser cannot set this |
 | `PRODUCT_REPOSITORY_ALLOW_FACTORY` | Optional. Set to `true` only when a local demo should use this application's own source tree |
 
 The key is read only on the server. The browser never receives it. If it is missing, the app still runs and Discovery says that AI is not configured.
@@ -114,7 +116,7 @@ npm run db:validate
 npm run db:seed
 ```
 
-The seed replaces existing factory data with one sample product, **Claims Management Platform**, in the Define stage. It includes an epic, features, a customer claim story, acceptance criteria, a task, a defect, decisions, approvals, and an activity history.
+The seed replaces existing factory data with one sample product, **Claims Management Platform**, in the Define stage. It includes an epic, features, a customer claim story, acceptance criteria, a task, a defect, decisions, approvals, and an activity history. It also includes a labelled demo verification session for the simple claim slice: a positive case, a negative case, an untested non-functional requirement, and a low-severity demo defect. That session does not include command output or an agent run.
 
 It also includes a **demo** discovery session and product brief, plus demo outcomes, capabilities, a first product slice, non-functional requirements, an open question, and an open definition proposal. The Build tab shows a demo solution architecture, architecture decisions, an initial security assessment, and an implementation plan for that slice. That content is labelled demo data. The seed does not create agent runs and does not pretend a model wrote the brief, the definition, or the architecture. The sample brief is ready for review and not approved, the definition is not approved, and the slice is still proposed, so **Generate architecture** stays closed until a person approves those gates and moves the product to Build.
 
@@ -142,7 +144,17 @@ Open a product and choose Build. Architecture and implementation planning happen
 
 If an approved requirement changes after the architecture is approved, the page says **Architecture review required** and keeps the approval. If the architecture changes after the plan is approved, the page says **Implementation Plan review required** and keeps that approval. If the architecture or the plan changes after governance is approved, the page says **GOVERNANCE REVIEW REQUIRED** and keeps the approval. If the coding policy changes after it is approved, the page says **CODING POLICY REAPPROVAL REQUIRED** and keeps the approval.
 
-See [docs/security-governance-agent.md](docs/security-governance-agent.md), [docs/coding-policy.md](docs/coding-policy.md), [docs/coding-agent.md](docs/coding-agent.md), [docs/repository-workspace.md](docs/repository-workspace.md), and [docs/coding-execution-contract.md](docs/coding-execution-contract.md).
+Build also shows a short verification status and a link to Prove. See [docs/security-governance-agent.md](docs/security-governance-agent.md), [docs/coding-policy.md](docs/coding-policy.md), [docs/coding-agent.md](docs/coding-agent.md), [docs/repository-workspace.md](docs/repository-workspace.md), and [docs/coding-execution-contract.md](docs/coding-execution-contract.md).
+
+## Prove
+
+Open a product and choose Prove. The page lists implementation tasks that are waiting for verification, and it lists every blocking entry condition. **Start verification** runs only for a completed task that has a human code approval, a commit SHA, a live coding workspace, a current execution contract, and passing required coding checks.
+
+The Testing & Verification Agent uses its own Git worktree, branched from the approved coding commit. It may add tests under `verification/`. It may not change production code, and it does not fix defects. A person approves the verification. If the implementation commit changes afterwards, the verification and its approval are marked **RE-VERIFICATION REQUIRED**.
+
+When every task in the approved slice has a completed implementation and an approved passing verification, and no critical or high defect is open, the page says **PRODUCT SLICE VERIFIED** and **Ready to move to PROVE**. If the product is already in Prove, it says **Ready for Release Review**. The stage does not move by itself.
+
+See [docs/verification-agent.md](docs/verification-agent.md) and [docs/verification-evidence.md](docs/verification-evidence.md).
 
 ## Demo repository
 
@@ -162,4 +174,4 @@ Add `PRODUCT_REPOSITORY_ROOT` to `.env`, then restart the server. Approve the up
 
 ## Later agents
 
-Testing and review agents are not registered. GitHub, push, pull requests, and merge are not implemented. Authentication will replace `getCurrentActor()` and the pass-through `src/proxy.ts` without rewriting the domain model.
+The review agent is not registered. GitHub, push, pull requests, merge, deployment, browser automation, vulnerability scanning, and performance infrastructure are not implemented. Authentication will replace `getCurrentActor()` and the pass-through `src/proxy.ts` without rewriting the domain model.

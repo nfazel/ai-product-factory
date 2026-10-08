@@ -1,12 +1,26 @@
-import { LaterStage } from "@/components/products/later-stage";
+import { Suspense } from "react";
+import { notFound } from "next/navigation";
 
-export const metadata = { title: "Testing" };
+import { PageSkeleton } from "@/components/feedback/states";
+import { ProvePanel } from "@/components/prove/prove-panel";
+import { getProveView } from "@/modules/verification/service";
+import { markDynamic } from "@/server/dynamic";
 
-export default function TestingPage() {
+export const metadata = { title: "Prove" };
+export const maxDuration = 60;
+
+export default function TestingPage({ params }: { params: Promise<{ id: string }> }) {
   return (
-    <LaterStage
-      title="Testing"
-      note="Proving the product will be tied to acceptance criteria. Nothing runs automatically in this foundation."
-    />
+    <Suspense fallback={<PageSkeleton />}>
+      <Prove params={params} />
+    </Suspense>
   );
+}
+
+async function Prove({ params }: { params: Promise<{ id: string }> }) {
+  await markDynamic();
+  const { id } = await params;
+  const prove = await getProveView(id);
+  if (!prove) notFound();
+  return <ProvePanel productId={id} prove={prove} />;
 }

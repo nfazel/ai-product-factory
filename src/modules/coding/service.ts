@@ -3,6 +3,7 @@ import "server-only";
 import { AGENT_CATALOG } from "@/domain/constants";
 import { db } from "@/lib/db";
 import { recordActivity } from "@/modules/activity/service";
+import { noteVerificationCommitChanged } from "@/modules/verification/impact";
 import { AgentNotConfiguredError, executeAgent } from "@/modules/agent/service";
 import { requestApproval, resolveApproval } from "@/modules/approval/service";
 import { buildContractDraft, type ContractDraft } from "@/modules/coding/contract";
@@ -421,6 +422,7 @@ export async function createCodingCommit(productId: string, workspaceId: string)
     where: { id: workspace.implementationTaskId },
     data: { status: "COMPLETED" },
   });
+  await noteVerificationCommitChanged(workspace.implementationTaskId, sha);
   await recordActivity({
     productId,
     type: "CODING_COMMIT_CREATED",

@@ -2,6 +2,7 @@ import "server-only";
 
 import { ACCEPTANCE_STATUS_LABEL } from "@/domain/constants";
 import { recordActivity } from "@/modules/activity/service";
+import { noteVerificationStale } from "@/modules/verification/impact";
 import { DomainError } from "@/modules/shared/errors";
 import { findWorkItemRow } from "@/modules/work-item/repository";
 import {
@@ -30,6 +31,7 @@ export async function addAcceptanceCriterion(input: {
     type: "ACCEPTANCE_CRITERION_ADDED",
     description: `Added acceptance criterion: "${criterion.description}".`,
   });
+  await noteVerificationStale(item.productId, "An acceptance criterion changed.");
   return criterion;
 }
 
@@ -53,5 +55,6 @@ export async function updateAcceptanceStatus(
     type: "ACCEPTANCE_CRITERION_UPDATED",
     description: `Marked an acceptance criterion as ${ACCEPTANCE_STATUS_LABEL[status].toLowerCase()}.`,
   });
+  await noteVerificationStale(item.productId, "An acceptance criterion changed.");
   return criterion;
 }

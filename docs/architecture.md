@@ -85,10 +85,13 @@ The catalogue in `src/domain/constants.ts` names the agents:
 - Requirements — implemented
 - Architecture — implemented, inside Build
 - Security & Engineering Governance — implemented, inside Build, as the existing `SECURITY` agent type
-- Planning, Testing, and Review — not configured
+- Planning and Review — not configured
 - Coding — implemented, inside Build. **CONFIGURED** only when `OPENAI_API_KEY` is set and `PRODUCT_REPOSITORY_ROOT` is a Git repository outside this application, unless `PRODUCT_REPOSITORY_ALLOW_FACTORY=true`
+- Testing & Verification — implemented, as the existing `TESTING` agent type. It verifies one completed task and can run while the product is still in Build. **CONFIGURED** only when the model and a repository are both configured
 
-Product Discovery, the Requirements Agent, the Architecture Agent, and the Security & Engineering Governance Agent are **CONFIGURED** only when `OPENAI_API_KEY` is set on the server, or when a test supplies a provider. The Coding Agent also needs a repository. The control centre reads run counts, completed runs, failed runs, and average duration from `AgentRun`. The Coding Agent also shows how many completed runs escalated. Token counts are stored when the provider returns them. Cost is left empty rather than guessed.
+Product Discovery, the Requirements Agent, the Architecture Agent, and the Security & Engineering Governance Agent are **CONFIGURED** only when `OPENAI_API_KEY` is set on the server, or when a test supplies a provider. The Coding Agent and the Testing & Verification Agent also need a repository. The control centre reads run counts, completed runs, failed runs, and average duration from `AgentRun`. The Coding Agent also shows how many completed runs escalated. The Testing & Verification Agent also shows how many non-demo sessions are `BLOCKED`. Token counts are stored when the provider returns them. Cost is left empty rather than guessed.
+
+Build is where implementation and task-level verification happen. Prove is where the approved product slice is assessed as a whole. The factory does not move the product into Prove because one task was verified.
 
 The governance agent is not a mode of the Architecture Agent. The Architecture Agent proposes how to build. The governance agent independently asks whether that proposal is safe, supportable, and ready to build. See [security-governance-agent.md](security-governance-agent.md).
 
@@ -105,7 +108,7 @@ type AgentRunner = {
 }
 ```
 
-`ensureAgentsRegistered()` adds the Product Discovery, Requirements, Architecture, Governance, and Coding runners. `executeAgent` looks up the runner for the requested type. If it is missing or not configured, it throws `AgentNotConfiguredError` before inserting an `AgentRun`. A runner may also refuse in `assertCanRun` before that insert. `POST /api/agent-runs` returns that refusal and does not fabricate output.
+`ensureAgentsRegistered()` adds the Product Discovery, Requirements, Architecture, Governance, Coding, and Testing & Verification runners. `executeAgent` looks up the runner for the requested type. If it is missing or not configured, it throws `AgentNotConfiguredError` before inserting an `AgentRun`. A runner may also refuse in `assertCanRun` before that insert. `POST /api/agent-runs` returns that refusal and does not fabricate output.
 
 When a configured runner executes:
 
@@ -123,6 +126,8 @@ The architecture runner also writes an uncommitted proposal. It does not approve
 
 The coding runner executes one approved implementation task in a Git worktree. Repository tools enforce the execution contract. The agent cannot approve its own diff, push, or merge. See [coding-agent.md](coding-agent.md), [repository-workspace.md](repository-workspace.md), and [coding-execution-contract.md](coding-execution-contract.md).
 
+The verification runner is a separate agent. It reads the approved acceptance criteria, builds a deterministic verification contract, and executes in its own worktree based on the approved coding commit. It cannot change production code, approve itself, or treat the Coding Agent's self-review as the verdict. See [verification-agent.md](verification-agent.md) and [verification-evidence.md](verification-evidence.md).
+
 ## Product brief storage
 
 Assumptions are their own table. Each one has impact, confidence, and a status a person can change (`UNVALIDATED`, `VALIDATED`, `INVALIDATED`). That lifecycle does not fit a JSON blob.
@@ -131,7 +136,7 @@ The other multi-value brief sections are ordered notes without their own workflo
 
 ## What this application does not do
 
-- No Testing or independent Review agent
+- No independent Review or Release agent
 - No GitHub integration, clone, push, pull request, or merge
 - No background scheduler that starts coding without a person
 - No deployment or production access

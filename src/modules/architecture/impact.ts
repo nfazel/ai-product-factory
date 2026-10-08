@@ -3,8 +3,10 @@ import "server-only";
 import { db } from "@/lib/db";
 import { recordActivity } from "@/modules/activity/service";
 import { noteCodingContractStale } from "@/modules/coding/impact";
+import { noteVerificationStale } from "@/modules/verification/impact";
 
 export async function noteRequirementChange(productId: string, reason: string) {
+  await noteVerificationStale(productId, reason);
   const rows = await db.solutionArchitecture.findMany({
     where: { productId, status: "APPROVED" },
   });
@@ -46,4 +48,5 @@ export async function noteArchitectureChange(productId: string, reason: string) 
     description: reason,
   });
   await noteCodingContractStale(productId, reason);
+  await noteVerificationStale(productId, reason);
 }

@@ -108,6 +108,8 @@ model Product {
   governanceProposals GovernanceProposal[]
   repositories Repository[]
   repositoryWorkspaces RepositoryWorkspace[]
+  verificationSessions VerificationSession[]
+  integratedVerifications IntegratedVerificationSession[]
 
   @@index([status])
   @@index([updatedAt])
@@ -148,6 +150,7 @@ model WorkItem {
   componentTraces ComponentTrace[]
   implementationTasks ImplementationTask[]
   findingLinks       GovernanceFindingLink[]
+  verificationDefects VerificationDefectLink[]
   decisions          Decision[]
   approvals          Approval[]
   activities         Activity[]
@@ -186,6 +189,8 @@ model AcceptanceCriterion {
   updatedAt   DateTime                  @updatedAt
 
   workItem WorkItem @relation(fields: [workItemId], references: [id], onDelete: Cascade)
+  verificationCoverages VerificationCoverage[]
+  verificationTestCases VerificationTestCase[]
 
   @@index([workItemId])
 }
@@ -222,6 +227,7 @@ model Approval {
   product  Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
   workItem WorkItem? @relation(fields: [workItemId], references: [id], onDelete: SetNull)
   codeChangeApprovals CodeChangeApproval[]
+  verificationApprovals VerificationApproval[]
 
   @@index([status])
   @@index([productId])
@@ -574,6 +580,7 @@ model ProductSlice {
   workItems WorkItem[]
   solutionArchitectures SolutionArchitecture[]
   implementationPlans ImplementationPlan[]
+  integratedVerifications IntegratedVerificationSession[]
 
   @@index([productId])
   @@index([status])
@@ -1083,6 +1090,7 @@ model ImplementationTask {
   findingLinks GovernanceFindingLink[]
   workspaces   RepositoryWorkspace[]
   codingContracts CodingExecutionContract[]
+  verificationSessions VerificationSession[]
 
   @@index([implementationPlanId])
   @@index([workItemId])
@@ -1563,6 +1571,7 @@ model Repository {
 
   product    Product               @relation(fields: [productId], references: [id], onDelete: Cascade)
   workspaces RepositoryWorkspace[]
+  verificationWorkspaces VerificationWorkspace[]
 
   @@unique([productId])
   @@index([status])
@@ -1589,6 +1598,7 @@ model RepositoryWorkspace {
   repository Repository              @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
   product    Product                 @relation(fields: [productId], references: [id], onDelete: Cascade)
   task       ImplementationTask      @relation(fields: [implementationTaskId], references: [id], onDelete: Cascade)
+  verificationSessions VerificationSession[]
   contract   CodingExecutionContract?
   plan       CodingExecutionPlan?
   escalations CodingEscalation[]
@@ -1764,4 +1774,352 @@ model CodeChangeApproval {
   @@index([productId])
   @@index([workspaceId])
   @@index([implementationTaskId])
+}
+
+enum VerificationSessionStatus {
+  PLANNING
+  READY
+  EXECUTING
+  REVIEW
+  PASSED
+  FAILED
+  BLOCKED
+}
+
+enum VerificationVerdict {
+  PASS
+  PASS_WITH_CONCERNS
+  FAIL
+  INCONCLUSIVE
+}
+
+enum VerificationCoverageStatus {
+  VERIFIED
+  FAILED
+  NOT_TESTED
+  BLOCKED
+  NOT_APPLICABLE
+}
+
+enum VerificationTestStatus {
+  PROPOSED
+  READY
+  PASSED
+  FAILED
+  BLOCKED
+  NOT_RUN
+  NOT_APPLICABLE
+}
+
+enum TestProvenance {
+  HUMAN_EXISTING
+  CODING_AGENT
+  VERIFICATION_AGENT
+}
+
+enum VerificationExecutionStatus {
+  PASSED
+  FAILED
+  BLOCKED
+  NOT_RUN
+}
+
+enum VerificationExecutionKind {
+  NEW_VERIFICATION
+  EXISTING_REGRESSION
+}
+
+enum VerificationEvidenceType {
+  TEST_RESULT
+  BUILD_RESULT
+  TYPECHECK_RESULT
+  STATIC_ANALYSIS
+  MANUAL_CONFIRMATION
+  AI_ANALYSIS
+  SCREENSHOT_FUTURE
+  PERFORMANCE_RESULT_FUTURE
+  SECURITY_SCAN_FUTURE
+}
+
+enum VerificationEvidenceSource {
+  COMMAND_RUNNER
+  REPOSITORY
+  AI_ANALYSIS
+  HUMAN
+}
+
+enum VerificationWorkspaceStatus {
+  CREATING
+  ACTIVE
+  FAILED
+  ABANDONED
+  COMPLETED
+}
+
+model VerificationSession {
+  id                    String                     @id @default(cuid())
+  productId             String
+  implementationTaskId  String
+  repositoryWorkspaceId String?
+  commitSha             String                     @default("")
+  agentRunId            String?
+  status                VerificationSessionStatus  @default(PLANNING)
+  overallVerdict        VerificationVerdict?
+  proposedVerdict       String                     @default("")
+  verdictReason         String                     @default("")
+  existingTestNotes     String                     @default("")
+  aiSummary             String                     @default("")
+  stale                 Boolean                    @default(false)
+  staleReason           String                     @default("")
+  staleFlaggedAt        DateTime?
+  demo                  Boolean                    @default(false)
+  startedAt             DateTime?
+  completedAt           DateTime?
+  createdAt             DateTime                   @default(now())
+  updatedAt             DateTime                   @updatedAt
+
+  product          Product               @relation(fields: [productId], references: [id], onDelete: Cascade)
+  task             ImplementationTask    @relation(fields: [implementationTaskId], references: [id], onDelete: Cascade)
+  codingWorkspace  RepositoryWorkspace?  @relation(fields: [repositoryWorkspaceId], references: [id], onDelete: SetNull)
+  contract         VerificationContract?
+  workspace        VerificationWorkspace?
+  conditions       VerificationCondition[]
+  testCases        VerificationTestCase[]
+  coverages        VerificationCoverage[]
+  executions       VerificationExecution[]
+  evidence         VerificationEvidence[]
+  escalations      VerificationEscalation[]
+  nfrResults       VerificationNfrResult[]
+  defectLinks      VerificationDefectLink[]
+  approvals        VerificationApproval[]
+
+  @@index([productId, createdAt])
+  @@index([implementationTaskId])
+  @@index([status])
+}
+
+model VerificationContract {
+  id                       String   @id @default(cuid())
+  sessionId                String   @unique
+  objective                String   @default("")
+  storyTitle               String   @default("")
+  acceptanceCriteria       Json     @default("[]")
+  nfrs                     Json     @default("[]")
+  architectureConstraints  String   @default("")
+  securityConstraints      String   @default("")
+  codingContractSummary    String   @default("")
+  commitSha                String   @default("")
+  changedFiles             Json     @default("[]")
+  requiredAreas            Json     @default("[]")
+  sourceFingerprint        String   @default("")
+  stale                    Boolean  @default(false)
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+
+  session VerificationSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+}
+
+model VerificationCondition {
+  id                     String   @id @default(cuid())
+  sessionId              String
+  acceptanceCriterionId  String?
+  title                  String
+  description            String   @default("")
+  negative               Boolean  @default(false)
+  source                 String   @default("ACCEPTANCE_CRITERION")
+  createdAt              DateTime @default(now())
+
+  session VerificationSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+}
+
+model VerificationTestCase {
+  id                     String                 @id @default(cuid())
+  sessionId              String
+  acceptanceCriterionId  String?
+  title                  String
+  purpose                String                 @default("")
+  preconditions          String                 @default("")
+  steps                  Json                   @default("[]")
+  expectedResult         String                 @default("")
+  testType               String                 @default("OTHER")
+  priority               String                 @default("MEDIUM")
+  source                 String                 @default("ACCEPTANCE_CRITERION")
+  provenance             TestProvenance         @default(VERIFICATION_AGENT)
+  automated              Boolean                @default(false)
+  status                 VerificationTestStatus @default(PROPOSED)
+  filePath               String                 @default("")
+  body                   String                 @default("")
+  createdAt              DateTime               @default(now())
+  updatedAt              DateTime               @updatedAt
+
+  session    VerificationSession     @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  criterion  AcceptanceCriterion?    @relation(fields: [acceptanceCriterionId], references: [id], onDelete: SetNull)
+  executions VerificationExecution[]
+  evidence   VerificationEvidence[]
+
+  @@index([sessionId])
+  @@index([acceptanceCriterionId])
+}
+
+model VerificationCoverage {
+  id                     String                      @id @default(cuid())
+  sessionId              String
+  acceptanceCriterionId  String
+  status                 VerificationCoverageStatus  @default(NOT_TESTED)
+  rationale              String                      @default("")
+  humanConfirmed         Boolean                     @default(false)
+  createdAt              DateTime                    @default(now())
+  updatedAt              DateTime                    @updatedAt
+
+  session   VerificationSession  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  criterion AcceptanceCriterion  @relation(fields: [acceptanceCriterionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, acceptanceCriterionId])
+  @@index([acceptanceCriterionId])
+}
+
+model VerificationWorkspace {
+  id           String                      @id @default(cuid())
+  sessionId    String                      @unique
+  repositoryId String
+  workspacePath String                     @default("")
+  branchName   String                      @default("")
+  baseCommit   String                      @default("")
+  status       VerificationWorkspaceStatus @default(CREATING)
+  createdAt    DateTime                    @default(now())
+  updatedAt    DateTime                    @updatedAt
+
+  session    VerificationSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  repository Repository          @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  @@index([repositoryId])
+}
+
+model VerificationExecution {
+  id          String                      @id @default(cuid())
+  sessionId   String
+  testCaseId  String?
+  command     String                      @default("")
+  kind        VerificationExecutionKind
+  status      VerificationExecutionStatus @default(NOT_RUN)
+  exitCode    Int?
+  outputSummary String                    @default("")
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime                    @default(now())
+
+  session  VerificationSession   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  testCase VerificationTestCase? @relation(fields: [testCaseId], references: [id], onDelete: SetNull)
+
+  @@index([sessionId])
+  @@index([testCaseId])
+}
+
+model VerificationEvidence {
+  id                     String                     @id @default(cuid())
+  sessionId              String
+  testCaseId             String?
+  acceptanceCriterionId  String?
+  type                   VerificationEvidenceType
+  source                 VerificationEvidenceSource
+  description            String                     @default("")
+  result                 String                     @default("")
+  command                String                     @default("")
+  exitCode               Int?
+  artifactReference      String                     @default("")
+  createdAt              DateTime                   @default(now())
+
+  session  VerificationSession   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  testCase VerificationTestCase? @relation(fields: [testCaseId], references: [id], onDelete: SetNull)
+
+  @@index([sessionId])
+  @@index([acceptanceCriterionId])
+  @@index([type])
+}
+
+model VerificationEscalation {
+  id          String   @id @default(cuid())
+  sessionId   String
+  type        String
+  description String   @default("")
+  reason      String   @default("")
+  status      String   @default("OPEN")
+  createdAt   DateTime @default(now())
+
+  session VerificationSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+}
+
+model VerificationNfrResult {
+  id          String   @id @default(cuid())
+  sessionId   String
+  nfrId       String?
+  title       String
+  status      String   @default("NOT_TESTED")
+  note        String   @default("")
+  createdAt   DateTime @default(now())
+
+  session VerificationSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+}
+
+model VerificationDefectLink {
+  id                     String   @id @default(cuid())
+  sessionId              String
+  workItemId             String
+  acceptanceCriterionId  String?
+  implementationTaskId   String
+  commitSha              String   @default("")
+  evidenceId             String?
+  createdAt              DateTime @default(now())
+
+  session  VerificationSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  workItem WorkItem            @relation(fields: [workItemId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@index([workItemId])
+  @@index([implementationTaskId])
+}
+
+model VerificationApproval {
+  id                   String    @id @default(cuid())
+  productId            String
+  approvalId           String
+  sessionId            String
+  implementationTaskId String
+  commitSha            String
+  evidenceFingerprint  String
+  stale                Boolean   @default(false)
+  staleReason          String    @default("")
+  staleFlaggedAt       DateTime?
+  createdAt            DateTime  @default(now())
+
+  approval Approval            @relation(fields: [approvalId], references: [id], onDelete: Cascade)
+  session  VerificationSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+  @@index([sessionId])
+  @@index([implementationTaskId])
+}
+
+model IntegratedVerificationSession {
+  id              String                @id @default(cuid())
+  productId       String
+  productSliceId  String
+  status          VerificationSessionStatus @default(PLANNING)
+  overallVerdict  VerificationVerdict?
+  planSummary     String                @default("")
+  evidenceGaps    Json                  @default("[]")
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+
+  product Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
+  slice   ProductSlice @relation(fields: [productSliceId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+  @@index([productSliceId])
 }
