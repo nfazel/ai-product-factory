@@ -20,6 +20,23 @@ function daysAgo(days: number, hours = 10) {
 }
 
 async function main() {
+  await prisma.learningProposal.deleteMany();
+  await prisma.learningRecord.deleteMany();
+  await prisma.outcomeObservation.deleteMany();
+  await prisma.releaseOutcome.deleteMany();
+  await prisma.releaseIssue.deleteMany();
+  await prisma.deploymentRecord.deleteMany();
+  await prisma.deploymentCheck.deleteMany();
+  await prisma.operationalReadinessArea.deleteMany();
+  await prisma.operationalReadinessAssessment.deleteMany();
+  await prisma.releaseQuestion.deleteMany();
+  await prisma.releaseRiskFactor.deleteMany();
+  await prisma.releaseRiskAssessment.deleteMany();
+  await prisma.releaseEvidence.deleteMany();
+  await prisma.releaseCandidateItem.deleteMany();
+  await prisma.releaseApproval.deleteMany();
+  await prisma.deploymentPlan.deleteMany();
+  await prisma.releaseCandidate.deleteMany();
   await prisma.sourceControlEvidence.deleteMany();
   await prisma.pullRequestComment.deleteMany();
   await prisma.pullRequestReview.deleteMany();
@@ -1935,6 +1952,193 @@ async function seedVerificationDemo(input: {
       source: "DEMO",
       description: "DEMO DATA. Seeded pull request for the simple claim slice. GitHub was not contacted.",
       result: "DEMO",
+      createdAt: input.createdAt,
+    },
+  });
+  await seedReleaseDemo({ ...input, pullRequestId: pullRequest.id });
+}
+
+async function seedReleaseDemo(input: {
+  productId: string;
+  storyId: string;
+  taskId: string | undefined;
+  pullRequestId: string;
+  createdAt: Date;
+}) {
+  const outcome = await prisma.productOutcome.findFirst({
+    where: { productId: input.productId, title: { contains: "straightforward claim" } },
+  });
+  const candidate = await prisma.releaseCandidate.create({
+    data: {
+      productId: input.productId,
+      productSliceId: (await prisma.productSlice.findFirst({ where: { productId: input.productId } }))?.id ?? "",
+      version: "DEMO-0.1.0",
+      name: "Demo: simple claim release",
+      description: "DEMO DATA. Reduce customer effort when submitting a claim. This candidate was not approved for release.",
+      status: "READY_FOR_REVIEW",
+      sourceCommitSummary: [],
+      releaseNotes: "DEMO DATA. Draft notes for a sample release. No production deployment is described.",
+      demo: true,
+      createdBy: "Demo seed",
+      createdAt: input.createdAt,
+      updatedAt: input.createdAt,
+    },
+  });
+  await prisma.releaseCandidateItem.create({
+    data: { releaseCandidateId: candidate.id, type: "STORY", title: "Submit a simple claim", workItemId: input.storyId, createdAt: input.createdAt },
+  });
+  if (input.taskId) {
+    await prisma.releaseCandidateItem.create({
+      data: {
+        releaseCandidateId: candidate.id,
+        type: "IMPLEMENTATION_TASK",
+        title: "Implement claim submission",
+        implementationTaskId: input.taskId,
+        pullRequestRecordId: input.pullRequestId,
+        createdAt: input.createdAt,
+      },
+    });
+  }
+  const evidence = [
+    ["PRODUCT_APPROVAL", "Demo slice. Not an approved release."],
+    ["REQUIREMENT_TRACEABILITY", "Story: submit a simple claim. Acceptance criteria are the seeded demo criteria."],
+    ["INTEGRATED_VERIFICATION", "Integrated verification gap: end-to-end behaviour was not executed."],
+    ["CI_RESULT", "Demo build check. This does not prove a GitHub check or an acceptance criterion."],
+    ["PULL_REQUEST_MERGE", "Demo pull request #7 is open. It has not been merged."],
+  ] as const;
+  for (const [type, description] of evidence) {
+    await prisma.releaseEvidence.create({
+      data: {
+        releaseCandidateId: candidate.id,
+        type,
+        source: "DEMO",
+        description: `DEMO DATA. ${description}`,
+        result: "DEMO / SAMPLE",
+        createdAt: input.createdAt,
+      },
+    });
+  }
+  const risk = await prisma.releaseRiskAssessment.create({
+    data: {
+      releaseCandidateId: candidate.id,
+      overallRisk: "MEDIUM",
+      summary: "DEMO DATA. One sample risk is open. This is not a production assessment.",
+      narrative: "",
+      createdAt: input.createdAt,
+      updatedAt: input.createdAt,
+    },
+  });
+  await prisma.releaseRiskFactor.create({
+    data: {
+      releaseRiskAssessmentId: risk.id,
+      category: "QUALITY",
+      severity: "MEDIUM",
+      description: "DEMO DATA. Integrated verification was not executed.",
+      evidence: "DEMO / SAMPLE",
+      mitigation: "Keep the gap visible.",
+      blocking: false,
+      status: "OPEN",
+      createdAt: input.createdAt,
+      updatedAt: input.createdAt,
+    },
+  });
+  await prisma.releaseQuestion.create({
+    data: {
+      releaseCandidateId: candidate.id,
+      question: "DEMO DATA. Has the business owner confirmed the release window?",
+      reason: "Sample question. Nobody answered it.",
+      blocking: true,
+      status: "OPEN",
+      createdAt: input.createdAt,
+    },
+  });
+  const plan = await prisma.deploymentPlan.create({
+    data: {
+      releaseCandidateId: candidate.id,
+      version: 1,
+      status: "DRAFT",
+      environment: "demo",
+      strategy: "MANUAL",
+      summary: "DEMO DATA. A person would deploy this. The factory does not.",
+      deploymentSteps: ["Confirm the demo build", "Ask a person to deploy it"],
+      rollbackTrigger: "DEMO DATA. Health check fails.",
+      rollbackSteps: "DEMO DATA. Restore the previous demo build.",
+      rollbackDataImplications: "DEMO DATA. No data migration is claimed.",
+      rollbackRole: "Release owner",
+      rollbackVerification: "DEMO DATA. Check the previous build responds.",
+      plannedWindow: "Not a real window",
+      createdAt: input.createdAt,
+      updatedAt: input.createdAt,
+    },
+  });
+  await prisma.deploymentCheck.create({
+    data: { deploymentPlanId: plan.id, phase: "POST_DEPLOYMENT", name: "Application available", description: "DEMO DATA. Not executed.", required: true, createdAt: input.createdAt, updatedAt: input.createdAt },
+  });
+  await prisma.operationalReadinessAssessment.create({
+    data: {
+      releaseCandidateId: candidate.id,
+      summary: "DEMO DATA. 0 of 11 relevant operational areas are sufficiently understood.",
+      createdAt: input.createdAt,
+      updatedAt: input.createdAt,
+      areas: {
+        create: ["MONITORING", "LOGGING", "ALERTING", "SUPPORT", "RUNBOOK", "ROLLBACK", "DEPENDENCIES", "DATA_MIGRATION", "CONFIGURATION", "FEATURE_FLAGS", "INCIDENT_RESPONSE"].map((area) => ({
+          area: area as "MONITORING",
+          rating: "LOW",
+          relevant: true,
+          notes: "DEMO DATA. Not assessed.",
+        })),
+      },
+    },
+  });
+  await prisma.deploymentRecord.create({
+    data: {
+      releaseCandidateId: candidate.id,
+      deploymentPlanId: plan.id,
+      environment: "demo",
+      status: "STARTED",
+      deployedVersion: "DEMO-0.1.0",
+      performedBy: "Demo seed",
+      notes: "DEMO / SAMPLE. The factory did not deploy this release.",
+      demo: true,
+      startedAt: input.createdAt,
+      createdAt: input.createdAt,
+    },
+  });
+  if (outcome) {
+    await prisma.outcomeObservation.create({
+      data: {
+        productId: input.productId,
+        productOutcomeId: outcome.id,
+        releaseCandidateId: candidate.id,
+        measure: "Percentage of eligible claims submitted digitally.",
+        value: "DEMO / SAMPLE",
+        unit: "%",
+        source: "DEMO",
+        notes: "DEMO DATA. No measurement was collected.",
+        recordedBy: "Demo seed",
+        demo: true,
+        observedAt: input.createdAt,
+      },
+    });
+  }
+  await prisma.learningRecord.create({
+    data: {
+      productId: input.productId,
+      releaseCandidateId: candidate.id,
+      productOutcomeId: outcome?.id,
+      observation: "DEMO DATA. The sample shows the learning record shape. It is not a conclusion about customers.",
+      interpretation: "DEMO DATA. Do not treat this as evidence that the outcome moved.",
+      decision: "INVESTIGATE",
+      createdBy: "Demo seed",
+      createdAt: input.createdAt,
+    },
+  });
+  await prisma.activity.create({
+    data: {
+      productId: input.productId,
+      type: "RELEASE_CANDIDATE_CREATED",
+      description: "DEMO DATA. Seeded a sample release candidate, evidence pack, and deployment record. Nothing was released.",
+      actor: "Demo seed",
       createdAt: input.createdAt,
     },
   });

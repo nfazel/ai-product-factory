@@ -157,6 +157,23 @@ export const ACTIVITY_TYPES = [
   "BRANCH_UPDATED",
   "PULL_REQUEST_READY",
   "PULL_REQUEST_MERGED",
+  "RELEASE_CANDIDATE_CREATED",
+  "RELEASE_EVIDENCE_ADDED",
+  "RELEASE_RISK_IDENTIFIED",
+  "RELEASE_RISK_ACCEPTED",
+  "DEPLOYMENT_PLAN_CREATED",
+  "DEPLOYMENT_PLAN_APPROVED",
+  "RELEASE_APPROVED",
+  "RELEASE_APPROVAL_STALE",
+  "DEPLOYMENT_STARTED",
+  "DEPLOYMENT_SUCCEEDED",
+  "DEPLOYMENT_FAILED",
+  "ROLLBACK_RECORDED",
+  "POST_DEPLOYMENT_CHECK",
+  "RELEASE_ISSUE_CREATED",
+  "MOVED_TO_LEARN",
+  "OUTCOME_OBSERVATION",
+  "LEARNING_DECISION",
 ] as const;
 export type ActivityType = (typeof ACTIVITY_TYPES)[number];
 
@@ -261,19 +278,19 @@ export const STAGE_META: Record<
   },
   BUILD: {
     label: "Build",
-    summary: "Agree the technical approach, then implement the approved slice.",
+    summary: "Code individual implementation tasks and verify each one.",
   },
   PROVE: {
     label: "Prove",
-    summary: "Test, review, and show the product holds.",
+    summary: "Assess the approved product slice as an integrated release candidate.",
   },
   SHIP: {
     label: "Ship",
-    summary: "Prepare and release with human approval.",
+    summary: "Release an approved candidate through a human-controlled deployment.",
   },
   LEARN: {
     label: "Learn",
-    summary: "Measure what happened and decide what is next.",
+    summary: "Observe the product and operational outcome after release.",
   },
 };
 
@@ -428,6 +445,23 @@ export const ACTIVITY_TYPE_LABEL: Record<ActivityType, string> = {
   BRANCH_UPDATED: "Branch updated",
   PULL_REQUEST_READY: "Pull request ready for human merge",
   PULL_REQUEST_MERGED: "Pull request merged",
+  RELEASE_CANDIDATE_CREATED: "Release candidate created",
+  RELEASE_EVIDENCE_ADDED: "Release evidence added",
+  RELEASE_RISK_IDENTIFIED: "Release risk identified",
+  RELEASE_RISK_ACCEPTED: "Release risk accepted",
+  DEPLOYMENT_PLAN_CREATED: "Deployment plan created",
+  DEPLOYMENT_PLAN_APPROVED: "Deployment plan approved",
+  RELEASE_APPROVED: "Release approved",
+  RELEASE_APPROVAL_STALE: "Release approval stale",
+  DEPLOYMENT_STARTED: "Deployment started",
+  DEPLOYMENT_SUCCEEDED: "Deployment succeeded",
+  DEPLOYMENT_FAILED: "Deployment failed",
+  ROLLBACK_RECORDED: "Rollback recorded",
+  POST_DEPLOYMENT_CHECK: "Post-deployment check",
+  RELEASE_ISSUE_CREATED: "Release issue created",
+  MOVED_TO_LEARN: "Moved to Learn",
+  OUTCOME_OBSERVATION: "Outcome observation",
+  LEARNING_DECISION: "Learning decision",
 };
 
 export const DISCOVERY_STATUS_LABEL: Record<DiscoveryStatus, string> = {

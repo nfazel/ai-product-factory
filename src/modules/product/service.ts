@@ -5,6 +5,7 @@ import {
   STAGE_META,
 } from "@/domain/constants";
 import { recordActivity } from "@/modules/activity/service";
+import { stageMoveBlockers } from "@/modules/release/service";
 import { buildProgressionBlockers } from "@/modules/requirements/gates";
 import { DomainError } from "@/modules/shared/errors";
 import {
@@ -69,6 +70,10 @@ export async function updateProduct(input: UpdateProductInput) {
         throw new DomainError(gate.reasons.join(" "));
       }
     }
+    if (input.currentStage === "SHIP" || input.currentStage === "LEARN") {
+      const reasons = await stageMoveBlockers(existing.id, input.currentStage);
+      if (reasons.length > 0) throw new DomainError(reasons.join(" "));
+    }
     changes.push(`stage to ${STAGE_META[input.currentStage].label}`);
   }
 
@@ -79,6 +84,13 @@ export async function updateProduct(input: UpdateProductInput) {
       productId: product.id,
       type: "PRODUCT_UPDATED",
       description: `Updated ${changes.join(", ")}.`,
+    });
+  }
+  if (existing.currentStage !== "LEARN" && product.currentStage === "LEARN") {
+    await recordActivity({
+      productId: product.id,
+      type: "MOVED_TO_LEARN",
+      description: "A person moved the product to Learn.",
     });
   }
 

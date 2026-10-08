@@ -113,6 +113,9 @@ model Product {
   publishedChanges PublishedChange[]
   pullRequests PullRequestRecord[]
   sourceControlEvidence SourceControlEvidence[]
+  releaseCandidates ReleaseCandidate[]
+  outcomeObservations OutcomeObservation[]
+  learningRecords LearningRecord[]
 
   @@index([status])
   @@index([updatedAt])
@@ -154,6 +157,7 @@ model WorkItem {
   implementationTasks ImplementationTask[]
   findingLinks       GovernanceFindingLink[]
   verificationDefects VerificationDefectLink[]
+  releaseItems       ReleaseCandidateItem[]
   decisions          Decision[]
   approvals          Approval[]
   activities         Activity[]
@@ -231,6 +235,7 @@ model Approval {
   workItem WorkItem? @relation(fields: [workItemId], references: [id], onDelete: SetNull)
   codeChangeApprovals CodeChangeApproval[]
   verificationApprovals VerificationApproval[]
+  releaseApprovals ReleaseApproval[]
 
   @@index([status])
   @@index([productId])
@@ -538,6 +543,8 @@ model ProductOutcome {
   product      Product             @relation(fields: [productId], references: [id], onDelete: Cascade)
   sourceBrief  ProductBrief?       @relation(fields: [sourceBriefId], references: [id], onDelete: SetNull)
   capabilities ProductCapability[]
+  observations OutcomeObservation[]
+  learningRecords LearningRecord[]
 
   @@index([productId])
   @@index([status])
@@ -584,6 +591,7 @@ model ProductSlice {
   solutionArchitectures SolutionArchitecture[]
   implementationPlans ImplementationPlan[]
   integratedVerifications IntegratedVerificationSession[]
+  releaseCandidates ReleaseCandidate[]
 
   @@index([productId])
   @@index([status])
@@ -1095,6 +1103,7 @@ model ImplementationTask {
   codingContracts CodingExecutionContract[]
   verificationSessions VerificationSession[]
   publishedChanges PublishedChange[]
+  releaseItems ReleaseCandidateItem[]
 
   @@index([implementationPlanId])
   @@index([workItemId])
@@ -1967,6 +1976,7 @@ model VerificationSession {
   nfrResults       VerificationNfrResult[]
   defectLinks      VerificationDefectLink[]
   approvals        VerificationApproval[]
+  releaseItems     ReleaseCandidateItem[]
 
   @@index([productId, createdAt])
   @@index([implementationTaskId])
@@ -2275,6 +2285,7 @@ model PullRequestRecord {
   checks          PullRequestCheck[]
   reviews         PullRequestReview[]
   comments        PullRequestComment[]
+  releaseItems    ReleaseCandidateItem[]
 
   @@index([productId])
   @@index([repositoryId])
@@ -2358,4 +2369,536 @@ model SourceControlEvidence {
   @@index([publishedChangeId])
   @@index([pullRequestRecordId])
   @@index([type])
+}
+
+enum ReleaseCandidateStatus {
+  DRAFT
+  ASSESSING
+  READY_FOR_REVIEW
+  APPROVED
+  REJECTED
+  DEPLOYED
+  FAILED
+  SUPERSEDED
+}
+
+enum ReleaseItemType {
+  FEATURE
+  STORY
+  IMPLEMENTATION_TASK
+  DEFECT_FIX
+  OTHER
+}
+
+enum ReleaseEvidenceType {
+  PRODUCT_APPROVAL
+  REQUIREMENT_TRACEABILITY
+  ARCHITECTURE_APPROVAL
+  GOVERNANCE_APPROVAL
+  CODE_APPROVAL
+  VERIFICATION_APPROVAL
+  CI_RESULT
+  PULL_REQUEST_REVIEW
+  PULL_REQUEST_MERGE
+  DEFECT_STATUS
+  INTEGRATED_VERIFICATION
+  MANUAL_EVIDENCE
+  DEPLOYMENT_EVIDENCE
+  POST_DEPLOYMENT_CHECK
+}
+
+enum ReleaseEvidenceSource {
+  FACTORY
+  GITHUB
+  COMMAND_RUNNER
+  HUMAN
+  EXTERNAL_FUTURE
+  DEMO
+}
+
+enum ReleaseRiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum ReleaseRiskCategory {
+  QUALITY
+  SECURITY
+  DATA
+  INTEGRATION
+  OPERABILITY
+  DEPLOYMENT
+  ROLLBACK
+  OBSERVABILITY
+  DEPENDENCY
+  COMPLIANCE
+  BUSINESS
+  OTHER
+}
+
+enum ReleaseRiskStatus {
+  OPEN
+  MITIGATED
+  ACCEPTED
+  CLOSED
+}
+
+enum ReleaseQuestionStatus {
+  OPEN
+  ANSWERED
+  CLOSED
+}
+
+enum DeploymentPlanStatus {
+  DRAFT
+  READY_FOR_REVIEW
+  APPROVED
+  SUPERSEDED
+}
+
+enum DeploymentStrategy {
+  MANUAL
+  ROLLING
+  BLUE_GREEN
+  CANARY
+  FEATURE_FLAG
+  OTHER
+}
+
+enum DeploymentCheckPhase {
+  PRE_DEPLOYMENT
+  POST_DEPLOYMENT
+  ROLLBACK
+}
+
+enum DeploymentCheckStatus {
+  PENDING
+  PASSED
+  FAILED
+  WAIVED
+  NOT_APPLICABLE
+}
+
+enum OperationalArea {
+  MONITORING
+  LOGGING
+  ALERTING
+  SUPPORT
+  RUNBOOK
+  ROLLBACK
+  DEPENDENCIES
+  DATA_MIGRATION
+  CONFIGURATION
+  FEATURE_FLAGS
+  INCIDENT_RESPONSE
+}
+
+enum DeploymentRecordStatus {
+  STARTED
+  SUCCEEDED
+  FAILED
+  ROLLED_BACK
+}
+
+enum ReleaseIssueSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum ReleaseIssueCategory {
+  FUNCTIONAL
+  PERFORMANCE
+  SECURITY
+  DATA
+  INTEGRATION
+  OPERABILITY
+  OTHER
+}
+
+enum ReleaseIssueStatus {
+  OPEN
+  MITIGATED
+  RESOLVED
+  ACCEPTED
+}
+
+enum LearningDecision {
+  CONTINUE
+  ITERATE
+  PIVOT
+  STOP
+  SCALE
+  INVESTIGATE
+}
+
+enum LearningProposalKind {
+  DISCOVERY_QUESTION
+  REQUIREMENT
+  PRODUCT_SLICE
+  DEFECT
+  IMPROVEMENT
+}
+
+enum LearningProposalStatus {
+  PROPOSED
+  CONFIRMED
+}
+
+enum ReleaseNotesStatus {
+  DRAFT
+  APPROVED
+}
+
+model ReleaseCandidate {
+  id                   String                 @id @default(cuid())
+  productId            String
+  productSliceId       String
+  version              String
+  name                 String
+  description          String                 @default("")
+  status               ReleaseCandidateStatus @default(DRAFT)
+  sourceCommitSummary  Json                   @default("[]")
+  evidenceFingerprint  String                 @default("")
+  releaseNotes         String                 @default("")
+  releaseNotesStatus   ReleaseNotesStatus     @default(DRAFT)
+  releaseNotesApprovedBy String               @default("")
+  demo                 Boolean                @default(false)
+  createdBy            String                 @default("")
+  createdAt            DateTime               @default(now())
+  updatedAt            DateTime               @updatedAt
+
+  product      Product                    @relation(fields: [productId], references: [id], onDelete: Cascade)
+  slice        ProductSlice               @relation(fields: [productSliceId], references: [id], onDelete: Cascade)
+  items        ReleaseCandidateItem[]
+  evidence     ReleaseEvidence[]
+  risk         ReleaseRiskAssessment?
+  questions    ReleaseQuestion[]
+  plans        DeploymentPlan[]
+  operational  OperationalReadinessAssessment?
+  approvals    ReleaseApproval[]
+  deployments  DeploymentRecord[]
+  issues       ReleaseIssue[]
+  outcome      ReleaseOutcome?
+  observations OutcomeObservation[]
+  learningRecords LearningRecord[]
+
+  @@unique([productId, version])
+  @@index([productId])
+  @@index([productSliceId])
+  @@index([status])
+}
+
+model ReleaseCandidateItem {
+  id                    String          @id @default(cuid())
+  releaseCandidateId    String
+  implementationTaskId  String?
+  workItemId            String?
+  pullRequestRecordId   String?
+  verificationSessionId String?
+  type                  ReleaseItemType
+  title                 String          @default("")
+  createdAt             DateTime        @default(now())
+
+  releaseCandidate ReleaseCandidate     @relation(fields: [releaseCandidateId], references: [id], onDelete: Cascade)
+  task             ImplementationTask?  @relation(fields: [implementationTaskId], references: [id], onDelete: SetNull)
+  workItem         WorkItem?            @relation(fields: [workItemId], references: [id], onDelete: SetNull)
+  pullRequest      PullRequestRecord?   @relation(fields: [pullRequestRecordId], references: [id], onDelete: SetNull)
+  verification     VerificationSession? @relation(fields: [verificationSessionId], references: [id], onDelete: SetNull)
+
+  @@index([releaseCandidateId])
+  @@index([implementationTaskId])
+  @@index([workItemId])
+}
+
+model ReleaseEvidence {
+  id                 String                @id @default(cuid())
+  releaseCandidateId String
+  type               ReleaseEvidenceType
+  source             ReleaseEvidenceSource
+  description        String                @default("")
+  result             String                @default("")
+  referenceId        String                @default("")
+  createdAt          DateTime              @default(now())
+
+  releaseCandidate ReleaseCandidate @relation(fields: [releaseCandidateId], references: [id], onDelete: Cascade)
+
+  @@index([releaseCandidateId])
+  @@index([type])
+  @@index([source])
+}
+
+model ReleaseRiskAssessment {
+  id                 String           @id @default(cuid())
+  releaseCandidateId String           @unique
+  overallRisk        ReleaseRiskLevel @default(LOW)
+  summary            String           @default("")
+  narrative          String           @default("")
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  releaseCandidate ReleaseCandidate    @relation(fields: [releaseCandidateId], references: [id], onDelete: Cascade)
+  factors          ReleaseRiskFactor[]
+}
+
+model ReleaseRiskFactor {
+  id                       String              @id @default(cuid())
+  releaseRiskAssessmentId  String
+  category                 ReleaseRiskCategory
+  severity                 ReleaseRiskLevel
+  description              String
+  evidence                 String              @default("")
+  mitigation               String              @default("")
+  blocking                 Boolean             @default(false)
+  status                   ReleaseRiskStatus   @default(OPEN)
+  acceptedBy               String              @default("")
+  acceptedRationale        String              @default("")
+  createdAt                DateTime            @default(now())
+  updatedAt                DateTime            @updatedAt
+
+  assessment ReleaseRiskAssessment @relation(fields: [releaseRiskAssessmentId], references: [id], onDelete: Cascade)
+
+  @@index([releaseRiskAssessmentId])
+  @@index([status])
+}
+
+model ReleaseQuestion {
+  id                 String                @id @default(cuid())
+  releaseCandidateId String
+  question           String
+  reason             String                @default("")
+  impact             SignalLevel           @default(MEDIUM)
+  blocking           Boolean               @default(false)
+  status             ReleaseQuestionStatus @default(OPEN)
+  answer             String                @default("")
+  answeredBy         String                @default("")
+  createdAt          DateTime              @default(now())
+  resolvedAt         DateTime?
+
+  releaseCandidate ReleaseCandidate @relation(fields: [releaseCandidateId], references: [id], onDelete: Cascade)
+
+  @@index([releaseCandidateId])
+  @@index([status])
+}
+
+model DeploymentPlan {
+  id                         String               @id @default(cuid())
+  releaseCandidateId         String
+  version                    Int                  @default(1)
+  status                     DeploymentPlanStatus @default(DRAFT)
+  environment                String               @default("")
+  strategy                   DeploymentStrategy   @default(MANUAL)
+  summary                    String               @default("")
+  deploymentSteps            Json                 @default("[]")
+  rollbackTrigger            String               @default("")
+  rollbackSteps              String               @default("")
+  rollbackDataImplications   String               @default("")
+  rollbackRole               String               @default("")
+  rollbackVerification       String               @default("")
+  rollbackUnavailable        Boolean              @default(false)
+  rollbackAcknowledgement    String               @default("")
+  rollbackAcknowledgedBy     String               @default("")
+  plannedWindow              String               @default("")
+  approvedBy                 String               @default("")
+  createdAt                  DateTime             @default(now())
+  updatedAt                  DateTime             @updatedAt
+
+  releaseCandidate ReleaseCandidate  @relation(fields: [releaseCandidateId], references: [id], onDelete: Cascade)
+  checks           DeploymentCheck[]
+  deployments      DeploymentRecord[]
+  approvals        ReleaseApproval[]
+
+  @@index([releaseCandidateId])
+  @@index([status])
+}
+
+model DeploymentCheck {
+  id               String                 @id @default(cuid())
+  deploymentPlanId String
+  phase            DeploymentCheckPhase
+  name             String
+  description      String                 @default("")
+  required         Boolean                @default(true)
+  status           DeploymentCheckStatus  @default(PENDING)
+  waiverRationale  String                 @default("")
+  evidenceId       String                 @default("")
+  completedBy      String                 @default("")
+  completedAt      DateTime?
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+
+  plan DeploymentPlan @relation(fields: [deploymentPlanId], references: [id], onDelete: Cascade)
+
+  @@index([deploymentPlanId])
+  @@index([phase])
+}
+
+model OperationalReadinessAssessment {
+  id                 String   @id @default(cuid())
+  releaseCandidateId String   @unique
+  summary            String   @default("")
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  releaseCandidate ReleaseCandidate          @relation(fields: [releaseCandidateId], references: [id], onDelete: Cascade)
+  areas            OperationalReadinessArea[]
+}
+
+model OperationalReadinessArea {
+  id            String          @id @default(cuid())
+  assessmentId  String
+  area          OperationalArea
+  rating        SignalLevel     @default(LOW)
+  relevant      Boolean         @default(true)
+  notes         String          @default("")
+  updatedAt     DateTime        @updatedAt
+
+  assessment OperationalReadinessAssessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+
+  @@unique([assessmentId, area])
+}
+
+model ReleaseApproval {
+  id                    String    @id @default(cuid())
+  productId             String
+  approvalId            String
+  releaseCandidateId    String
+  deploymentPlanId      String?
+  deploymentPlanVersion Int       @default(0)
+  evidenceFingerprint   String
+  riskState             String    @default("")
+  stale                 Boolean   @default(false)
+  staleReason           String    @default("")
+  staleFlaggedAt        DateTime?
+  createdAt             DateTime  @default(now())
+
+  approval         Approval          @relation(fields: [approvalId], references: [id], onDelete: Cascade)
+  releaseCandidate ReleaseCandidate  @relation(fields: [releaseCandidateId], references: [id], onDelete: Cascade)
+  deploymentPlan   DeploymentPlan?   @relation(fields: [deploymentPlanId], references: [id], onDelete: SetNull)
+
+  @@index([productId])
+  @@index([releaseCandidateId])
+  @@index([approvalId])
+}
+
+model DeploymentRecord {
+  id                  String                 @id @default(cuid())
+  releaseCandidateId  String
+  deploymentPlanId    String?
+  environment         String                 @default("")
+  status              DeploymentRecordStatus
+  deployedVersion     String                 @default("")
+  deployedCommitSha   String                 @default("")
+  startedAt           DateTime?
+  completedAt         DateTime?
+  performedBy         String                 @default("")
+  externalReference   String                 @default("")
+  notes               String                 @default("")
+  reason              String                 @default("")
+  demo                Boolean                @default(false)
+  createdAt           DateTime               @default(now())
+
+  releaseCandidate ReleaseCandidate @relation(fields: [releaseCandidateId], references: [id], onDelete: Cascade)
+  deploymentPlan   DeploymentPlan?  @relation(fields: [deploymentPlanId], references: [id], onDelete: SetNull)
+  issues           ReleaseIssue[]
+
+  @@index([releaseCandidateId])
+  @@index([status])
+}
+
+model ReleaseIssue {
+  id                  String               @id @default(cuid())
+  releaseCandidateId  String
+  deploymentRecordId  String?
+  severity            ReleaseIssueSeverity
+  category            ReleaseIssueCategory
+  description         String
+  status              ReleaseIssueStatus   @default(OPEN)
+  detectedAt          DateTime             @default(now())
+  resolvedAt          DateTime?
+
+  releaseCandidate ReleaseCandidate  @relation(fields: [releaseCandidateId], references: [id], onDelete: Cascade)
+  deployment       DeploymentRecord? @relation(fields: [deploymentRecordId], references: [id], onDelete: SetNull)
+
+  @@index([releaseCandidateId])
+  @@index([status])
+  @@index([severity])
+}
+
+model ReleaseOutcome {
+  id                    String   @id @default(cuid())
+  releaseCandidateId    String   @unique
+  deploymentSuccessful  Boolean  @default(false)
+  rollbackRequired      Boolean  @default(false)
+  summary               String   @default("")
+  observedAt            DateTime @default(now())
+
+  releaseCandidate ReleaseCandidate @relation(fields: [releaseCandidateId], references: [id], onDelete: Cascade)
+}
+
+model OutcomeObservation {
+  id                  String    @id @default(cuid())
+  productId           String
+  productOutcomeId    String
+  releaseCandidateId  String?
+  measure             String
+  value               String
+  unit                String    @default("")
+  source              String    @default("HUMAN")
+  evidenceReference   String    @default("")
+  observedAt          DateTime  @default(now())
+  recordedBy          String    @default("")
+  notes               String    @default("")
+  demo                Boolean   @default(false)
+
+  product          Product           @relation(fields: [productId], references: [id], onDelete: Cascade)
+  outcome          ProductOutcome    @relation(fields: [productOutcomeId], references: [id], onDelete: Cascade)
+  releaseCandidate ReleaseCandidate? @relation(fields: [releaseCandidateId], references: [id], onDelete: SetNull)
+
+  @@index([productId])
+  @@index([productOutcomeId])
+  @@index([releaseCandidateId])
+}
+
+model LearningRecord {
+  id                  String           @id @default(cuid())
+  productId           String
+  releaseCandidateId  String?
+  productOutcomeId    String?
+  observation         String
+  interpretation      String           @default("")
+  decision            LearningDecision
+  createdBy           String           @default("")
+  createdAt           DateTime         @default(now())
+
+  product          Product           @relation(fields: [productId], references: [id], onDelete: Cascade)
+  releaseCandidate ReleaseCandidate? @relation(fields: [releaseCandidateId], references: [id], onDelete: SetNull)
+  outcome          ProductOutcome?   @relation(fields: [productOutcomeId], references: [id], onDelete: SetNull)
+  proposals        LearningProposal[]
+
+  @@index([productId])
+  @@index([releaseCandidateId])
+}
+
+model LearningProposal {
+  id               String                 @id @default(cuid())
+  learningRecordId String
+  productId        String
+  kind             LearningProposalKind
+  title            String
+  description      String                 @default("")
+  status           LearningProposalStatus @default(PROPOSED)
+  createdRecordId  String                 @default("")
+  confirmedBy      String                 @default("")
+  confirmedAt      DateTime?
+  createdAt        DateTime               @default(now())
+
+  learningRecord LearningRecord @relation(fields: [learningRecordId], references: [id], onDelete: Cascade)
+
+  @@index([learningRecordId])
+  @@index([productId])
+  @@index([status])
 }

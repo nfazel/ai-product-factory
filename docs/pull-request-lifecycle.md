@@ -42,9 +42,11 @@ The factory does not merge. When readiness is satisfied it shows **Open Pull Req
 
 A new commit after review needs a new code approval and a new verification before **Update Published Branch**. That update is another normal commit, not a force push.
 
-## Release candidate
+## After merge
 
-For the approved slice, **RELEASE CANDIDATE READY FOR REVIEW** means every task is completed, independently verified, and has a merged pull request that is not demo data, no blocking defect is open, and an integrated verification session has been recorded. The product stage does not move. Deployment is not implemented.
+A merged pull request can be included in a release candidate. The candidate also requires an approved slice, current verification, current governance and coding policy, and an integrated verification session. A person approves the release and records the deployment. The factory does not deploy. See [release-governance.md](release-governance.md) and [deployment-governance.md](deployment-governance.md).
+
+The earlier **RELEASE CANDIDATE READY FOR REVIEW** signal on Prove means every task is completed, independently verified, and has a merged non-demo pull request, with no blocking defect and an integrated verification session recorded. Creating the candidate also requires current Engineering Governance and Coding Policy. The product stage does not move.
 
 ## Demo data
 

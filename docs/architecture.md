@@ -130,6 +130,8 @@ The verification runner is a separate agent. It reads the approved acceptance cr
 
 GitHub is not an agent. `SourceControlProvider` publishes an approved branch and reads pull request state. No provider method can merge. See [github-integration.md](github-integration.md) and [pull-request-lifecycle.md](pull-request-lifecycle.md).
 
+Release and deployment are not an agent. A release candidate is created from an approved slice, merged pull requests, and current verification. A person approves the release and records the deployment. The factory does not deploy or mark a product outcome achieved. See [release-governance.md](release-governance.md), [deployment-governance.md](deployment-governance.md), and [learn-loop.md](learn-loop.md).
+
 ## Product brief storage
 
 Assumptions are their own table. Each one has impact, confidence, and a status a person can change (`UNVALIDATED`, `VALIDATED`, `INVALIDATED`). That lifecycle does not fit a JSON blob.
@@ -139,8 +141,9 @@ The other multi-value brief sections are ordered notes without their own workflo
 ## What this application does not do
 
 - No independent Review or Release agent
-- No automatic merge, deployment, or background GitHub polling
+- No automatic merge, autonomous deployment, automatic rollback, or background GitHub polling
 - No background scheduler that starts coding without a person
-- No deployment or production access
+- No production credentials or cloud deployment integration
+- No automatic stage movement or automatic outcome achievement
 - No authentication requirement for local use
 - No invented model response when `OPENAI_API_KEY` is missing

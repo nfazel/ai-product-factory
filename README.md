@@ -4,7 +4,7 @@ AI Product Factory is the foundation of an AI-native software product developmen
 
 **Explore → Define → Build → Prove → Ship → Learn**
 
-This repository is the product factory with six agents enabled. Product Discovery turns an incomplete idea into a Product Brief during Explore. The Requirements Agent turns an approved brief into an outcome-driven product definition during Define. The Architecture Agent, inside Build, turns an approved definition and an approved first slice into a solution architecture and an implementation plan. The Security & Engineering Governance Agent, also inside Build, independently reviews that approved architecture and plan before coding. The Coding Agent, still inside Build, executes one approved implementation task in an isolated Git worktree. The Testing & Verification Agent independently checks that completed work against the approved acceptance criteria. Task-level verification can start during Build. Prove is where the approved product slice is assessed as a whole. The review agent is not implemented. GitHub publication is a human-triggered integration. Automatic merge is not implemented.
+This repository is the product factory with six agents enabled. Product Discovery turns an incomplete idea into a Product Brief during Explore. The Requirements Agent turns an approved brief into an outcome-driven product definition during Define. The Architecture Agent, inside Build, turns an approved definition and an approved first slice into a solution architecture and an implementation plan. The Security & Engineering Governance Agent, also inside Build, independently reviews that approved architecture and plan before coding. The Coding Agent, still inside Build, executes one approved implementation task in an isolated Git worktree. The Testing & Verification Agent independently checks that completed work against the approved acceptance criteria. Task-level verification can start during Build. Prove considers the approved product slice as an integrated release candidate. Ship is where a person approves that candidate and records a deployment the person performed. Learn is where a person records what the release did to the product outcome. The review agent is not implemented. GitHub publication is a human-triggered integration. Automatic merge and autonomous deployment are not implemented.
 
 Humans remain in control of stage changes, decisions, and approval gates. No agent can approve its own work or move the product stage.
 
@@ -31,7 +31,7 @@ prisma/                  Schema, migrations, and demo seed
 src/app/                 Routes, layouts, and HTTP API
 src/components/          Shared interface components
 src/domain/              Stages, labels, hierarchy rules, backlog tree
-src/modules/             Product, discovery, requirements, architecture, governance, coding, verification, AI, work item, approval, activity, agent, identity
+src/modules/             Product, discovery, requirements, architecture, governance, coding, verification, source control, release, AI, work item, approval, activity, agent, identity
 src/server/              Server actions and API helpers
 docs/architecture.md     Modular design
 docs/product-discovery-agent.md  Discovery agent, prompt, and approval gate
@@ -43,6 +43,9 @@ docs/verification-agent.md       Independent verification, workspace, and verdic
 docs/verification-evidence.md    Coverage, evidence, and what is not claimed
 docs/github-integration.md       GitHub connection, publication, and evidence
 docs/pull-request-lifecycle.md   Pull request readiness and human merge
+docs/release-governance.md       Release candidate, evidence, risk, and approval
+docs/deployment-governance.md    Human deployment records and rollback
+docs/learn-loop.md               Outcome observation and the next decision
 ```
 
 ## Database setup
@@ -163,6 +166,14 @@ When every task in the approved slice has a completed implementation and an appr
 
 See [docs/verification-agent.md](docs/verification-agent.md) and [docs/verification-evidence.md](docs/verification-evidence.md).
 
+## Ship and Learn
+
+Open a product and choose Ship. **Create Release Candidate** runs only when the approved slice is complete: every task is completed, independently verified, and merged, governance and coding policy are current, no critical or high defect is open, and an integrated verification session exists. Gaps in that session stay visible.
+
+A person writes the deployment plan, including rollback, and approves the release. **Record Deployment** stores what that person did outside the factory. The candidate becomes deployed only after the recorded result succeeded and the required post-deployment checks passed. There is no deploy button that ships the software.
+
+Learn shows the product outcome, observations a person enters, and a learning decision. A sample value is labelled `DEMO / SAMPLE`. Marking an outcome achieved is a separate human action. See [docs/release-governance.md](docs/release-governance.md), [docs/deployment-governance.md](docs/deployment-governance.md), and [docs/learn-loop.md](docs/learn-loop.md).
+
 ## Demo repository
 
 The Coding Agent does not point itself at this source tree. Create a small Git repository and set `PRODUCT_REPOSITORY_ROOT` to its absolute path:
@@ -181,6 +192,6 @@ Add `PRODUCT_REPOSITORY_ROOT` to `.env`, then restart the server. Approve the up
 
 ## Later agents
 
-The review agent is not registered. GitHub publication and pull requests are a human-triggered integration: the factory can publish an approved branch and open a pull request, and a person merges it on GitHub. Automatic merge, deployment, browser automation, vulnerability scanning, and performance infrastructure are not implemented. Authentication will replace `getCurrentActor()` and the pass-through `src/proxy.ts` without rewriting the domain model.
+The review agent is not registered. GitHub publication and pull requests are a human-triggered integration: the factory can publish an approved branch and open a pull request, and a person merges it on GitHub. Release approval and deployment recording are also human actions. Automatic merge, autonomous deployment, automatic rollback, browser automation, vulnerability scanning, and performance infrastructure are not implemented. Authentication will replace `getCurrentActor()` and the pass-through `src/proxy.ts` without rewriting the domain model.
 
 See [docs/github-integration.md](docs/github-integration.md) and [docs/pull-request-lifecycle.md](docs/pull-request-lifecycle.md).
