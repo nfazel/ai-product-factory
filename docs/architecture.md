@@ -37,6 +37,7 @@ Rules:
 | Activity | Append-only audit history and filters. |
 | Agent | Catalogue, run records, runner registry, and run lifecycle. |
 | Dashboard | Read model composed from the modules above. |
+| Analytics | Flow, delivery, quality, AI, governance, release, outcome, and portfolio metrics. Calculated from operational records. Factory Insights may explain those numbers and cannot change them. |
 
 Public imports go through each module's `index.ts`. Pages may also import a focused read function such as `getProductOverview` when that keeps a service from depending on the UI.
 
@@ -132,6 +133,8 @@ GitHub is not an agent. `SourceControlProvider` publishes an approved branch and
 
 Release and deployment are not an agent. A release candidate is created from an approved slice, merged pull requests, and current verification. A person approves the release and records the deployment. The factory does not deploy or mark a product outcome achieved. See [release-governance.md](release-governance.md), [deployment-governance.md](deployment-governance.md), and [learn-loop.md](learn-loop.md).
 
+Factory Intelligence is not an agent. `src/modules/analytics` reads operational rows into one snapshot and calculates metrics in pure functions. The dashboard and the product Intelligence tab render those results. Factory Insights calls the model with the calculated metrics only. See [factory-intelligence.md](factory-intelligence.md) and [metrics-catalogue.md](metrics-catalogue.md).
+
 ## Product brief storage
 
 Assumptions are their own table. Each one has impact, confidence, and a status a person can change (`UNVALIDATED`, `VALIDATED`, `INVALIDATED`). That lifecycle does not fit a JSON blob.
@@ -147,3 +150,5 @@ The other multi-value brief sections are ordered notes without their own workflo
 - No automatic stage movement or automatic outcome achievement
 - No authentication requirement for local use
 - No invented model response when `OPENAI_API_KEY` is missing
+- No data warehouse, external BI feed, automatic performance target, or invented ROI
+- No analytics that treat a missing timestamp as zero or a demo deployment as production

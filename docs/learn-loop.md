@@ -23,3 +23,7 @@ A learning record stores the observation, the interpretation, and a decision: co
 ## Feedback into the next slice
 
 Confirmed scope appears in the existing product model as a draft story, task, defect, proposed slice, or open question. A later Define or Build pass can pick it up through the same human gates as any other scope.
+
+## Delivery and outcome
+
+Intelligence separates a successful deployment from an achieved outcome. When a non-demo deployment succeeded and the outcome is not marked achieved, the product shows **Delivery complete, outcome pending**. That is a learning signal. It is not an automatic failure, and an observation does not close it. Demo observations stay labelled and are not treated as the latest real measurement. The metric definitions are in [metrics-catalogue.md](metrics-catalogue.md).

@@ -31,7 +31,7 @@ prisma/                  Schema, migrations, and demo seed
 src/app/                 Routes, layouts, and HTTP API
 src/components/          Shared interface components
 src/domain/              Stages, labels, hierarchy rules, backlog tree
-src/modules/             Product, discovery, requirements, architecture, governance, coding, verification, source control, release, AI, work item, approval, activity, agent, identity
+src/modules/             Product, discovery, requirements, architecture, governance, coding, verification, source control, release, analytics, AI, work item, approval, activity, agent, identity
 src/server/              Server actions and API helpers
 docs/architecture.md     Modular design
 docs/product-discovery-agent.md  Discovery agent, prompt, and approval gate
@@ -46,6 +46,8 @@ docs/pull-request-lifecycle.md   Pull request readiness and human merge
 docs/release-governance.md       Release candidate, evidence, risk, and approval
 docs/deployment-governance.md    Human deployment records and rollback
 docs/learn-loop.md               Outcome observation and the next decision
+docs/factory-intelligence.md    Flow metrics, portfolio dashboard, and Factory Insights
+docs/metrics-catalogue.md       Definition, formula, source, and data-quality rule for every metric
 ```
 
 ## Database setup
@@ -173,6 +175,14 @@ Open a product and choose Ship. **Create Release Candidate** runs only when the 
 A person writes the deployment plan, including rollback, and approves the release. **Record Deployment** stores what that person did outside the factory. The candidate becomes deployed only after the recorded result succeeded and the required post-deployment checks passed. There is no deploy button that ships the software.
 
 Learn shows the product outcome, observations a person enters, and a learning decision. A sample value is labelled `DEMO / SAMPLE`. Marking an outcome achieved is a separate human action. See [docs/release-governance.md](docs/release-governance.md), [docs/deployment-governance.md](docs/deployment-governance.md), and [docs/learn-loop.md](docs/learn-loop.md).
+
+## Intelligence
+
+The dashboard is the portfolio view. Open a product and choose Intelligence for that product's flow, quality, AI contribution, governance, release, outcomes, and timeline.
+
+The time window is the last 7 days, last 30 days, last 90 days, or all time. Leadership is the default reading. Engineering shows task samples, agent runs, revisions, and the rest of the catalogue. Export CSV or JSON from either page. **Explain these metrics** asks the model to describe the numbers already on the page. It cannot change them.
+
+The seeded Claims product keeps its existing demo records. Where those records are not a real production deployment, the page says **INSUFFICIENT DATA** rather than drawing a chart from invented history. See [docs/factory-intelligence.md](docs/factory-intelligence.md).
 
 ## Demo repository
 
