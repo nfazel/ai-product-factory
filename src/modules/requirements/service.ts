@@ -9,7 +9,7 @@ import {
   type ProductStage,
 } from "@/domain/constants";
 import { db } from "@/lib/db";
-import { isAIConfigured } from "@/modules/ai/provider";
+import { aiWorkspaceGate } from "@/modules/ai/surface";
 import { recordActivity } from "@/modules/activity/service";
 import { executeAgent } from "@/modules/agent/service";
 import { requestApproval, resolveApproval } from "@/modules/approval/service";
@@ -507,7 +507,7 @@ export async function getDefinitionWorkspace(productId: string) {
     highQuestions.length === 0;
   return {
     product: gate.product,
-    configured: isAIConfigured(),
+    ...(await aiWorkspaceGate("product definition")),
     entryReasons: gate.reasons,
     brief,
     definition: snapshot.definition,

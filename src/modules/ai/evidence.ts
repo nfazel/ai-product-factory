@@ -7,12 +7,14 @@ export type AIRunEvidence = {
 };
 
 export function aiRunEvidence(
-  result: Pick<AIGenerateResult<unknown>, "provider" | "model" | "usage">,
-): AIRunEvidence {
+  result: Pick<AIGenerateResult<unknown>, "provider" | "model" | "usage" | "finishStatus" | "durationMs">,
+): AIRunEvidence & { finishStatus?: string; durationMs?: number } {
   return {
     provider: result.provider?.trim() || "unspecified",
     model: result.model,
     usage: result.usage,
+    ...(result.finishStatus ? { finishStatus: result.finishStatus } : {}),
+    ...(typeof result.durationMs === "number" ? { durationMs: result.durationMs } : {}),
   };
 }
 

@@ -1,7 +1,8 @@
 import "server-only";
 
 import { AGENT_CATALOG } from "@/domain/constants";
-import { isAIConfigured } from "@/modules/ai/provider";
+import { isAIConfigured, prepareAI } from "@/modules/ai/provider";
+import { assertAIReady } from "@/modules/ai/surface";
 import { executeAgent, AgentNotConfiguredError } from "@/modules/agent/service";
 import { recordActivity } from "@/modules/activity/service";
 import { requestApproval, resolveApproval } from "@/modules/approval/service";
@@ -32,7 +33,9 @@ function assertHuman(actor: string) {
 
 export async function startVerification(productId: string, taskId: string) {
   await assertVerificationEntry(productId, taskId);
+  await prepareAI();
   if (!isAIConfigured()) throw new AgentNotConfiguredError("TESTING");
+  await assertAIReady("verification", "No verification was started.");
   const task = await db.implementationTask.findFirst({
     where: { id: taskId, plan: { productId } },
     include: {

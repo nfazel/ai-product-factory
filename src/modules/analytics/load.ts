@@ -493,6 +493,8 @@ export async function loadAnalyticsInputs(productId?: string): Promise<Analytics
               estimatedCost: item.estimatedCost == null ? null : item.estimatedCost.toString(),
               inputTokens: usage.inputTokens,
               outputTokens: usage.outputTokens,
+              provider: usage.provider,
+              model: usage.model,
               escalated: usage.escalated,
               workspaceId: usage.workspaceId,
             };
@@ -510,7 +512,14 @@ function iso(value: Date | null | undefined) {
 }
 
 function readUsage(output: unknown) {
-  const empty = { inputTokens: null as number | null, outputTokens: null as number | null, escalated: false, workspaceId: null as string | null };
+  const empty = {
+    inputTokens: null as number | null,
+    outputTokens: null as number | null,
+    provider: null as string | null,
+    model: null as string | null,
+    escalated: false,
+    workspaceId: null as string | null,
+  };
   if (!output || typeof output !== "object") return empty;
   const record = output as Record<string, unknown>;
   const usage = record.usage;
@@ -519,6 +528,8 @@ function readUsage(output: unknown) {
     if (typeof tokens.inputTokens === "number") empty.inputTokens = tokens.inputTokens;
     if (typeof tokens.outputTokens === "number") empty.outputTokens = tokens.outputTokens;
   }
+  if (typeof record.provider === "string") empty.provider = record.provider;
+  if (typeof record.model === "string") empty.model = record.model;
   empty.escalated = record.escalated === true;
   empty.workspaceId = typeof record.workspaceId === "string" ? record.workspaceId : null;
   return empty;

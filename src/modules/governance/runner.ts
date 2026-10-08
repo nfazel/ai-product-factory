@@ -57,7 +57,7 @@ export const governanceRunner: AgentRunner = {
     }
 
     const loaded = await loadGovernanceContext(request.productId);
-    const provider = getAIProvider();
+    const provider = await getAIProvider();
     const result = await provider.generate({
       systemPrompt: GOVERNANCE_SYSTEM_PROMPT,
       messages: governanceMessages({

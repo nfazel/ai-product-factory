@@ -3,7 +3,7 @@ import "server-only";
 import type { Prisma } from "@/generated/prisma/client";
 
 import { db } from "@/lib/db";
-import { getAIProvider, isAIConfigured } from "@/modules/ai/provider";
+import { getAIProvider, isAIConfigured, prepareAI } from "@/modules/ai/provider";
 import { recordActivity } from "@/modules/activity/service";
 import { getCurrentActor } from "@/modules/identity/actor";
 import { buildReleasePrompt, RELEASE_REVIEW_PROMPT, releaseNotesSchema, releaseReviewSchema } from "@/modules/release/prompt";
@@ -535,10 +535,12 @@ export async function reviewRelease(productId: string, candidateId: string, acto
   assertHuman(actor);
   const candidate = await loadCandidate(candidateId, productId);
   if (candidate.demo) throw new DomainError("Demo release data is not sent for release review.");
+  await prepareAI();
   if (!isAIConfigured()) throw new DomainError("AI is not configured. The deterministic risk assessment is unchanged.");
   const facts = await loadReleaseFacts(productId);
   const synced = await syncCandidate(candidate, facts);
-  const generated = await getAIProvider().generate({
+  const provider = await getAIProvider();
+  const generated = await provider.generate({
     systemPrompt: RELEASE_REVIEW_PROMPT,
     messages: [{ role: "user", content: buildReleasePrompt({ evidence: synced.evidence, factors: synced.risk?.factors ?? [], questions: synced.questions }) }],
     responseSchema: releaseReviewSchema,
@@ -973,11 +975,13 @@ export async function draftNotesWithModel(productId: string, candidateId: string
   const facts = await loadReleaseFacts(productId);
   const candidate = await loadCandidate(candidateId, productId);
   const draft = draftReleaseNotes({ version: candidate.version, facts, planSummary: candidate.plans[0]?.summary ?? "" });
+  await prepareAI();
   if (!isAIConfigured()) {
     await db.releaseCandidate.update({ where: { id: candidate.id }, data: { releaseNotes: draft, releaseNotesStatus: "DRAFT" } });
     return getShipView(productId);
   }
-  const generated = await getAIProvider().generate({
+  const provider = await getAIProvider();
+  const generated = await provider.generate({
     systemPrompt: "Draft release notes from the evidence. Do not approve the release, invent metrics, or include secrets. Keep the version and factory identifiers.",
     messages: [{ role: "user", content: buildReleasePrompt({ draft, version: candidate.version }) }],
     responseSchema: releaseNotesSchema,

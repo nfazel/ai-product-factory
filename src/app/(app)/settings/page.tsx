@@ -1,10 +1,11 @@
 import { Suspense } from "react";
 import Link from "next/link";
 
+import { AIConfigurationForm } from "@/components/ai/configuration-form";
 import { PageSkeleton } from "@/components/feedback/states";
 import { PageHeader } from "@/components/layout/page-header";
 import { ValidateConnectionButton } from "@/components/source-control/source-control-controls";
-import { describeAIConfiguration } from "@/modules/ai/config";
+import { loadAIConfiguration } from "@/modules/ai/surface";
 import { repositoryRootConfigured } from "@/modules/coding/config";
 import { getConnectionSummary } from "@/modules/source-control/service";
 import { markDynamic } from "@/server/dynamic";
@@ -31,8 +32,9 @@ export default function SettingsPage() {
 async function Settings() {
   await markDynamic();
   const connection = await getConnectionSummary();
-  const ai = describeAIConfiguration();
+  const ai = await loadAIConfiguration();
   const repositoryConfigured = repositoryRootConfigured();
+  const active = ai.active;
 
   return (
     <div className="space-y-6">
@@ -42,28 +44,61 @@ async function Settings() {
         description="AI Product Builder helps teams take a product idea through discovery, definition, engineering, independent verification, release and learning, while keeping material decisions under human control."
       />
       <section className="grid gap-4 lg:grid-cols-2">
-        <article className="rounded-2xl border bg-card p-5">
+        <article className="rounded-2xl border bg-card p-5 lg:col-span-2">
           <h2 className="text-base font-semibold">AI Configuration</h2>
-          <dl className="mt-4 grid gap-3 text-sm">
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">
+            One active provider and model is used by every AI Product Builder capability. Changing it is an administrator action. The model cannot choose a provider.
+          </p>
+          <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-3">
             <div>
-              <dt className="text-xs text-muted-foreground">Provider</dt>
-              <dd className="mt-1 font-medium">{ai.providerLabel ?? "Not selected"}</dd>
+              <dt className="text-xs text-muted-foreground">Active provider</dt>
+              <dd className="mt-1 font-medium">{active.providerLabel ?? "Not selected"}</dd>
             </div>
             <div>
               <dt className="text-xs text-muted-foreground">Model</dt>
-              <dd className="mt-1 font-medium">{ai.model ?? "Not selected"}</dd>
+              <dd className="mt-1 font-medium">{active.model ?? "Not selected"}</dd>
             </div>
             <div>
               <dt className="text-xs text-muted-foreground">Status</dt>
-              <dd className="mt-1 font-medium">{ai.status}</dd>
+              <dd className="mt-1 font-medium">{active.status}</dd>
             </div>
           </dl>
-          <p className="mt-3 text-sm leading-6">{ai.setup}</p>
-          <div className="mt-3 space-y-2 text-sm leading-6 text-muted-foreground">
-            <p>OpenAI: set AI_PROVIDER=openai, AI_MODEL to an OpenAI model, and OPENAI_API_KEY on the server.</p>
-            <p>Anthropic: set AI_PROVIDER=anthropic, AI_MODEL to an Anthropic model, and ANTHROPIC_API_KEY on the server.</p>
-            <p>Credentials stay in the server environment. This page cannot show an API key.</p>
+          {active.description ? <p className="mt-3 text-sm leading-6">{active.description}</p> : null}
+          {active.privacy ? <p className="mt-1 text-sm leading-6 text-muted-foreground">{active.privacy}</p> : null}
+          <p className="mt-3 text-sm leading-6">{active.setup}</p>
+          <AIConfigurationForm
+            provider={active.providerId ?? ""}
+            model={active.model ?? ""}
+            installedModels={ai.installedModels}
+          />
+          <div className="mt-5 grid gap-3 sm:grid-cols-3">
+            {ai.cards.map((card) => (
+              <div key={card.id} className="rounded-xl border px-3 py-3 text-sm">
+                <p className="font-medium">{card.label}</p>
+                <p className="mt-1 text-muted-foreground">{card.description}</p>
+                <p className="mt-2 font-medium">{card.status}</p>
+                <p className="mt-1 text-muted-foreground">{card.detail}</p>
+              </div>
+            ))}
           </div>
+          <div className="mt-5 space-y-3 text-sm leading-6 text-muted-foreground">
+            <p>Google Gemini is a cloud AI provider and requires a Gemini API key. Obtain a key from Google, add GOOGLE_GEMINI_API_KEY to the server environment, restart AI Product Builder, select Google Gemini, then set the model. A current recommendation is gemini-flash-latest. That is a starting point, not a platform requirement. Data is sent to the configured cloud AI provider.</p>
+            <p>Ollama runs supported models locally. No API key is required for normal local use. Install Ollama, start it, install a compatible model outside AI Product Builder, return here, and select the installed model. AI Product Builder does not download models. The server address is OLLAMA_BASE_URL. A loopback address is a local endpoint. Requests are sent to that configured endpoint.</p>
+            <p>OpenAI is a cloud AI provider and requires an OpenAI API key. Obtain a key, add OPENAI_API_KEY to the server environment, restart, select OpenAI, then set the model. A current recommendation is gpt-4.1-mini. That is a starting point, not a platform requirement. A ChatGPT subscription does not by itself provide this API credential. Data is sent to the configured cloud AI provider.</p>
+            <p>Credentials stay in the server environment. This page cannot show or store an API key.</p>
+          </div>
+          {ai.changes.length > 0 ? (
+            <div className="mt-5">
+              <h3 className="text-sm font-semibold">Configuration history</h3>
+              <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
+                {ai.changes.map((change) => (
+                  <li key={change.id}>
+                    {change.description}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
         </article>
         <article className="rounded-2xl border bg-card p-5">
           <h2 className="text-base font-semibold">Local repository</h2>

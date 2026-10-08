@@ -1,6 +1,6 @@
 import type { ZodType } from "zod";
 
-import { DomainError } from "@/modules/shared/errors";
+import { AIFailure } from "@/modules/ai/failures";
 
 export const STRUCTURED_OUTPUT_ERROR =
   "The model returned a response that did not match the required structure. Nothing was saved from this response.";
@@ -12,7 +12,7 @@ export function requireStructured<T>(schema: ZodType<T>, value: unknown): T {
     console.error("[ai] structured output rejected", {
       issues: validated.error.issues.length,
     });
-    throw new DomainError(STRUCTURED_OUTPUT_ERROR);
+    throw new AIFailure(STRUCTURED_OUTPUT_ERROR, "SCHEMA_VALIDATION_FAILED");
   }
   return validated.data;
 }

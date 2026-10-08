@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { ActivityFeed } from "@/components/activity/activity-feed";
+import { AgentRunEvidenceList } from "@/components/ai/run-evidence";
 import { EmptyState, PageSkeleton } from "@/components/feedback/states";
 import {
   AcceptanceBadge,
@@ -225,19 +226,7 @@ async function WorkItem({ params }: { params: Promise<{ id: string }> }) {
             title="Agent activity"
             description="Agent runs recorded for this work item."
           >
-            {agentRuns.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                No agent runs for this work item. Status: Not configured.
-              </p>
-            ) : (
-              <ul className="space-y-2 text-sm">
-                {agentRuns.map((run) => (
-                  <li key={run.id}>
-                    {run.agentType} · {run.status}
-                  </li>
-                ))}
-              </ul>
-            )}
+            <AgentRunEvidenceList runs={agentRuns} />
           </Section>
 
           <Section title="History" description="Changes recorded for this work item.">

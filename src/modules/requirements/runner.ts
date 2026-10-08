@@ -78,7 +78,7 @@ export const requirementsRunner: AgentRunner = {
 
     const brief = gate.brief;
     const texts = (items: { text: string }[]) => items.map((item) => item.text);
-    const provider = getAIProvider();
+    const provider = await getAIProvider();
     const result = await provider.generate({
       systemPrompt: REQUIREMENTS_SYSTEM_PROMPT,
       messages: requirementsMessages({

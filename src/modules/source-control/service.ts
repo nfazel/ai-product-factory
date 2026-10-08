@@ -1,6 +1,6 @@
 import "server-only";
 
-import { getAIProvider, isAIConfigured } from "@/modules/ai/provider";
+import { getAIProvider, isAIConfigured, prepareAI } from "@/modules/ai/provider";
 import { recordActivity } from "@/modules/activity/service";
 import { classifyWrite } from "@/modules/coding/policy";
 import { asStrings } from "@/modules/coding/strings";
@@ -297,8 +297,10 @@ export async function createTaskPullRequest(productId: string, taskId: string, t
   const trace = await pullRequestTrace(productId, taskId, change.localCommitSha);
   let title = titleInput?.trim() || trace.taskTitle;
   let summary = "Prepared from the approved implementation task.";
+  await prepareAI();
   if (isAIConfigured()) {
-    const suggestion = await getAIProvider().generate({
+    const provider = await getAIProvider();
+    const suggestion = await provider.generate({
       systemPrompt: "Suggest a pull request title and a short summary. Do not invent acceptance results, CI, or approvals.",
       messages: [{ role: "user", content: `Task: ${trace.taskTitle}\nOutcome: ${trace.outcome}` }],
       responseSchema: pullRequestSuggestionSchema,
@@ -509,6 +511,7 @@ export async function refreshPullRequest(productId: string, pullRequestId: strin
 
 export async function analyseReviewFeedback(productId: string, pullRequestId: string) {
   assertHuman(getCurrentActor().name);
+  await prepareAI();
   if (!isAIConfigured()) throw new DomainError("AI is not configured. Review comments were not classified.");
   const record = await db.pullRequestRecord.findFirst({
     where: { id: pullRequestId, productId },
@@ -516,7 +519,8 @@ export async function analyseReviewFeedback(productId: string, pullRequestId: st
   });
   if (!record) throw new DomainError("The pull request was not found.", "NOT_FOUND");
   if (record.comments.length === 0) return getSourceControlView(productId);
-  const generated = await getAIProvider().generate({
+  const provider = await getAIProvider();
+  const generated = await provider.generate({
     systemPrompt: REVIEW_SYSTEM_PROMPT,
     messages: [{ role: "user", content: buildReviewPrompt(record.comments.map((comment) => ({ id: comment.providerCommentId, author: comment.author, body: comment.body, path: comment.path }))) }],
     responseSchema: reviewAnalysisSchema,

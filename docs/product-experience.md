@@ -79,3 +79,7 @@ Learn asks whether the outcome moved. Deployed does not mean outcome achieved. T
 Home leads with decisions waiting, blocked products, release, and outcomes. Flow appears only when the metrics have a real sample. Recent products open Overview.
 
 Intelligence for leadership leads with risk, release, and outcome. AI contribution stays available and is not the first story. Engineering still shows the metric catalogue.
+
+## AI configuration
+
+Settings has one AI Configuration section. An administrator chooses Google Gemini, Ollama, or OpenAI, then a model for that provider. Status is Configured, Not configured, Not running, Model unavailable, or No model selected. The page names the server environment variable a cloud provider needs. It does not accept or display an API key. Ollama lists models installed on the configured local service and does not download one. Discovery and requirements analysis say when AI is not configured, or when local Ollama is not running, and link to Settings. Agent run evidence shows the provider and model that actually ran. Changing the default does not rewrite that history.

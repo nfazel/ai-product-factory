@@ -96,7 +96,13 @@ export async function IntakeExplore({
         </section>
       ) : null}
 
-      {!workspace.configured ? <AINotConfiguredNotice capability="requirements analysis" /> : null}
+      {!workspace.configured ? (
+        <AINotConfiguredNotice
+          capability="requirements analysis"
+          title={workspace.aiNotice?.title}
+          body={workspace.aiNotice?.body}
+        />
+      ) : null}
 
       <section className="rounded-2xl border bg-card p-4 sm:p-5">
         <h3 className="text-sm font-semibold">Readiness</h3>

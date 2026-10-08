@@ -400,6 +400,8 @@ export type AnalyticsInput = {
     estimatedCost: string | null;
     inputTokens: number | null;
     outputTokens: number | null;
+    provider?: string | null;
+    model?: string | null;
     escalated: boolean;
     workspaceId: string | null;
   }[];

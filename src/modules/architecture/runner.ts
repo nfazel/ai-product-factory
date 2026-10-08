@@ -58,7 +58,7 @@ export const architectureRunner: AgentRunner = {
     }
 
     const context = await loadArchitectureContext(request.productId);
-    const provider = getAIProvider();
+    const provider = await getAIProvider();
     const result = await provider.generate({
       systemPrompt: ARCHITECTURE_SYSTEM_PROMPT,
       messages: architectureMessages({

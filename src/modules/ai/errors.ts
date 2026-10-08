@@ -3,9 +3,11 @@ import { DomainError } from "@/modules/shared/errors";
 const SECRET_PATTERNS = [
   /sk-ant-[A-Za-z0-9_-]{8,}/g,
   /sk-[A-Za-z0-9_-]{8,}/g,
+  /AIza[0-9A-Za-z_-]{10,}/g,
   /bearer\s+[A-Za-z0-9._-]+/gi,
   /OPENAI_API_KEY\s*[=:]\s*\S+/gi,
   /ANTHROPIC_API_KEY\s*[=:]\s*\S+/gi,
+  /GOOGLE_GEMINI_API_KEY\s*[=:]\s*\S+/gi,
 ];
 
 export function aiNotConfiguredMessage(capability: string, consequence: string) {

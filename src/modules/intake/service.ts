@@ -3,9 +3,10 @@ import "server-only";
 import { db } from "@/lib/db";
 import { describeAIConfiguration } from "@/modules/ai/config";
 import { aiRunEvidence } from "@/modules/ai/evidence";
-import { aiNotConfiguredMessage } from "@/modules/ai/errors";
-import { isAIConfigured, getAIProvider } from "@/modules/ai/provider";
 import { safeErrorMessage } from "@/modules/ai/errors";
+import { AIFailure } from "@/modules/ai/failures";
+import { getAIProvider } from "@/modules/ai/provider";
+import { assertAIReady, aiWorkspaceGate } from "@/modules/ai/surface";
 import { completeAgentRun, failAgentRun, insertAgentRun } from "@/modules/agent/repository";
 import { recordActivity } from "@/modules/activity/service";
 import { getCurrentActor } from "@/modules/identity/actor";
@@ -149,9 +150,7 @@ export async function analyseRequirements(productId: string) {
   });
   const usable = sources.filter((source) => source.sourceText.trim().length > 0);
   if (usable.length === 0) throw new DomainError("Add requirements before analysing them.");
-  if (!isAIConfigured()) {
-    throw new DomainError(aiNotConfiguredMessage("requirements analysis", "No analysis was created."));
-  }
+  await assertAIReady("requirements analysis", "No analysis was created.");
   const startedAt = new Date();
   const run = await insertAgentRun({
     productId,
@@ -169,7 +168,8 @@ export async function analyseRequirements(productId: string) {
       key: `s${index + 1}`,
       source,
     }));
-    const generated = await getAIProvider().generate({
+    const provider = await getAIProvider();
+    const generated = await provider.generate({
       systemPrompt: INTAKE_SYSTEM_PROMPT,
       messages: intakeMessages(
         keyed.map((item) => ({
@@ -216,6 +216,7 @@ export async function analyseRequirements(productId: string) {
       output: {
         error: safeErrorMessage(error),
         purpose: "existing-requirements-analysis",
+        ...(error instanceof AIFailure ? { errorCategory: error.category } : {}),
         ...(configuration.providerId ? { provider: configuration.providerId } : {}),
         ...(configuration.model ? { model: configuration.model } : {}),
       },
@@ -669,7 +670,7 @@ export async function getIntakeWorkspace(productId: string) {
       mapped: mapped.length,
       deferred: requirements.filter((item) => ["OUT_OF_SCOPE", "DEFERRED", "DUPLICATE", "SUPERSEDED", "NOT_A_REQUIREMENT"].includes(item.disposition)).length,
     },
-    configured: isAIConfigured(),
+    ...(await aiWorkspaceGate("requirements analysis")),
   };
 }
 

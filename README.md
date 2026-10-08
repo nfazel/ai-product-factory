@@ -93,10 +93,11 @@ cp .env.example .env
 | Variable | Purpose |
 | --- | --- |
 | `DATABASE_URL` | PostgreSQL connection string used by Prisma and the Next.js server |
-| `AI_PROVIDER` | `openai` or `anthropic`. Required before any model call. Empty does not default to OpenAI |
+| `AI_PROVIDER` | `GOOGLE_GEMINI`, `OLLAMA`, or `OPENAI`. Required before any model call unless Settings has saved a provider. Empty does not assume a provider |
 | `AI_MODEL` | Model id for that provider. Required. Empty does not substitute a built-in model |
-| `OPENAI_API_KEY` | Server-only credential used when `AI_PROVIDER=openai` |
-| `ANTHROPIC_API_KEY` | Server-only credential used when `AI_PROVIDER=anthropic` |
+| `GOOGLE_GEMINI_API_KEY` | Server-only credential used when Google Gemini is selected |
+| `OPENAI_API_KEY` | Server-only credential used when OpenAI is selected |
+| `OLLAMA_BASE_URL` | Ollama address. Defaults to `http://127.0.0.1:11434`. No API key is required for normal local use |
 | `CODEBASE_CONTEXT_ROOT` | Optional absolute path. When set, Build can read that directory's `package.json` and top-level folder names. It cannot browse an arbitrary path |
 | `PRODUCT_REPOSITORY_ROOT` | Optional absolute path to a local Git repository the Coding Agent and the Testing & Verification Agent may use. The browser cannot set this |
 | `PRODUCT_REPOSITORY_ALLOW_FACTORY` | Optional. Set to `true` only when a local demo should use this application's own source tree |
@@ -106,7 +107,7 @@ cp .env.example .env
 | `GITHUB_MINIMUM_HUMAN_APPROVALS` | Optional. Defaults to 1. Branch protection can require more |
 | `GITHUB_SERVICE_ACCOUNT` | Optional login that must not count as a human reviewer |
 
-The credential is read only on the server. The browser never receives it. Settings shows the provider, the model, and Configured or Not configured. If the connection is missing, Discovery says that AI is not configured and links to Settings. See [docs/ai-provider.md](docs/ai-provider.md).
+The credential is read only on the server. The browser never receives it. Settings shows the active provider, the model, and whether that provider is configured, not running, or missing a model. If the connection is missing, Discovery says that AI is not configured and links to Settings. See [docs/ai-providers.md](docs/ai-providers.md).
 
 ## Run locally
 
@@ -143,7 +144,7 @@ It also includes a **demo** discovery session and product brief, plus demo outco
 
 ## Product Discovery
 
-Open a product and choose Discovery. With `AI_PROVIDER`, `AI_MODEL`, and that provider's server credential set, Start Discovery sends the idea to the Product Discovery Agent and builds a brief. Without that connection, the page says AI is not configured and links to Settings.
+Open a product and choose Discovery. With an active provider, a model, and that provider's server credential (or a running local Ollama), Start Discovery sends the idea to the Product Discovery Agent and builds a brief. Without that connection, the page says AI is not configured and links to Settings. Ollama is the path that does not need a cloud subscription. See [docs/ai-providers.md](docs/ai-providers.md).
 
 A person edits the brief, confirms assumptions, and approves it. Approval does not change the product stage. Move to Define is a separate human action, and only from Explore.
 
@@ -151,7 +152,7 @@ A person edits the brief, confirms assumptions, and approves it. Approval does n
 
 Open a product and choose Definition. **Generate Product Definition** runs only in Define, and only when the current brief is approved and the AI connection is configured. The result is a proposal. Accept, edit, or reject items, then commit. Committed items become normal backlog work with provenance. Confirm outcomes yourself. Approve the first slice and the product definition yourself. Move to Build stays closed until the brief, the definition, and the first slice are approved.
 
-Tests mock the provider. They do not call OpenAI.
+Tests mock the provider. They do not call Gemini, Ollama, or OpenAI.
 
 ## Build
 

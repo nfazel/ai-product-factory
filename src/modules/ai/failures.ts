@@ -1,6 +1,17 @@
+import type { AIFailureCategory } from "@/modules/ai/config";
 import { safeErrorMessage } from "@/modules/ai/errors";
 import { STRUCTURED_OUTPUT_ERROR } from "@/modules/ai/structured";
 import { DomainError } from "@/modules/shared/errors";
+
+export class AIFailure extends DomainError {
+  readonly category: AIFailureCategory;
+
+  constructor(message: string, category: AIFailureCategory) {
+    super(message, "INVALID");
+    this.name = "AIFailure";
+    this.category = category;
+  }
+}
 
 const EMPTY_RESPONSE =
   "The model returned an empty response. Nothing was saved from this response.";
@@ -10,20 +21,20 @@ const CUT_OFF =
   "The model response was cut off before it matched the required structure. Nothing was saved from this response.";
 
 export function declinedResponse() {
-  return new DomainError(DECLINED);
+  return new AIFailure(DECLINED, "INVALID_RESPONSE");
 }
 
 export function emptyResponse() {
-  return new DomainError(EMPTY_RESPONSE);
+  return new AIFailure(EMPTY_RESPONSE, "INVALID_RESPONSE");
 }
 
 export function cutOffResponse() {
-  return new DomainError(CUT_OFF);
+  return new AIFailure(CUT_OFF, "INVALID_RESPONSE");
 }
 
 /** Maps a provider SDK failure to a product error. The original message is logged without secrets. */
 export function mapProviderFailure(error: unknown): never {
-  if (error instanceof DomainError) throw error;
+  if (error instanceof AIFailure || error instanceof DomainError) throw error;
 
   const status = statusOf(error);
   const name = error instanceof Error ? error.name : "";
@@ -35,8 +46,9 @@ export function mapProviderFailure(error: unknown): never {
     name === "AbortError" ||
     /timeout|timed out/i.test(message)
   ) {
-    throw new DomainError(
+    throw new AIFailure(
       "The AI provider did not respond in time. Nothing was generated. You can retry.",
+      "TIMEOUT",
     );
   }
   if (
@@ -45,33 +57,38 @@ export function mapProviderFailure(error: unknown): never {
     name === "AuthenticationError" ||
     name === "PermissionDeniedError"
   ) {
-    throw new DomainError(
+    throw new AIFailure(
       "The AI provider rejected the credentials. Check the server configuration in Settings. Nothing was generated.",
+      "AUTHENTICATION_FAILED",
     );
   }
   if (status === 429 || name === "RateLimitError") {
-    throw new DomainError(
+    throw new AIFailure(
       "The AI provider rate limit was reached. Wait and retry. Nothing was generated.",
+      "RATE_LIMITED",
     );
   }
   if (
     status === 404 ||
     /model[^\n]{0,80}(not found|does not exist)|invalid model|not_found_error/i.test(message)
   ) {
-    throw new DomainError(
+    throw new AIFailure(
       "The configured model is not available from this provider. No other model was substituted. Nothing was generated.",
+      "MODEL_NOT_AVAILABLE",
     );
   }
   if (/Failed to parse structured output|did not match the required structure/i.test(message)) {
-    throw new DomainError(STRUCTURED_OUTPUT_ERROR);
+    throw new AIFailure(STRUCTURED_OUTPUT_ERROR, "SCHEMA_VALIDATION_FAILED");
   }
   if (name === "APIConnectionError" || (status !== undefined && status >= 500)) {
-    throw new DomainError(
+    throw new AIFailure(
       "The AI provider is unavailable. Nothing was generated. You can retry.",
+      "PROVIDER_UNAVAILABLE",
     );
   }
-  throw new DomainError(
+  throw new AIFailure(
     safeErrorMessage(error) || "The AI provider failed. Nothing was generated.",
+    "PROVIDER_UNAVAILABLE",
   );
 }
 

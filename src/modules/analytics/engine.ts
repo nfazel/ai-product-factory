@@ -952,7 +952,29 @@ function buildAi(ctx: CalcContext, push: (metric: MetricValue) => void) {
   if (tokenRuns.length === 0) {
     push(textMetric({ key: "token_usage", window: ctx.window, calculatedAt: ctx.calculatedAt, display: "NOT AVAILABLE", quality: "INSUFFICIENT", note: "No run in this period stored input or output token counts.", sampleSize: runs.length }));
   } else {
-    push(countMetric({ key: "token_usage", window: ctx.window, calculatedAt: ctx.calculatedAt, count: inputTokens + outputTokens, display: `Input ${inputTokens}, output ${outputTokens}, total ${inputTokens + outputTokens}`, note: "Token counts stored on the run. Runs without tokens are omitted from the sum.", sampleSize: tokenRuns.length }));
+    const groups = new Map<string, { input: number; output: number }>();
+    for (const run of tokenRuns) {
+      const provider = run.provider?.trim();
+      const model = run.model?.trim();
+      if (!provider && !model) continue;
+      const key = `${provider || "unspecified"} / ${model || "unspecified"}`;
+      const current = groups.get(key) ?? { input: 0, output: 0 };
+      current.input += run.inputTokens ?? 0;
+      current.output += run.outputTokens ?? 0;
+      groups.set(key, current);
+    }
+    const grouped = [...groups.entries()].map(([key, value]) => `${key}: input ${value.input}, output ${value.output}`).join("; ");
+    push(countMetric({
+      key: "token_usage",
+      window: ctx.window,
+      calculatedAt: ctx.calculatedAt,
+      count: inputTokens + outputTokens,
+      display: `Input ${inputTokens}, output ${outputTokens}, total ${inputTokens + outputTokens}`,
+      note: grouped
+        ? `Token counts stored on the run. Runs without tokens are omitted from the sum. Grouped by provider and model: ${grouped}. Cost is not calculated from these counts.`
+        : "Token counts stored on the run. Runs without tokens are omitted from the sum. Provider and model are included when the run stored them. Cost is not calculated from these counts.",
+      sampleSize: tokenRuns.length,
+    }));
   }
   const costs = runs.map((run) => run.estimatedCost).filter((cost): cost is string => Boolean(cost));
   const costTotal = sumNumbers(costs);

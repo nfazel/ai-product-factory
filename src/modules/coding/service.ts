@@ -7,7 +7,8 @@ import { noteVerificationCommitChanged } from "@/modules/verification/impact";
 import { AgentNotConfiguredError, executeAgent } from "@/modules/agent/service";
 import { requestApproval, resolveApproval } from "@/modules/approval/service";
 import { buildContractDraft, type ContractDraft } from "@/modules/coding/contract";
-import { isAIConfigured } from "@/modules/ai/provider";
+import { isAIConfigured, prepareAI } from "@/modules/ai/provider";
+import { assertAIReady } from "@/modules/ai/surface";
 import { repositoryRootConfigured, resolveConfiguredRepository } from "@/modules/coding/config";
 import { assertCodingEntry, codingEntryBlockers } from "@/modules/coding/gates";
 import {
@@ -104,7 +105,9 @@ export async function approveImplementationTask(productId: string, taskId: strin
 
 export async function startCodingTask(productId: string, taskId: string) {
   const gate = await assertCodingEntry(productId, taskId);
+  await prepareAI();
   if (!isAIConfigured()) throw new AgentNotConfiguredError("CODING");
+  await assertAIReady("coding", "No code was changed.");
   const configured = await resolveConfiguredRepository();
   const repository = await upsertRepository({
     productId,

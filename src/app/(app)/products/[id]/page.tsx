@@ -3,12 +3,14 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { ActivityFeed } from "@/components/activity/activity-feed";
+import { AgentRunEvidenceList } from "@/components/ai/run-evidence";
 import { PageSkeleton } from "@/components/feedback/states";
 import { EvidencePanel, EvidenceSummary, NextActionPanel } from "@/components/guidance/guidance-ui";
 import { EditProductForm } from "@/components/products/product-forms";
 import { STAGE_META } from "@/domain/constants";
 import { STAGE_PROGRESS_LABEL } from "@/modules/guidance/types";
 import { getProductGuidance } from "@/modules/guidance/service";
+import { listAgentRuns } from "@/modules/agent/service";
 import { getProductOverview } from "@/modules/product/overview";
 import { markDynamic } from "@/server/dynamic";
 
@@ -25,7 +27,11 @@ export default function OverviewPage({ params }: { params: Promise<{ id: string 
 async function Overview({ params }: { params: Promise<{ id: string }> }) {
   await markDynamic();
   const { id } = await params;
-  const [overview, guidance] = await Promise.all([getProductOverview(id), getProductGuidance(id)]);
+  const [overview, guidance, runs] = await Promise.all([
+    getProductOverview(id),
+    getProductGuidance(id),
+    listAgentRuns({ productId: id }),
+  ]);
   if (!overview || !guidance) notFound();
   const current = guidance.stages.find((stage) => stage.stage === guidance.stage);
 
@@ -90,6 +96,12 @@ async function Overview({ params }: { params: Promise<{ id: string }> }) {
             <li>Ship records a release. It does not deploy.</li>
             <li>Learn records outcome evidence.</li>
           </ul>
+        </div>
+        <div>
+          <h3 className="text-sm font-semibold">Agent runs</h3>
+          <div className="mt-2">
+            <AgentRunEvidenceList runs={runs.slice(0, 8)} />
+          </div>
         </div>
         <ActivityFeed items={overview.activity} />
         <p className="text-sm">

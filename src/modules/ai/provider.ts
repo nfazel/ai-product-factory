@@ -1,6 +1,7 @@
 import type { ZodType } from "zod";
 
 import { describeAIConfiguration, type AITask } from "@/modules/ai/config";
+import { ensureAISelection } from "@/modules/ai/selection";
 import { createConfiguredProvider } from "@/modules/ai/registry";
 
 export type AIChatMessage = {
@@ -19,7 +20,9 @@ export type AIGenerateRequest<T> = {
   responseSchema: ZodType<T>;
   schemaName: string;
   temperature?: number;
-  /** Reserved for a later per-task model. Ignored by adapters; the registry resolves the model. */
+  /** Product purpose, such as discovery. Adapters do not use it to choose a provider. */
+  purpose?: string;
+  /** Reserved for a later per-task model. The registry resolves the model. */
   task?: AITask;
 };
 
@@ -29,6 +32,8 @@ export type AIGenerateResult<T> = {
   model: string;
   /** Set by a real adapter. Test doubles may omit it. */
   provider?: string;
+  finishStatus?: string;
+  durationMs?: number;
 };
 
 export interface AIProvider {
@@ -42,12 +47,23 @@ export function setAIProviderForTests(provider: AIProvider | null) {
   providerOverride = provider;
 }
 
+export function hasProviderOverride() {
+  return providerOverride !== null;
+}
+
 export function isAIConfigured() {
   if (providerOverride) return true;
   return describeAIConfiguration().configured;
 }
 
-export function getAIProvider(task?: AITask): AIProvider {
+/** Loads the saved provider and model before a synchronous configuration check. */
+export async function prepareAI() {
+  if (providerOverride) return;
+  await ensureAISelection();
+}
+
+export async function getAIProvider(task?: AITask): Promise<AIProvider> {
   if (providerOverride) return providerOverride;
+  await ensureAISelection();
   return createConfiguredProvider(task);
 }

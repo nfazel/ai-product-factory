@@ -4,6 +4,9 @@ import { AGENT_CATALOG, AGENT_TYPES } from "@/domain/constants";
 import { codingConfigurationGap } from "@/modules/coding/config";
 import { describeAIConfiguration } from "@/modules/ai/config";
 import { aiNotConfiguredMessage, safeErrorMessage } from "@/modules/ai/errors";
+import { AIFailure } from "@/modules/ai/failures";
+import { prepareAI } from "@/modules/ai/provider";
+import { assertAIReady } from "@/modules/ai/surface";
 import { recordActivity } from "@/modules/activity/service";
 import { ensureAgentsRegistered } from "@/modules/agent/bootstrap";
 import {
@@ -64,6 +67,7 @@ export async function listAgentRuns(filters?: {
 
 export async function listAgentCatalogue(): Promise<AgentCatalogueEntry[]> {
   ensureAgentsRegistered();
+  await prepareAI();
   const [counts, latest, stats, escalatedCount, blockedCount] = await Promise.all([
     countRunsByAgentType(),
     latestRunByAgentType(),
@@ -95,13 +99,31 @@ export async function listAgentCatalogue(): Promise<AgentCatalogueEntry[]> {
  * Creates an AgentRun, executes the registered runner, and stores the outcome.
  * Refuses before writing a run when the agent is not configured.
  */
+const AGENT_CAPABILITY: Record<string, string> = {
+  PRODUCT_DISCOVERY: "Discovery",
+  REQUIREMENTS: "product definition",
+  ARCHITECTURE: "architecture",
+  SECURITY: "engineering governance",
+  CODING: "coding",
+  TESTING: "verification",
+};
+
 export async function executeAgent(request: AgentExecutionRequest) {
   ensureAgentsRegistered();
+  await prepareAI();
   const runner = getAgentRunner(request.agentType);
   if (!runner || !runner.isConfigured()) {
     throw new AgentNotConfiguredError(request.agentType);
   }
   if (runner.assertCanRun) await runner.assertCanRun(request);
+  await assertAIReady(
+    AGENT_CAPABILITY[request.agentType] ?? request.agentType,
+    request.agentType === "CODING"
+      ? "No code was changed."
+      : request.agentType === "TESTING"
+        ? "No verification was started."
+        : "Nothing was generated.",
+  );
 
   const startedAt = new Date();
   const run = await insertAgentRun({
@@ -116,7 +138,13 @@ export async function executeAgent(request: AgentExecutionRequest) {
     const result = await runner.execute(request);
     const completedAt = new Date();
     const saved = await completeAgentRun(run.id, {
-      output: result.output,
+      output: {
+        ...result.output,
+        purpose:
+          typeof result.output.purpose === "string" && result.output.purpose.trim()
+            ? result.output.purpose
+            : request.agentType,
+      },
       completedAt,
       duration: completedAt.getTime() - startedAt.getTime(),
       estimatedCost: result.estimatedCost ?? null,
@@ -136,6 +164,8 @@ export async function executeAgent(request: AgentExecutionRequest) {
     await failAgentRun(run.id, {
       output: {
         error: message,
+        purpose: request.agentType,
+        ...(error instanceof AIFailure ? { errorCategory: error.category } : {}),
         ...(configuration.providerId ? { provider: configuration.providerId } : {}),
         ...(configuration.model ? { model: configuration.model } : {}),
       },

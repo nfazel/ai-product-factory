@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { getAIProvider, isAIConfigured } from "@/modules/ai/provider";
+import { getAIProvider, isAIConfigured, prepareAI } from "@/modules/ai/provider";
 import { getMetricDefinition } from "@/modules/analytics/catalogue";
 import type { MetricValue } from "@/modules/analytics/types";
 
@@ -43,10 +43,12 @@ export type InsightResult =
 const UNSUPPORTED = /saved|return on investment|\broi\b|productivity|cost saving/i;
 
 export async function explainMetrics(metrics: MetricValue[]): Promise<InsightResult> {
+  await prepareAI();
   if (!isAIConfigured()) {
     return { available: false, reason: "AI is not configured. The calculated metrics are unchanged." };
   }
-  const generated = await getAIProvider().generate({
+  const provider = await getAIProvider();
+  const generated = await provider.generate({
     systemPrompt: [
       "You explain factory metrics that were already calculated.",
       "You cannot change a number, a data-quality rating, a sample size, a lifecycle record, or an approval.",

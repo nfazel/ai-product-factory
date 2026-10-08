@@ -73,7 +73,7 @@ async function ask<T>(
   context: string,
   evidence: AIRunEvidence[],
 ) {
-  const provider = getAIProvider();
+  const provider = await getAIProvider();
   const result = await provider.generate({
     systemPrompt: VERIFICATION_SYSTEM_PROMPT,
     messages: [{ role: "user", content: verificationUserMessage({ phase, contract, context }) }],

@@ -83,7 +83,7 @@ AI output is a proposal.
 1. Refuse, before creating a run, when the AI connection is not configured and no test provider is installed.
 2. Insert `AgentRun` with status `RUNNING`, the product id, and input `{ sessionId, mode }`. The input does not contain the API key.
 3. Load the session, messages, and current brief on the server.
-4. Call `AIProvider.generate` with the system prompt, the conversation, and the Zod schema. Temperature is 0.3. The model is `AI_MODEL` for the provider in `AI_PROVIDER`. See [ai-provider.md](ai-provider.md).
+4. Call `AIProvider.generate` with the system prompt, the conversation, and the Zod schema. Temperature is 0.3. The model is the active model for the active provider. See [ai-providers.md](ai-providers.md).
 5. Validate. Merge updates that are allowed. Write the assistant message.
 6. Set the run to `COMPLETED`, store the response plus `usage.inputTokens` and `usage.outputTokens`, and store duration in milliseconds.
 7. Leave `estimatedCost` null. The provider does not return a reliable price, and the app does not invent one.

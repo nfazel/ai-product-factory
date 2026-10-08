@@ -85,7 +85,13 @@ async function Definition({ params }: { params: Promise<{ id: string }> }) {
                 ))}
               </div>
             ) : null}
-            {!workspace.configured ? <AINotConfiguredNotice capability="product definition" /> : null}
+            {!workspace.configured ? (
+              <AINotConfiguredNotice
+                capability="product definition"
+                title={workspace.aiNotice?.title}
+                body={workspace.aiNotice?.body}
+              />
+            ) : null}
             {workspace.definition.reviewSummary ? (
               <p className="text-sm leading-6">{workspace.definition.reviewSummary}</p>
             ) : null}

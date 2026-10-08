@@ -7,8 +7,8 @@ import {
   type BriefSection,
   type ProductStage,
 } from "@/domain/constants";
-import { isAIConfigured } from "@/modules/ai/provider";
-import { AINotConfiguredError, safeErrorMessage } from "@/modules/ai/errors";
+import { safeErrorMessage } from "@/modules/ai/errors";
+import { aiWorkspaceGate, assertAIReady } from "@/modules/ai/surface";
 import { executeAgent } from "@/modules/agent/service";
 import { recordActivity } from "@/modules/activity/service";
 import { queryApprovals } from "@/modules/approval/repository";
@@ -85,8 +85,10 @@ export async function getDiscoveryWorkspace(productId: string, version?: number)
       ])
     : 0;
 
+  const connection = await aiWorkspaceGate("Discovery");
   return {
-    configured: isAIConfigured(),
+    configured: connection.configured,
+    aiNotice: connection.aiNotice,
     product,
     session,
     messages,
@@ -95,7 +97,7 @@ export async function getDiscoveryWorkspace(productId: string, version?: number)
     versions,
     viewingHistorical: Boolean(brief && current && brief.id !== current.id),
     approvals: approvals.filter((item) => item.approvalType === "PRODUCT_DISCOVERY"),
-    canRetry: isAIConfigured() && latestRun?.status === "FAILED",
+    canRetry: connection.configured && latestRun?.status === "FAILED",
     latestError,
     sufficientAreas: clarity,
   };
@@ -109,7 +111,7 @@ export async function startDiscovery(input: {
   knownUsers: string;
   desiredOutcome: string;
 }) {
-  if (!isAIConfigured()) throw new AINotConfiguredError();
+  await assertAIReady("Discovery");
   const product = await findProductRow(input.productId);
   if (!product) throw new DomainError("Product not found.", "NOT_FOUND");
   const existing = await findDiscoverySession(input.productId);
@@ -131,7 +133,7 @@ export async function startDiscovery(input: {
 }
 
 export async function continueDiscovery(productId: string, message: string) {
-  if (!isAIConfigured()) throw new AINotConfiguredError();
+  await assertAIReady("Discovery");
   const session = await findDiscoverySession(productId);
   if (!session) throw new DomainError("Start product discovery before continuing.");
   await appendDiscoveryMessage({
@@ -143,7 +145,7 @@ export async function continueDiscovery(productId: string, message: string) {
 }
 
 export async function requestDiscoveryReview(productId: string) {
-  if (!isAIConfigured()) throw new AINotConfiguredError();
+  await assertAIReady("Discovery");
   const session = await findDiscoverySession(productId);
   if (!session) throw new DomainError("Start product discovery before requesting a review.");
   await appendDiscoveryMessage({
@@ -155,7 +157,7 @@ export async function requestDiscoveryReview(productId: string) {
 }
 
 export async function retryDiscovery(productId: string) {
-  if (!isAIConfigured()) throw new AINotConfiguredError();
+  await assertAIReady("Discovery");
   const session = await findDiscoverySession(productId);
   if (!session) throw new DomainError("There is no discovery session to retry.");
   const latest = await latestDiscoveryRun(productId);

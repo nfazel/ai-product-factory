@@ -3198,6 +3198,23 @@ model IntakeQuestionLink {
   @@index([sourceRequirementId])
 }
 
+model AiSelection {
+  id        String   @id
+  provider  String
+  model     String
+  updatedBy String
+  updatedAt DateTime @updatedAt
+}
+
+model AiSelectionChange {
+  id          String   @id @default(cuid())
+  description String
+  actor       String
+  createdAt   DateTime @default(now())
+
+  @@index([createdAt])
+}
+
 model RequirementTraceLink {
   id                  String              @id @default(cuid())
   productId           String

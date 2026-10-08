@@ -41,12 +41,16 @@ function ProductForm({
 export function DiscoveryComposer({
   productId,
   configured,
+  noticeTitle,
+  noticeBody,
   canRetry,
   approved,
   canApprove,
 }: {
   productId: string;
   configured: boolean;
+  noticeTitle?: string;
+  noticeBody?: string;
   canRetry: boolean;
   approved: boolean;
   canApprove: boolean;
@@ -76,7 +80,7 @@ export function DiscoveryComposer({
           </SubmitButton>
         </form>
       ) : (
-        <AINotConfiguredNotice capability="Discovery" />
+        <AINotConfiguredNotice capability="Discovery" title={noticeTitle} body={noticeBody} />
       )}
       <div className="flex flex-wrap gap-3">
         {configured ? (

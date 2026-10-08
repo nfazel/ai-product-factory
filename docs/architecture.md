@@ -29,7 +29,7 @@ Rules:
 | Product | Product definition, status, and current stage. |
 | Discovery | Discovery sessions, messages, product briefs, and assumptions. |
 | Requirements | Outcomes, capabilities, proposals, the first slice, readiness, and the requirements runner. |
-| AI | `AIProvider`, the provider registry, and the OpenAI and Anthropic adapters. Server-side only. See [ai-provider.md](ai-provider.md). |
+| AI | `AIProvider`, the provider registry, and the Gemini, Ollama, and OpenAI adapters. Server-side only. See [ai-providers.md](ai-providers.md). |
 | Work item | Backlog items, hierarchy, and dependencies. |
 | Acceptance | Criteria on a work item, including pass and fail. |
 | Decision | Human decisions, optionally tied to a work item. |
@@ -90,7 +90,7 @@ The catalogue in `src/domain/constants.ts` names the agents:
 - Coding — implemented, inside Build. **CONFIGURED** only when the AI connection is configured and `PRODUCT_REPOSITORY_ROOT` is a Git repository outside this application, unless `PRODUCT_REPOSITORY_ALLOW_FACTORY=true`
 - Testing & Verification — implemented, as the existing `TESTING` agent type. It verifies one completed task and can run while the product is still in Build. **CONFIGURED** only when the model and a repository are both configured
 
-Product Discovery, the Requirements Agent, the Architecture Agent, and the Security & Engineering Governance Agent are **CONFIGURED** only when `AI_PROVIDER`, `AI_MODEL`, and that provider's server credential are set, or when a test supplies a provider. The Coding Agent and the Testing & Verification Agent also need a repository. The control centre reads run counts, completed runs, failed runs, and average duration from `AgentRun`. The Coding Agent also shows how many completed runs escalated. The Testing & Verification Agent also shows how many non-demo sessions are `BLOCKED`. Token counts are stored when the provider returns them. Cost is left empty rather than guessed.
+Product Discovery, the Requirements Agent, the Architecture Agent, and the Security & Engineering Governance Agent are **CONFIGURED** only when the active provider and model are set and that provider can be called, or when a test supplies a provider. Google Gemini and OpenAI need their server credential. Ollama needs a reachable endpoint and an installed model. The Coding Agent and the Testing & Verification Agent also need a repository. The control centre reads run counts, completed runs, failed runs, and average duration from `AgentRun`. The Coding Agent also shows how many completed runs escalated. The Testing & Verification Agent also shows how many non-demo sessions are `BLOCKED`. Token counts are stored when the provider returns them. Cost is left empty rather than guessed. A later configuration may give the Coding Agent and the Verification Agent different models. Different models do not prove correctness.
 
 Build is where implementation and task-level verification happen. Prove is where the approved product slice is assessed as a whole. AI Product Builder does not move the product into Prove because one task was verified.
 
@@ -114,7 +114,7 @@ type AgentRunner = {
 When a configured runner executes:
 
 1. Create an `AgentRun` with status `RUNNING` and the structured input.
-2. Call the provider through `AIProvider.generate`. The registry selects OpenAI or Anthropic. The credential never leaves the server.
+2. Call the provider through `AIProvider.generate`. The registry selects the configured Gemini, Ollama, or OpenAI adapter. The credential never leaves the server. Another provider is not substituted when the selected one fails.
 3. Validate the response with Zod. On failure, store a redacted error, set status `FAILED`, and leave the product brief unchanged.
 4. On success, store the structured output, duration, and token usage. `estimatedCost` stays null.
 5. Append an activity record.

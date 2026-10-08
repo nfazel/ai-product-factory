@@ -44,7 +44,7 @@ export const productDiscoveryRunner: AgentRunner = {
     ]);
     if (!brief) throw new DomainError("Product brief not found.", "NOT_FOUND");
 
-    const provider = getAIProvider();
+    const provider = await getAIProvider();
     const result = await provider.generate({
       systemPrompt: PRODUCT_DISCOVERY_SYSTEM_PROMPT,
       messages: modelMessages({

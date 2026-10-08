@@ -145,7 +145,7 @@ async function ask<T>(schema: ZodType<T>, schemaName: string, input: {
   context: string;
   revision?: string;
 }) {
-  const provider = getAIProvider();
+  const provider = await getAIProvider();
   const result = await provider.generate({
     systemPrompt: CODING_SYSTEM_PROMPT,
     messages: [{ role: "user", content: codingUserMessage(input) }],
