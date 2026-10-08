@@ -21,7 +21,7 @@ Execution starts only when all of these are true:
 - the effective execution mode is not `HUMAN_ONLY`
 - no dependency is still unresolved
 - no other workspace for that product is still open
-- `OPENAI_API_KEY` is set, or a test provider is installed
+- the AI connection is configured, or a test provider is installed
 - `PRODUCT_REPOSITORY_ROOT` is a configured local Git repository
 
 If any condition fails, the page lists every blocking reason and no `AgentRun` is created.

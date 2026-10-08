@@ -4,7 +4,7 @@ import Link from "next/link";
 import { PageSkeleton } from "@/components/feedback/states";
 import { PageHeader } from "@/components/layout/page-header";
 import { ValidateConnectionButton } from "@/components/source-control/source-control-controls";
-import { isAIConfigured } from "@/modules/ai/provider";
+import { describeAIConfiguration } from "@/modules/ai/config";
 import { repositoryRootConfigured } from "@/modules/coding/config";
 import { getConnectionSummary } from "@/modules/source-control/service";
 import { markDynamic } from "@/server/dynamic";
@@ -31,7 +31,7 @@ export default function SettingsPage() {
 async function Settings() {
   await markDynamic();
   const connection = await getConnectionSummary();
-  const aiConfigured = isAIConfigured();
+  const ai = describeAIConfiguration();
   const repositoryConfigured = repositoryRootConfigured();
 
   return (
@@ -43,11 +43,27 @@ async function Settings() {
       />
       <section className="grid gap-4 lg:grid-cols-2">
         <article className="rounded-2xl border bg-card p-5">
-          <h2 className="text-base font-semibold">AI model</h2>
-          <p className="mt-3 text-sm leading-6">
-            {aiConfigured ? "A model key is configured on the server." : "No model key is configured. Discovery and drafting stay closed, and no response is invented."}
-          </p>
-          <p className="mt-2 text-sm leading-6 text-muted-foreground">The key stays in the server environment. This page cannot show it.</p>
+          <h2 className="text-base font-semibold">AI Configuration</h2>
+          <dl className="mt-4 grid gap-3 text-sm">
+            <div>
+              <dt className="text-xs text-muted-foreground">Provider</dt>
+              <dd className="mt-1 font-medium">{ai.providerLabel ?? "Not selected"}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-muted-foreground">Model</dt>
+              <dd className="mt-1 font-medium">{ai.model ?? "Not selected"}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-muted-foreground">Status</dt>
+              <dd className="mt-1 font-medium">{ai.status}</dd>
+            </div>
+          </dl>
+          <p className="mt-3 text-sm leading-6">{ai.setup}</p>
+          <div className="mt-3 space-y-2 text-sm leading-6 text-muted-foreground">
+            <p>OpenAI: set AI_PROVIDER=openai, AI_MODEL to an OpenAI model, and OPENAI_API_KEY on the server.</p>
+            <p>Anthropic: set AI_PROVIDER=anthropic, AI_MODEL to an Anthropic model, and ANTHROPIC_API_KEY on the server.</p>
+            <p>Credentials stay in the server environment. This page cannot show an API key.</p>
+          </div>
         </article>
         <article className="rounded-2xl border bg-card p-5">
           <h2 className="text-base font-semibold">Local repository</h2>

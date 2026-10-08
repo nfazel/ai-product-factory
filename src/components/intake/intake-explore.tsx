@@ -1,3 +1,4 @@
+import { AINotConfiguredNotice } from "@/components/ai/not-configured";
 import {
   ApproveBriefButton,
   MoveToDefineButton,
@@ -95,11 +96,7 @@ export async function IntakeExplore({
         </section>
       ) : null}
 
-      {!workspace.configured ? (
-        <p className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-950">
-          Requirements analysis is not configured. Add OPENAI_API_KEY on the server. No analysis will be invented.
-        </p>
-      ) : null}
+      {!workspace.configured ? <AINotConfiguredNotice capability="requirements analysis" /> : null}
 
       <section className="rounded-2xl border bg-card p-4 sm:p-5">
         <h3 className="text-sm font-semibold">Readiness</h3>

@@ -59,7 +59,7 @@ File deletion is denied unless the task text asks to remove or delete something,
 
 A coding policy may also list a specific `npm …` command. Anything else is denied, including `rm`, `sudo`, `curl` or `wget` piped to a shell, `git push`, `git reset --hard`, environment dumps, and shell metacharacters such as `;`, `|`, `&`, and backticks.
 
-The child process receives `PATH` and a few locale variables. It does not receive `OPENAI_API_KEY` or `DATABASE_URL`.
+The child process receives `PATH` and a few locale variables. It does not receive `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `DATABASE_URL`.
 
 Checks run with the worktree as the working directory, so they do not run this application's own test suite.
 

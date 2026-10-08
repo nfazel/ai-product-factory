@@ -10,7 +10,7 @@ It challenges, assesses, identifies risk, and recommends. A person gates the res
 
 The review is a separate agent (`SECURITY` in the catalogue), registered on the existing `AgentRunner` and `AIProvider`. It is not a mode of the Architecture Agent. The system prompt tells the model that it did not create the architecture, that it must not defend the design, and that it must not mark something safe merely because the Architecture Agent proposed it.
 
-The control centre shows **CONFIGURED** only when `OPENAI_API_KEY` is set, or when a test supplies a provider. It shows Runs, Completed, Failed, and Average duration from real `AgentRun` rows. Otherwise it shows **NOT CONFIGURED**.
+The control centre shows **CONFIGURED** only when the AI connection is configured, or when a test supplies a provider. It shows Runs, Completed, Failed, and Average duration from real `AgentRun` rows. Otherwise it shows **NOT CONFIGURED**.
 
 ## Entry conditions
 

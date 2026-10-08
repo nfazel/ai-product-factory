@@ -1,4 +1,5 @@
-export { AINotConfiguredError, safeErrorMessage } from "@/modules/ai/errors";
+export { AINotConfiguredError, aiNotConfiguredMessage, safeErrorMessage } from "@/modules/ai/errors";
+export { describeAIConfiguration } from "@/modules/ai/config";
 export {
   getAIProvider,
   isAIConfigured,
@@ -11,3 +12,4 @@ export type {
   AIProvider,
   AIUsage,
 } from "@/modules/ai/provider";
+export type { AIConfigurationView, AITask } from "@/modules/ai/config";

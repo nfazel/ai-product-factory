@@ -3,6 +3,7 @@ import "server-only";
 import fs from "node:fs";
 import path from "node:path";
 
+import { aiRunEvidence, combineAIEvidence, type AIRunEvidence } from "@/modules/ai/evidence";
 import { getAIProvider } from "@/modules/ai/provider";
 import type { AgentExecutionRequest, AgentRunner } from "@/modules/agent/types";
 import { codingConfigurationGap } from "@/modules/coding/config";
@@ -64,7 +65,14 @@ async function loadSession(productId: string, sessionId: string) {
   return session;
 }
 
-async function ask<T>(schema: ZodType<T>, schemaName: string, phase: string, contract: string, context: string) {
+async function ask<T>(
+  schema: ZodType<T>,
+  schemaName: string,
+  phase: string,
+  contract: string,
+  context: string,
+  evidence: AIRunEvidence[],
+) {
   const provider = getAIProvider();
   const result = await provider.generate({
     systemPrompt: VERIFICATION_SYSTEM_PROMPT,
@@ -75,6 +83,7 @@ async function ask<T>(schema: ZodType<T>, schemaName: string, phase: string, con
   });
   const parsed = schema.safeParse(result.data);
   if (!parsed.success) throw new DomainError(refusal);
+  evidence.push(aiRunEvidence(result));
   return parsed.data;
 }
 
@@ -82,10 +91,11 @@ async function runPlan(session: NonNullable<Awaited<ReturnType<typeof loadSessio
   const contract = contractText(session.contract!);
   const criterionIds = new Set((session.task.workItem?.acceptanceCriteria ?? []).map((item) => item.id));
   const context = boundedContext(session.workspace!.workspacePath);
-  const conditions = await ask(conditionAnalysisSchema, "verification_conditions", "conditions", contract, context);
-  const plan = await ask(verificationPlanSchema, "verification_plan", "plan", contract, context);
-  const cases = await ask(testCaseSchema, "verification_test_cases", "test cases", contract, context);
-  const mapping = await ask(coverageMappingSchema, "verification_coverage", "coverage", contract, context);
+  const evidence: AIRunEvidence[] = [];
+  const conditions = await ask(conditionAnalysisSchema, "verification_conditions", "conditions", contract, context, evidence);
+  const plan = await ask(verificationPlanSchema, "verification_plan", "plan", contract, context, evidence);
+  const cases = await ask(testCaseSchema, "verification_test_cases", "test cases", contract, context, evidence);
+  const mapping = await ask(coverageMappingSchema, "verification_coverage", "coverage", contract, context, evidence);
   const known = (id: string) => criterionIds.has(id);
   for (const criterion of session.task.workItem?.acceptanceCriteria ?? []) {
     await db.verificationCondition.create({
@@ -164,6 +174,7 @@ async function runPlan(session: NonNullable<Awaited<ReturnType<typeof loadSessio
       sessionId: session.id,
       summary: plan.summary,
       blocked: false,
+      ...combineAIEvidence(evidence),
     },
   };
 }
@@ -253,9 +264,10 @@ async function runExecute(session: NonNullable<Awaited<ReturnType<typeof loadSes
   });
   const contract = contractText(session.contract!);
   const context = "Independent execution finished. Coding self-review is not a verdict.";
-  const interpretation = await ask(interpretationSchema, "verification_interpretation", "interpretation", contract, context);
-  const defects = await ask(defectProposalSchema, "verification_defects", "defects", contract, context);
-  const summary = await ask(verificationSummarySchema, "verification_summary", "summary", contract, context);
+  const evidence: AIRunEvidence[] = [];
+  const interpretation = await ask(interpretationSchema, "verification_interpretation", "interpretation", contract, context, evidence);
+  const defects = await ask(defectProposalSchema, "verification_defects", "defects", contract, context, evidence);
+  const summary = await ask(verificationSummarySchema, "verification_summary", "summary", contract, context, evidence);
   await db.verificationEvidence.create({
     data: {
       sessionId: session.id,
@@ -295,6 +307,7 @@ async function runExecute(session: NonNullable<Awaited<ReturnType<typeof loadSes
       proposedVerdict: summary.proposedVerdict,
       verdict: decision?.verdict ?? "INCONCLUSIVE",
       blocked: decision?.status === "BLOCKED",
+      ...combineAIEvidence(evidence),
     },
   };
 }

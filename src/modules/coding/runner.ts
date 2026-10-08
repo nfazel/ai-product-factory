@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { recordActivity } from "@/modules/activity/service";
+import { aiRunEvidence } from "@/modules/ai/evidence";
 import { getAIProvider } from "@/modules/ai/provider";
 import type { AgentExecutionRequest, AgentRunner } from "@/modules/agent/types";
 import { commandForCheck } from "@/modules/coding/checks";
@@ -154,7 +155,7 @@ async function ask<T>(schema: ZodType<T>, schemaName: string, input: {
   });
   const parsed = schema.safeParse(result.data);
   if (!parsed.success) throw new DomainError(refusal);
-  return { data: parsed.data, model: result.model, usage: result.usage };
+  return { data: parsed.data, ...aiRunEvidence(result) };
 }
 
 async function boundedContext(context: ToolContext) {
@@ -241,6 +242,7 @@ async function runPlan(workspace: NonNullable<Awaited<ReturnType<typeof findWork
         escalated: true,
         outcome: "ESCALATED",
         summary: plan.data.summary,
+        provider: plan.provider,
         model: plan.model,
         usage: plan.usage,
       },
@@ -261,6 +263,7 @@ async function runPlan(workspace: NonNullable<Awaited<ReturnType<typeof findWork
       escalated: false,
       outcome: autonomous ? "APPROVED" : "PROPOSED",
       summary: plan.data.summary,
+      provider: plan.provider,
       model: plan.model,
       usage: plan.usage,
     },
@@ -324,7 +327,7 @@ async function runImplement(
       change.data.escalation.recommendedAction,
     );
     await finish(workspace, context, "ESCALATED", change.data.summary, false);
-    return output(workspace.id, "ESCALATED", true, change.data.summary, change.model, change.usage);
+    return output(workspace.id, "ESCALATED", true, change.data.summary, change.provider, change.model, change.usage);
   }
 
   let denied = false;
@@ -383,7 +386,7 @@ async function runImplement(
   const open = await openEscalationCount(workspace.id);
   const outcome = decide(completion.data.proposal, checksOk, denied, open > 0);
   await finish(workspace, context, outcome, change.data.summary, true);
-  return output(workspace.id, outcome, outcome === "ESCALATED", change.data.summary, completion.model, completion.usage);
+  return output(workspace.id, outcome, outcome === "ESCALATED", change.data.summary, completion.provider, completion.model, completion.usage);
 }
 
 function decide(
@@ -545,6 +548,7 @@ function output(
   outcome: string,
   escalated: boolean,
   summary: string,
+  provider: string,
   model: string,
   usage: { inputTokens: number | null; outputTokens: number | null },
 ) {
@@ -556,6 +560,7 @@ function output(
       escalated,
       outcome,
       summary,
+      provider,
       model,
       usage,
     },

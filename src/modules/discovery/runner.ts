@@ -1,6 +1,7 @@
 import "server-only";
 
 import { AGENT_CATALOG } from "@/domain/constants";
+import { aiRunEvidence } from "@/modules/ai/evidence";
 import { getAIProvider, isAIConfigured } from "@/modules/ai/provider";
 import { applyDiscoveryTurn } from "@/modules/discovery/repository";
 import {
@@ -85,8 +86,7 @@ export const productDiscoveryRunner: AgentRunner = {
     return {
       output: {
         response: parsed.data,
-        usage: result.usage,
-        model: result.model,
+        ...aiRunEvidence(result),
         briefId: applied.briefId,
         briefVersion: applied.version,
         readyForReview: parsed.data.discoveryAssessment.readyForReview,

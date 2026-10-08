@@ -1,7 +1,7 @@
 import type { ZodType } from "zod";
 
-import { AINotConfiguredError } from "@/modules/ai/errors";
-import { OpenAIProvider } from "@/modules/ai/openai";
+import { describeAIConfiguration, type AITask } from "@/modules/ai/config";
+import { createConfiguredProvider } from "@/modules/ai/registry";
 
 export type AIChatMessage = {
   role: "user" | "assistant";
@@ -19,12 +19,16 @@ export type AIGenerateRequest<T> = {
   responseSchema: ZodType<T>;
   schemaName: string;
   temperature?: number;
+  /** Reserved for a later per-task model. Ignored by adapters; the registry resolves the model. */
+  task?: AITask;
 };
 
 export type AIGenerateResult<T> = {
   data: T;
   usage: AIUsage;
   model: string;
+  /** Set by a real adapter. Test doubles may omit it. */
+  provider?: string;
 };
 
 export interface AIProvider {
@@ -40,11 +44,10 @@ export function setAIProviderForTests(provider: AIProvider | null) {
 
 export function isAIConfigured() {
   if (providerOverride) return true;
-  return Boolean(process.env.OPENAI_API_KEY?.trim());
+  return describeAIConfiguration().configured;
 }
 
-export function getAIProvider(): AIProvider {
+export function getAIProvider(task?: AITask): AIProvider {
   if (providerOverride) return providerOverride;
-  if (!process.env.OPENAI_API_KEY?.trim()) throw new AINotConfiguredError();
-  return new OpenAIProvider();
+  return createConfiguredProvider(task);
 }

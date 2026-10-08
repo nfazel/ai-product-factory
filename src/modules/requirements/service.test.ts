@@ -24,7 +24,8 @@ function mockProvider(data: unknown, error?: Error): AIProvider {
       return {
         data: data as T,
         usage: { inputTokens: 20, outputTokens: 40 },
-        model: "mock",
+        model: "mock-definition",
+        provider: "anthropic",
       };
     },
   };
@@ -139,6 +140,9 @@ describe("requirements commit and traceability", () => {
     setAIProviderForTests(mockProvider(requirementsFixture()));
     await generateProductDefinition(product.id);
 
+    const run = await db.agentRun.findFirst({ where: { productId: product.id, agentType: "REQUIREMENTS" } });
+    expect(run?.output).toMatchObject({ provider: "anthropic", model: "mock-definition" });
+    expect(JSON.stringify(run?.output)).not.toMatch(/sk-|OPENAI_API_KEY|ANTHROPIC_API_KEY/);
     expect(await db.workItem.count({ where: { productId: product.id } })).toBe(0);
     const proposal = await db.definitionProposal.findFirst({ where: { productId: product.id } });
     expect(proposal?.status).toBe("OPEN");

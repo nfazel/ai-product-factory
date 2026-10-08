@@ -13,7 +13,7 @@ A real run starts only when both are true:
 
 If either is missing, the agent does not run. The Definition page states what is missing. Seeded demo content can still be reviewed. The seed does not create an `AgentRun` and does not bypass the gate.
 
-The agent also refuses, before an `AgentRun` row is inserted, when `OPENAI_API_KEY` is unset and no test provider is installed.
+The agent also refuses, before an `AgentRun` row is inserted, when the AI connection is not configured and no test provider is installed.
 
 ## System prompt
 

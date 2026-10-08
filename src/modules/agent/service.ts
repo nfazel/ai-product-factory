@@ -2,7 +2,8 @@ import "server-only";
 
 import { AGENT_CATALOG, AGENT_TYPES } from "@/domain/constants";
 import { codingConfigurationGap } from "@/modules/coding/config";
-import { safeErrorMessage } from "@/modules/ai/errors";
+import { describeAIConfiguration } from "@/modules/ai/config";
+import { aiNotConfiguredMessage, safeErrorMessage } from "@/modules/ai/errors";
 import { recordActivity } from "@/modules/activity/service";
 import { ensureAgentsRegistered } from "@/modules/agent/bootstrap";
 import {
@@ -28,22 +29,22 @@ export class AgentNotConfiguredError extends DomainError {
   constructor(agentType: string) {
     super(
       agentType === "PRODUCT_DISCOVERY"
-        ? "Product Discovery is not configured. Add OPENAI_API_KEY on the server. No response was generated."
+        ? aiNotConfiguredMessage("Discovery", "Nothing was generated.")
         : agentType === "REQUIREMENTS"
-          ? "The Requirements Agent is not configured. Add OPENAI_API_KEY on the server. No product definition was generated."
+          ? aiNotConfiguredMessage("product definition", "No product definition was generated.")
           : agentType === "ARCHITECTURE"
-            ? "The Architecture Agent is not configured. Add OPENAI_API_KEY on the server. No architecture was generated."
+            ? aiNotConfiguredMessage("architecture", "No architecture was generated.")
             : agentType === "SECURITY"
-              ? "The Security & Engineering Governance Agent is not configured. Add OPENAI_API_KEY on the server. No governance review was generated."
+              ? aiNotConfiguredMessage("engineering governance", "No governance review was generated.")
               : agentType === "CODING"
                 ? codingConfigurationGap() === "repository"
                   ? "The Coding Agent is not configured. Set PRODUCT_REPOSITORY_ROOT to a Git repository that is not this application. No code was changed."
-                  : "The Coding Agent is not configured. Add OPENAI_API_KEY on the server. No code was changed."
+                  : aiNotConfiguredMessage("coding", "No code was changed.")
                 : agentType === "TESTING"
                   ? codingConfigurationGap() === "repository"
                     ? "The Testing & Verification Agent is not configured. Set PRODUCT_REPOSITORY_ROOT to a Git repository that is not this application. No verification was started."
-                    : "The Testing & Verification Agent is not configured. Add OPENAI_API_KEY on the server. No verification was started."
-                : `${agentType} is not configured. No response was generated.`,
+                    : aiNotConfiguredMessage("verification", "No verification was started.")
+                : aiNotConfiguredMessage(agentType, "Nothing was generated."),
       "INVALID",
     );
     this.name = "AgentNotConfiguredError";
@@ -131,8 +132,13 @@ export async function executeAgent(request: AgentExecutionRequest) {
   } catch (error) {
     const completedAt = new Date();
     const message = safeErrorMessage(error);
+    const configuration = describeAIConfiguration();
     await failAgentRun(run.id, {
-      output: { error: message },
+      output: {
+        error: message,
+        ...(configuration.providerId ? { provider: configuration.providerId } : {}),
+        ...(configuration.model ? { model: configuration.model } : {}),
+      },
       completedAt,
       duration: completedAt.getTime() - startedAt.getTime(),
     });

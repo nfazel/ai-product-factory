@@ -395,7 +395,7 @@ describe("coding entry", () => {
     const setup = await readyProduct();
     setAIProviderForTests(null);
     delete process.env.OPENAI_API_KEY;
-    await expect(startCodingTask(setup.product.id, setup.task.id)).rejects.toThrow(/OPENAI_API_KEY/);
+    await expect(startCodingTask(setup.product.id, setup.task.id)).rejects.toThrow(/AI is not configured/);
     expect(await db.agentRun.count({ where: { productId: setup.product.id } })).toBe(0);
   });
 });

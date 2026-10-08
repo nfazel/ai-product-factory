@@ -19,7 +19,7 @@ A real run starts only when all of these are true:
 
 If any condition is missing, the agent does not run. The Build page lists what is blocking it. Seeded demo architecture can still be reviewed. The seed does not create an `AgentRun` and does not bypass the gate.
 
-The agent is registered on the existing `AgentRunner` and calls `AIProvider.generate`. It does not add a second model integration. It is **CONFIGURED** only when `OPENAI_API_KEY` is set, or when a test supplies a provider. Otherwise the control centre shows **NOT CONFIGURED** and no run is stored.
+The agent is registered on the existing `AgentRunner` and calls `AIProvider.generate`. It does not add a second model integration. It is **CONFIGURED** only when the AI connection is configured, or when a test supplies a provider. Otherwise the control centre shows **NOT CONFIGURED** and no run is stored.
 
 ## Workflow
 

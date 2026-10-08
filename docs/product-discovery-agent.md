@@ -41,7 +41,7 @@ The prompt also states the governance rules: the agent cannot approve the brief,
 
 ## Structured output
 
-The model does not return free-form prose for the brief. `AIProvider.generate` requests a Zod schema named `product_discovery_turn`. The OpenAI provider uses the official SDK structured parse helper. The runner parses the payload again before any brief write.
+The model does not return free-form prose for the brief. `AIProvider.generate` requests a Zod schema named `product_discovery_turn`. The selected adapter translates that schema into the provider's structured-output API. The runner parses the payload again before any brief write.
 
 The response contains:
 
@@ -80,10 +80,10 @@ AI output is a proposal.
 
 ## Agent execution lifecycle
 
-1. Refuse, before creating a run, when `OPENAI_API_KEY` is missing and no test provider is installed.
+1. Refuse, before creating a run, when the AI connection is not configured and no test provider is installed.
 2. Insert `AgentRun` with status `RUNNING`, the product id, and input `{ sessionId, mode }`. The input does not contain the API key.
 3. Load the session, messages, and current brief on the server.
-4. Call `AIProvider.generate` with the system prompt, the conversation, and the Zod schema. Temperature is 0.3. The model defaults to `gpt-4.1-mini` unless `OPENAI_MODEL` is set.
+4. Call `AIProvider.generate` with the system prompt, the conversation, and the Zod schema. Temperature is 0.3. The model is `AI_MODEL` for the provider in `AI_PROVIDER`. See [ai-provider.md](ai-provider.md).
 5. Validate. Merge updates that are allowed. Write the assistant message.
 6. Set the run to `COMPLETED`, store the response plus `usage.inputTokens` and `usage.outputTokens`, and store duration in milliseconds.
 7. Leave `estimatedCost` null. The provider does not return a reliable price, and the app does not invent one.

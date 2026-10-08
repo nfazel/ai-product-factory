@@ -1,6 +1,7 @@
 import "server-only";
 
 import { ARCHITECTURE_SECTIONS, type ArchitectureSection } from "@/domain/constants";
+import { aiRunEvidence } from "@/modules/ai/evidence";
 import { getAIProvider, isAIConfigured } from "@/modules/ai/provider";
 import { loadArchitectureContext } from "@/modules/architecture/context";
 import { architectureEntryBlockers, planEntryBlockers } from "@/modules/architecture/gates";
@@ -89,8 +90,7 @@ export const architectureRunner: AgentRunner = {
         output: {
           mode,
           summary: parsed.data.assistantSummary,
-          usage: result.usage,
-          model: result.model,
+          ...aiRunEvidence(result),
           approved: false,
         },
         estimatedCost: null,
@@ -122,8 +122,7 @@ export const architectureRunner: AgentRunner = {
       output: {
         mode,
         summary: stored.assistantSummary,
-        usage: result.usage,
-        model: result.model,
+        ...aiRunEvidence(result),
         approved: false,
       },
       estimatedCost: null,

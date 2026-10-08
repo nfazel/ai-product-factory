@@ -2,6 +2,7 @@
 
 import { useActionState } from "react";
 
+import { AINotConfiguredNotice } from "@/components/ai/not-configured";
 import { FormMessage, SubmitButton, TextAreaField } from "@/components/forms/fields";
 import { idleState } from "@/lib/action-state";
 import {
@@ -75,9 +76,7 @@ export function DiscoveryComposer({
           </SubmitButton>
         </form>
       ) : (
-        <p className="text-sm leading-6 text-muted-foreground">
-          Replies stay closed until OPENAI_API_KEY is set on the server. Nothing is invented in its place.
-        </p>
+        <AINotConfiguredNotice capability="Discovery" />
       )}
       <div className="flex flex-wrap gap-3">
         {configured ? (

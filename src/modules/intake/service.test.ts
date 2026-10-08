@@ -43,7 +43,7 @@ function mockProvider(data: unknown, error?: Error, seen?: { request?: AIGenerat
     async generate<T>(request: AIGenerateRequest<T>) {
       if (seen) seen.request = request;
       if (error) throw error;
-      return { data: data as T, usage: { inputTokens: 8, outputTokens: 12 }, model: "mock" };
+      return { data: data as T, usage: { inputTokens: 8, outputTokens: 12 }, model: "mock", provider: "anthropic" };
     },
   };
 }
@@ -348,6 +348,11 @@ describe("requirement extraction", () => {
     expect(JSON.stringify(seen.request)).not.toContain(process.env.OPENAI_API_KEY ?? "sk-live");
     const run = await db.agentRun.findFirst({ where: { productId: product.id, agentType: "REQUIREMENTS" } });
     expect(run?.status).toBe("COMPLETED");
+    expect(run?.output).toMatchObject({
+      provider: "anthropic",
+      model: "mock",
+      purpose: "existing-requirements-analysis",
+    });
     expect(JSON.stringify(run?.input)).not.toContain("rm -rf");
     expect(JSON.stringify(run?.input)).toContain("existing-requirements-analysis");
     const conflict = await db.requirementFinding.findFirst({ where: { productId: product.id, findingType: "CONFLICT" } });

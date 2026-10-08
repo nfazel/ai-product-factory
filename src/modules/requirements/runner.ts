@@ -1,6 +1,7 @@
 import "server-only";
 
 import { AGENT_CATALOG } from "@/domain/constants";
+import { aiRunEvidence } from "@/modules/ai/evidence";
 import { getAIProvider, isAIConfigured } from "@/modules/ai/provider";
 import { definitionEntryBlockers } from "@/modules/requirements/gates";
 import {
@@ -148,8 +149,7 @@ export const requirementsRunner: AgentRunner = {
         output: {
           mode,
           summary: parsed.data.assistantSummary,
-          usage: result.usage,
-          model: result.model,
+          ...aiRunEvidence(result),
           approved: false,
         },
         estimatedCost: null,
@@ -184,8 +184,7 @@ export const requirementsRunner: AgentRunner = {
         mode,
         proposalId: proposal.id,
         summary: stored.assistantSummary,
-        usage: result.usage,
-        model: result.model,
+        ...aiRunEvidence(result),
         actor: AGENT_CATALOG.REQUIREMENTS.name,
         approved: false,
       },

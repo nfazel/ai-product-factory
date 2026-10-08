@@ -1,6 +1,9 @@
 import "server-only";
 
 import { db } from "@/lib/db";
+import { describeAIConfiguration } from "@/modules/ai/config";
+import { aiRunEvidence } from "@/modules/ai/evidence";
+import { aiNotConfiguredMessage } from "@/modules/ai/errors";
 import { isAIConfigured, getAIProvider } from "@/modules/ai/provider";
 import { safeErrorMessage } from "@/modules/ai/errors";
 import { completeAgentRun, failAgentRun, insertAgentRun } from "@/modules/agent/repository";
@@ -147,7 +150,7 @@ export async function analyseRequirements(productId: string) {
   const usable = sources.filter((source) => source.sourceText.trim().length > 0);
   if (usable.length === 0) throw new DomainError("Add requirements before analysing them.");
   if (!isAIConfigured()) {
-    throw new DomainError("Requirements analysis is not configured. Add OPENAI_API_KEY on the server. No analysis was created.");
+    throw new DomainError(aiNotConfiguredMessage("requirements analysis", "No analysis was created."));
   }
   const startedAt = new Date();
   const run = await insertAgentRun({
@@ -193,8 +196,7 @@ export async function analyseRequirements(productId: string) {
         version: analysis.version,
         requirementCount: analysis.requirementCount,
         findingCount: analysis.findingCount,
-        model: generated.model,
-        usage: generated.usage,
+        ...aiRunEvidence(generated),
       },
       completedAt,
       duration: completedAt.getTime() - startedAt.getTime(),
@@ -209,8 +211,14 @@ export async function analyseRequirements(productId: string) {
     return analysis;
   } catch (error) {
     const completedAt = new Date();
+    const configuration = describeAIConfiguration();
     await failAgentRun(run.id, {
-      output: { error: safeErrorMessage(error), purpose: "existing-requirements-analysis" },
+      output: {
+        error: safeErrorMessage(error),
+        purpose: "existing-requirements-analysis",
+        ...(configuration.providerId ? { provider: configuration.providerId } : {}),
+        ...(configuration.model ? { model: configuration.model } : {}),
+      },
       completedAt,
       duration: completedAt.getTime() - startedAt.getTime(),
     });

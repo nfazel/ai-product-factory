@@ -29,7 +29,7 @@ Rules:
 | Product | Product definition, status, and current stage. |
 | Discovery | Discovery sessions, messages, product briefs, and assumptions. |
 | Requirements | Outcomes, capabilities, proposals, the first slice, readiness, and the requirements runner. |
-| AI | Provider interface. The OpenAI implementation is server-side only. |
+| AI | `AIProvider`, the provider registry, and the OpenAI and Anthropic adapters. Server-side only. See [ai-provider.md](ai-provider.md). |
 | Work item | Backlog items, hierarchy, and dependencies. |
 | Acceptance | Criteria on a work item, including pass and fail. |
 | Decision | Human decisions, optionally tied to a work item. |
@@ -87,10 +87,10 @@ The catalogue in `src/domain/constants.ts` names the agents:
 - Architecture — implemented, inside Build
 - Security & Engineering Governance — implemented, inside Build, as the existing `SECURITY` agent type
 - Planning and Review — not configured
-- Coding — implemented, inside Build. **CONFIGURED** only when `OPENAI_API_KEY` is set and `PRODUCT_REPOSITORY_ROOT` is a Git repository outside this application, unless `PRODUCT_REPOSITORY_ALLOW_FACTORY=true`
+- Coding — implemented, inside Build. **CONFIGURED** only when the AI connection is configured and `PRODUCT_REPOSITORY_ROOT` is a Git repository outside this application, unless `PRODUCT_REPOSITORY_ALLOW_FACTORY=true`
 - Testing & Verification — implemented, as the existing `TESTING` agent type. It verifies one completed task and can run while the product is still in Build. **CONFIGURED** only when the model and a repository are both configured
 
-Product Discovery, the Requirements Agent, the Architecture Agent, and the Security & Engineering Governance Agent are **CONFIGURED** only when `OPENAI_API_KEY` is set on the server, or when a test supplies a provider. The Coding Agent and the Testing & Verification Agent also need a repository. The control centre reads run counts, completed runs, failed runs, and average duration from `AgentRun`. The Coding Agent also shows how many completed runs escalated. The Testing & Verification Agent also shows how many non-demo sessions are `BLOCKED`. Token counts are stored when the provider returns them. Cost is left empty rather than guessed.
+Product Discovery, the Requirements Agent, the Architecture Agent, and the Security & Engineering Governance Agent are **CONFIGURED** only when `AI_PROVIDER`, `AI_MODEL`, and that provider's server credential are set, or when a test supplies a provider. The Coding Agent and the Testing & Verification Agent also need a repository. The control centre reads run counts, completed runs, failed runs, and average duration from `AgentRun`. The Coding Agent also shows how many completed runs escalated. The Testing & Verification Agent also shows how many non-demo sessions are `BLOCKED`. Token counts are stored when the provider returns them. Cost is left empty rather than guessed.
 
 Build is where implementation and task-level verification happen. Prove is where the approved product slice is assessed as a whole. AI Product Builder does not move the product into Prove because one task was verified.
 
@@ -114,7 +114,7 @@ type AgentRunner = {
 When a configured runner executes:
 
 1. Create an `AgentRun` with status `RUNNING` and the structured input.
-2. Call the provider through `AIProvider.generate`. The key never leaves the server.
+2. Call the provider through `AIProvider.generate`. The registry selects OpenAI or Anthropic. The credential never leaves the server.
 3. Validate the response with Zod. On failure, store a redacted error, set status `FAILED`, and leave the product brief unchanged.
 4. On success, store the structured output, duration, and token usage. `estimatedCost` stays null.
 5. Append an activity record.
@@ -149,6 +149,6 @@ The other multi-value brief sections are ordered notes without their own workflo
 - No production credentials or cloud deployment integration
 - No automatic stage movement or automatic outcome achievement
 - No authentication requirement for local use
-- No invented model response when `OPENAI_API_KEY` is missing
+- No invented model response when the AI connection is missing, and no silent fallback to another provider or model
 - No data warehouse, external BI feed, automatic performance target, or invented ROI
 - No analytics that treat a missing timestamp as zero or a demo deployment as production

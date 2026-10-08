@@ -16,6 +16,8 @@ import { discoveryFixture } from "@/modules/discovery/testing";
 
 const createdProducts: string[] = [];
 const originalKey = process.env.OPENAI_API_KEY;
+const originalProvider = process.env.AI_PROVIDER;
+const originalModel = process.env.AI_MODEL;
 
 function mockProvider(data: unknown, error?: Error): AIProvider {
   return {
@@ -25,6 +27,7 @@ function mockProvider(data: unknown, error?: Error): AIProvider {
         data: data as T,
         usage: { inputTokens: 11, outputTokens: 17 },
         model: "mock",
+        provider: "anthropic",
       };
     },
   };
@@ -57,6 +60,10 @@ const intake = {
 afterEach(async () => {
   setAIProviderForTests(null);
   process.env.OPENAI_API_KEY = originalKey;
+  if (originalProvider === undefined) delete process.env.AI_PROVIDER;
+  else process.env.AI_PROVIDER = originalProvider;
+  if (originalModel === undefined) delete process.env.AI_MODEL;
+  else process.env.AI_MODEL = originalModel;
   while (createdProducts.length > 0) {
     const id = createdProducts.pop();
     if (!id) continue;
@@ -91,7 +98,9 @@ describe("product discovery service", () => {
     expect(run?.output).toMatchObject({
       usage: { inputTokens: 11, outputTokens: 17 },
       model: "mock",
+      provider: "anthropic",
     });
+    expect(JSON.stringify(run?.output)).not.toMatch(/sk-|OPENAI_API_KEY|ANTHROPIC_API_KEY/);
     expect(stored?.currentStage).toBe("EXPLORE");
   });
 
@@ -251,13 +260,15 @@ describe("product discovery service", () => {
     expect(brief?.problemStatement).toBe("");
   });
 
-  it("refuses to start when OPENAI_API_KEY is missing and does not invent a session", async () => {
+  it("refuses to start when AI is not configured and does not invent a session", async () => {
     delete process.env.OPENAI_API_KEY;
+    delete process.env.AI_PROVIDER;
+    delete process.env.AI_MODEL;
     setAIProviderForTests(null);
     const product = await tempProduct();
 
     await expect(startDiscovery({ productId: product.id, ...intake })).rejects.toThrow(
-      /not configured/i,
+      /AI is not configured[\s\S]*Discovery/,
     );
 
     const session = await db.discoverySession.findUnique({ where: { productId: product.id } });

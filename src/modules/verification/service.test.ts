@@ -24,6 +24,8 @@ import {
 const products: string[] = [];
 const repos: string[] = [];
 const originalKey = process.env.OPENAI_API_KEY;
+const originalProvider = process.env.AI_PROVIDER;
+const originalModel = process.env.AI_MODEL;
 const originalRoot = process.env.PRODUCT_REPOSITORY_ROOT;
 const originalWorktrees = process.env.PRODUCT_REPOSITORY_WORKTREE_ROOT;
 const worktreeRoot = fs.mkdtempSync(path.join(os.tmpdir(), "apf-verify-worktrees-"));
@@ -58,6 +60,8 @@ function prepareRepo(pass = true) {
   const repo = makeRepo(pass);
   process.env.PRODUCT_REPOSITORY_ROOT = repo;
   process.env.PRODUCT_REPOSITORY_WORKTREE_ROOT = worktreeRoot;
+  process.env.AI_PROVIDER = "openai";
+  process.env.AI_MODEL = "gpt-4.1-mini";
   process.env.OPENAI_API_KEY = "test-key";
   return repo;
 }
@@ -276,6 +280,10 @@ async function completedTask(options?: {
 afterEach(async () => {
   setAIProviderForTests(null);
   process.env.OPENAI_API_KEY = originalKey;
+  if (originalProvider === undefined) delete process.env.AI_PROVIDER;
+  else process.env.AI_PROVIDER = originalProvider;
+  if (originalModel === undefined) delete process.env.AI_MODEL;
+  else process.env.AI_MODEL = originalModel;
   if (originalRoot === undefined) delete process.env.PRODUCT_REPOSITORY_ROOT;
   else process.env.PRODUCT_REPOSITORY_ROOT = originalRoot;
   if (originalWorktrees === undefined) delete process.env.PRODUCT_REPOSITORY_WORKTREE_ROOT;
@@ -329,7 +337,7 @@ describe("verification entry", () => {
     const setup = await completedTask();
     setAIProviderForTests(null);
     delete process.env.OPENAI_API_KEY;
-    await expect(startVerification(setup.product.id, setup.task.id)).rejects.toThrow(/OPENAI_API_KEY/);
+    await expect(startVerification(setup.product.id, setup.task.id)).rejects.toThrow(/AI is not configured/);
     expect(await db.agentRun.count({ where: { productId: setup.product.id } })).toBe(0);
   });
 

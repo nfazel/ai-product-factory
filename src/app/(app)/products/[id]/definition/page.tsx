@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { AINotConfiguredNotice } from "@/components/ai/not-configured";
 import { DefinitionControls } from "@/components/definition/controls";
 import { RequirementsPanel } from "@/components/intake/requirements-panel";
 import { AnswerForm, EntityAction } from "@/components/definition/entity-actions";
@@ -84,11 +85,7 @@ async function Definition({ params }: { params: Promise<{ id: string }> }) {
                 ))}
               </div>
             ) : null}
-            {!workspace.configured ? (
-              <p className="text-sm leading-6 text-muted-foreground">
-                The Requirements Agent is not configured. Add OPENAI_API_KEY on the server. No definition will be invented.
-              </p>
-            ) : null}
+            {!workspace.configured ? <AINotConfiguredNotice capability="product definition" /> : null}
             {workspace.definition.reviewSummary ? (
               <p className="text-sm leading-6">{workspace.definition.reviewSummary}</p>
             ) : null}

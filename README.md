@@ -93,8 +93,10 @@ cp .env.example .env
 | Variable | Purpose |
 | --- | --- |
 | `DATABASE_URL` | PostgreSQL connection string used by Prisma and the Next.js server |
-| `OPENAI_API_KEY` | Server-only key for Product Discovery, the Requirements Agent, the Architecture Agent, the Security & Engineering Governance Agent, the Coding Agent, and the Testing & Verification Agent. Leave empty to run without model calls |
-| `OPENAI_MODEL` | Optional. Defaults to `gpt-4.1-mini` |
+| `AI_PROVIDER` | `openai` or `anthropic`. Required before any model call. Empty does not default to OpenAI |
+| `AI_MODEL` | Model id for that provider. Required. Empty does not substitute a built-in model |
+| `OPENAI_API_KEY` | Server-only credential used when `AI_PROVIDER=openai` |
+| `ANTHROPIC_API_KEY` | Server-only credential used when `AI_PROVIDER=anthropic` |
 | `CODEBASE_CONTEXT_ROOT` | Optional absolute path. When set, Build can read that directory's `package.json` and top-level folder names. It cannot browse an arbitrary path |
 | `PRODUCT_REPOSITORY_ROOT` | Optional absolute path to a local Git repository the Coding Agent and the Testing & Verification Agent may use. The browser cannot set this |
 | `PRODUCT_REPOSITORY_ALLOW_FACTORY` | Optional. Set to `true` only when a local demo should use this application's own source tree |
@@ -104,7 +106,7 @@ cp .env.example .env
 | `GITHUB_MINIMUM_HUMAN_APPROVALS` | Optional. Defaults to 1. Branch protection can require more |
 | `GITHUB_SERVICE_ACCOUNT` | Optional login that must not count as a human reviewer |
 
-The key is read only on the server. The browser never receives it. If it is missing, the app still runs and Discovery says that AI is not configured.
+The credential is read only on the server. The browser never receives it. Settings shows the provider, the model, and Configured or Not configured. If the connection is missing, Discovery says that AI is not configured and links to Settings. See [docs/ai-provider.md](docs/ai-provider.md).
 
 ## Run locally
 
@@ -141,13 +143,13 @@ It also includes a **demo** discovery session and product brief, plus demo outco
 
 ## Product Discovery
 
-Open a product and choose Discovery. With `OPENAI_API_KEY` set, Start Discovery sends the idea to the Product Discovery Agent and builds a brief. Without the key, the page explains that AI is not configured.
+Open a product and choose Discovery. With `AI_PROVIDER`, `AI_MODEL`, and that provider's server credential set, Start Discovery sends the idea to the Product Discovery Agent and builds a brief. Without that connection, the page says AI is not configured and links to Settings.
 
 A person edits the brief, confirms assumptions, and approves it. Approval does not change the product stage. Move to Define is a separate human action, and only from Explore.
 
 ## Product definition
 
-Open a product and choose Definition. **Generate Product Definition** runs only in Define, and only when the current brief is approved and `OPENAI_API_KEY` is set. The result is a proposal. Accept, edit, or reject items, then commit. Committed items become normal backlog work with provenance. Confirm outcomes yourself. Approve the first slice and the product definition yourself. Move to Build stays closed until the brief, the definition, and the first slice are approved.
+Open a product and choose Definition. **Generate Product Definition** runs only in Define, and only when the current brief is approved and the AI connection is configured. The result is a proposal. Accept, edit, or reject items, then commit. Committed items become normal backlog work with provenance. Confirm outcomes yourself. Approve the first slice and the product definition yourself. Move to Build stays closed until the brief, the definition, and the first slice are approved.
 
 Tests mock the provider. They do not call OpenAI.
 
@@ -155,7 +157,7 @@ Tests mock the provider. They do not call OpenAI.
 
 Open a product and choose Build. Architecture and implementation planning happen here. They are not a new pipeline stage.
 
-**Generate architecture** runs only in Build, and only when the product brief, the product definition, and the first product slice are approved, and `OPENAI_API_KEY` is set. The result is a proposal. A person accepts, edits, or rejects it, then commits a draft. Approve architecture is a separate human action. **Generate implementation plan** stays closed until that approval exists. Approve the plan yourself.
+**Generate architecture** runs only in Build, and only when the product brief, the product definition, and the first product slice are approved, and the AI connection is configured. The result is a proposal. A person accepts, edits, or rejects it, then commits a draft. Approve architecture is a separate human action. **Generate implementation plan** stays closed until that approval exists. Approve the plan yourself.
 
 **Run governance review** stays closed until the brief, the definition, the first slice, the solution architecture, and the implementation plan are approved. The governance agent does not approve its own review and does not write code. A person resolves findings, approves the coding policy, and approves the governance review. Coding readiness stays **NOT READY** until those approvals exist and no deterministic governance blocker remains. The label is **CODING READY** only then.
 

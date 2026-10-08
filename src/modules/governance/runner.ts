@@ -1,6 +1,7 @@
 import "server-only";
 
 import { GOVERNANCE_SECTIONS, type GovernanceSection } from "@/domain/constants";
+import { aiRunEvidence } from "@/modules/ai/evidence";
 import { getAIProvider, isAIConfigured } from "@/modules/ai/provider";
 import type { AgentRunner } from "@/modules/agent/types";
 import { loadGovernanceContext } from "@/modules/governance/context";
@@ -110,8 +111,7 @@ export const governanceRunner: AgentRunner = {
         section: section ?? "full",
         summary: stored.assistantSummary,
         overallAssessment: stored.overallAssessment,
-        usage: result.usage,
-        model: result.model,
+        ...aiRunEvidence(result),
         approved: false,
       },
       estimatedCost: null,
