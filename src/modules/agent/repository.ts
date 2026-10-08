@@ -94,6 +94,16 @@ export async function agentRunStatsByType() {
   return stats;
 }
 
+export async function countEscalatedCodingRuns() {
+  return db.agentRun.count({
+    where: {
+      agentType: "CODING",
+      status: "COMPLETED",
+      output: { path: ["escalated"], equals: true },
+    },
+  });
+}
+
 export async function insertAgentRun(input: {
   productId: string;
   workItemId: string | null;

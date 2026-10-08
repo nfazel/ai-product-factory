@@ -106,6 +106,8 @@ model Product {
   governanceReviews EngineeringGovernanceReview[]
   codingPolicies CodingPolicy[]
   governanceProposals GovernanceProposal[]
+  repositories Repository[]
+  repositoryWorkspaces RepositoryWorkspace[]
 
   @@index([status])
   @@index([updatedAt])
@@ -219,6 +221,7 @@ model Approval {
 
   product  Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
   workItem WorkItem? @relation(fields: [workItemId], references: [id], onDelete: SetNull)
+  codeChangeApprovals CodeChangeApproval[]
 
   @@index([status])
   @@index([productId])
@@ -739,6 +742,7 @@ enum ImplementationTaskStatus {
   PROPOSED
   APPROVED
   IN_PROGRESS
+  CODE_REVIEW
   COMPLETED
   BLOCKED
 }
@@ -1077,6 +1081,8 @@ model ImplementationTask {
   dependents   ImplementationTaskDependency[] @relation("TaskDependency")
   codingRisks  CodingRiskAssessment[]
   findingLinks GovernanceFindingLink[]
+  workspaces   RepositoryWorkspace[]
+  codingContracts CodingExecutionContract[]
 
   @@index([implementationPlanId])
   @@index([workItemId])
@@ -1456,4 +1462,306 @@ model GovernanceProposal {
 
   @@index([productId, createdAt])
   @@index([section, status])
+}
+
+enum RepositoryProvider {
+  LOCAL
+  GITHUB_FUTURE
+}
+
+enum RepositoryRecordStatus {
+  CONFIGURED
+  UNAVAILABLE
+  DISABLED
+}
+
+enum WorkspaceStatus {
+  CREATING
+  ACTIVE
+  CHECKING
+  READY_FOR_REVIEW
+  FAILED
+  ABANDONED
+  COMPLETED
+}
+
+enum ExecutionContractStatus {
+  DRAFT
+  APPROVED
+  EXECUTING
+  COMPLETED
+  FAILED
+  ESCALATED
+}
+
+enum ExecutionPlanStatus {
+  PROPOSED
+  APPROVED
+  EXECUTING
+  COMPLETED
+  ESCALATED
+}
+
+enum CodingEscalationType {
+  REQUIREMENT_AMBIGUITY
+  ARCHITECTURE_CONFLICT
+  MISSING_DEPENDENCY
+  POLICY_CONFLICT
+  SCOPE_EXPANSION
+  TEST_FAILURE
+  SECURITY_CONCERN
+  UNEXPECTED_CODEBASE
+  OTHER
+}
+
+enum CodingEscalationStatus {
+  OPEN
+  RESOLVED
+  CANCELLED
+}
+
+enum CodingEvidenceType {
+  FILE_CHANGE
+  TEST_RESULT
+  TYPECHECK
+  LINT
+  BUILD
+  STATIC_ANALYSIS
+  AGENT_ANALYSIS
+  HUMAN_CONFIRMATION
+}
+
+enum CodingEvidenceSource {
+  REPOSITORY
+  COMMAND_RUNNER
+  AI_ANALYSIS
+  HUMAN
+}
+
+enum CodingToolAction {
+  READ_FILE
+  LIST_DIRECTORY
+  WRITE_FILE
+  CREATE_FILE
+  DELETE_FILE
+  RUN_COMMAND
+  GET_DIFF
+  GET_STATUS
+}
+
+model Repository {
+  id             String                 @id @default(cuid())
+  productId      String
+  name           String
+  provider       RepositoryProvider     @default(LOCAL)
+  repositoryUrl  String                 @default("")
+  defaultBranch  String                 @default("main")
+  localPath      String
+  status         RepositoryRecordStatus @default(UNAVAILABLE)
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
+
+  product    Product               @relation(fields: [productId], references: [id], onDelete: Cascade)
+  workspaces RepositoryWorkspace[]
+
+  @@unique([productId])
+  @@index([status])
+}
+
+model RepositoryWorkspace {
+  id                     String          @id @default(cuid())
+  repositoryId           String
+  productId              String
+  implementationTaskId   String
+  agentRunId             String?
+  workspacePath          String
+  branchName             String
+  baseCommit             String          @default("")
+  headCommit             String          @default("")
+  status                 WorkspaceStatus @default(CREATING)
+  executionContractStale Boolean         @default(false)
+  staleReason            String          @default("")
+  staleFlaggedAt         DateTime?
+  createdAt              DateTime        @default(now())
+  updatedAt              DateTime        @updatedAt
+  completedAt            DateTime?
+
+  repository Repository              @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  product    Product                 @relation(fields: [productId], references: [id], onDelete: Cascade)
+  task       ImplementationTask      @relation(fields: [implementationTaskId], references: [id], onDelete: Cascade)
+  contract   CodingExecutionContract?
+  plan       CodingExecutionPlan?
+  escalations CodingEscalation[]
+  evidence   CodingEvidence[]
+  toolEvents CodingToolEvent[]
+  selfReview CodingSelfReview?
+  revisions  CodingRevision[]
+  diff       CodingDiff?
+  codeApprovals CodeChangeApproval[]
+
+  @@index([productId, status])
+  @@index([repositoryId])
+  @@index([implementationTaskId])
+}
+
+model CodingExecutionContract {
+  id                       String                  @id @default(cuid())
+  implementationTaskId     String
+  workspaceId              String                  @unique
+  objective                String                  @default("")
+  allowedPaths             Json                    @default("[]")
+  restrictedPaths          Json                    @default("[]")
+  acceptanceCriteria       Json                    @default("[]")
+  requiredChecks           Json                    @default("[]")
+  architectureConstraints  String                  @default("")
+  codingPolicyConstraints  String                  @default("")
+  dependencies             Json                    @default("[]")
+  validationExpectations   String                  @default("")
+  maxFiles                 Int?
+  executionMode            CodingExecutionMode
+  riskLevel                CodingRiskLevel
+  allowFileDelete          Boolean                 @default(false)
+  status                   ExecutionContractStatus @default(APPROVED)
+  sourceFingerprint        String                  @default("")
+  stale                    Boolean                 @default(false)
+  staleReason              String                  @default("")
+  staleFlaggedAt           DateTime?
+  createdAt                DateTime                @default(now())
+  updatedAt                DateTime                @updatedAt
+
+  task      ImplementationTask   @relation(fields: [implementationTaskId], references: [id], onDelete: Cascade)
+  workspace RepositoryWorkspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([implementationTaskId])
+  @@index([status])
+}
+
+model CodingExecutionPlan {
+  id                   String              @id @default(cuid())
+  workspaceId          String              @unique
+  summary              String              @default("")
+  analysisNote         String              @default("")
+  filesExpectedToChange Json               @default("[]")
+  steps                Json                @default("[]")
+  risks                String              @default("")
+  validationPlan       String              @default("")
+  status               ExecutionPlanStatus @default(PROPOSED)
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+
+  workspace RepositoryWorkspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+model CodingEscalation {
+  id                 String                 @id @default(cuid())
+  workspaceId        String
+  type               CodingEscalationType
+  description        String                 @default("")
+  reason             String                 @default("")
+  recommendedAction  String                 @default("")
+  status             CodingEscalationStatus @default(OPEN)
+  createdAt          DateTime               @default(now())
+  resolvedAt         DateTime?
+
+  workspace RepositoryWorkspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, status])
+  @@index([type])
+}
+
+model CodingEvidence {
+  id                   String              @id @default(cuid())
+  workspaceId          String
+  implementationTaskId String
+  type                 CodingEvidenceType
+  source               CodingEvidenceSource
+  description          String              @default("")
+  result               String              @default("")
+  command              String              @default("")
+  exitCode             Int?
+  startedAt            DateTime?
+  completedAt          DateTime?
+  createdAt            DateTime            @default(now())
+
+  workspace RepositoryWorkspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([implementationTaskId])
+  @@index([type])
+}
+
+model CodingToolEvent {
+  id          String           @id @default(cuid())
+  workspaceId String
+  action      CodingToolAction
+  allowed     Boolean
+  reason      String           @default("")
+  path        String           @default("")
+  command     String           @default("")
+  metadata    Json             @default("{}")
+  createdAt   DateTime         @default(now())
+
+  workspace RepositoryWorkspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt])
+  @@index([allowed])
+}
+
+model CodingSelfReview {
+  id         String   @id @default(cuid())
+  workspaceId String  @unique
+  summary    String   @default("")
+  findings   Json     @default("{}")
+  createdAt  DateTime @default(now())
+
+  workspace RepositoryWorkspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+model CodingRevision {
+  id              String   @id @default(cuid())
+  workspaceId     String
+  feedback        String   @default("")
+  requiredChanges String   @default("")
+  affectedFiles   Json     @default("[]")
+  createdAt       DateTime @default(now())
+
+  workspace RepositoryWorkspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+}
+
+model CodingDiff {
+  id            String   @id @default(cuid())
+  workspaceId   String   @unique
+  files         Json     @default("[]")
+  additions     Int      @default(0)
+  deletions     Int      @default(0)
+  patch         String   @default("")
+  truncated     Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  workspace RepositoryWorkspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+model CodeChangeApproval {
+  id                   String    @id @default(cuid())
+  productId            String
+  approvalId           String
+  implementationTaskId String
+  workspaceId          String
+  baseCommit           String
+  headCommit           String
+  diffHash             String
+  stale                Boolean   @default(false)
+  staleReason          String    @default("")
+  staleFlaggedAt       DateTime?
+  createdAt            DateTime  @default(now())
+
+  approval  Approval             @relation(fields: [approvalId], references: [id], onDelete: Cascade)
+  workspace RepositoryWorkspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+  @@index([workspaceId])
+  @@index([implementationTaskId])
 }

@@ -2,6 +2,7 @@ import "server-only";
 
 import { db } from "@/lib/db";
 import { recordActivity } from "@/modules/activity/service";
+import { noteCodingContractStale } from "@/modules/coding/impact";
 
 export async function noteRequirementChange(productId: string, reason: string) {
   const rows = await db.solutionArchitecture.findMany({
@@ -22,6 +23,7 @@ export async function noteRequirementChange(productId: string, reason: string) {
     type: "ARCHITECTURE_REVIEW_REQUIRED",
     description: reason,
   });
+  await noteCodingContractStale(productId, reason);
 }
 
 export async function noteArchitectureChange(productId: string, reason: string) {
@@ -43,4 +45,5 @@ export async function noteArchitectureChange(productId: string, reason: string) 
     type: "PLAN_REVIEW_REQUIRED",
     description: reason,
   });
+  await noteCodingContractStale(productId, reason);
 }

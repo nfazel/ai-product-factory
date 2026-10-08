@@ -14,6 +14,7 @@ import {
   TaskEditor,
   TechnologyEditor,
 } from "@/components/build/controls";
+import { CodingPanel } from "@/components/build/coding-panel";
 import { BuildReadiness, GovernancePanel } from "@/components/build/governance-panel";
 import { CODING_EXECUTION_LABEL, CODING_RISK_LABEL } from "@/domain/constants";
 import { PageSkeleton } from "@/components/feedback/states";
@@ -562,6 +563,7 @@ async function Build({
       </section>
 
       <GovernancePanel productId={id} governance={workspace.governance} />
+      <CodingPanel productId={id} coding={workspace.codingExecution} />
     </div>
   );
 }

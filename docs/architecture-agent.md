@@ -97,4 +97,4 @@ The component diagram is generated from `ArchitectureComponent` and `Architectur
 
 ## Future coding agent
 
-Coding readiness is **NOT READY** until the brief, the definition, the first slice, the solution architecture, the implementation plan, engineering governance, and the coding policy are approved, and no deterministic governance blocker remains. The label is then **CODING READY**. This application still does not start coding. A later Coding Agent must honour those gates, the coding policy, and each task's coding-risk recommendation.
+Coding readiness is **NOT READY** until the brief, the definition, the first slice, the solution architecture, the implementation plan, engineering governance, and the coding policy are approved, and no deterministic governance blocker remains. The label is then **CODING READY**. The Coding Agent honours those gates, the coding policy, and each task's coding-risk recommendation. See [coding-agent.md](coding-agent.md).

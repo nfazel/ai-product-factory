@@ -51,6 +51,7 @@ export const APPROVAL_TYPES = [
   "IMPLEMENTATION_PLAN",
   "ENGINEERING_GOVERNANCE",
   "CODING_POLICY",
+  "CODE_CHANGE",
 ] as const;
 export type ApprovalType = (typeof APPROVAL_TYPES)[number];
 
@@ -115,6 +116,24 @@ export const ACTIVITY_TYPES = [
   "CODING_POLICY_APPROVED",
   "CODING_POLICY_REAPPROVAL_REQUIRED",
   "GOVERNANCE_QUESTION_ANSWERED",
+  "CODING_WORKSPACE_CREATED",
+  "CODING_EXECUTION_STARTED",
+  "CODING_FILE_READ",
+  "CODING_FILE_MODIFIED",
+  "CODING_FILE_CREATED",
+  "CODING_FILE_DELETED",
+  "CODING_COMMAND_EXECUTED",
+  "CODING_POLICY_DENIED",
+  "CODING_ESCALATION_CREATED",
+  "CODING_CHECKS_COMPLETED",
+  "CODING_READY_FOR_REVIEW",
+  "CODING_CHANGES_REQUESTED",
+  "CODING_APPROVED",
+  "CODING_COMMIT_CREATED",
+  "CODING_WORKSPACE_ABANDONED",
+  "CODING_CONTRACT_STALE",
+  "CODING_TASK_APPROVED",
+  "CODING_PLAN_APPROVED",
 ] as const;
 export type ActivityType = (typeof ACTIVITY_TYPES)[number];
 
@@ -290,6 +309,7 @@ export const APPROVAL_TYPE_LABEL: Record<ApprovalType, string> = {
   IMPLEMENTATION_PLAN: "Implementation plan",
   ENGINEERING_GOVERNANCE: "Engineering governance",
   CODING_POLICY: "Coding policy",
+  CODE_CHANGE: "Code change",
 };
 
 export const ACTIVITY_TYPE_LABEL: Record<ActivityType, string> = {
@@ -344,6 +364,24 @@ export const ACTIVITY_TYPE_LABEL: Record<ActivityType, string> = {
   CODING_POLICY_APPROVED: "Coding policy approved",
   CODING_POLICY_REAPPROVAL_REQUIRED: "Coding policy reapproval required",
   GOVERNANCE_QUESTION_ANSWERED: "Governance question answered",
+  CODING_WORKSPACE_CREATED: "Coding workspace created",
+  CODING_EXECUTION_STARTED: "Coding execution started",
+  CODING_FILE_READ: "Coding file read",
+  CODING_FILE_MODIFIED: "Coding file modified",
+  CODING_FILE_CREATED: "Coding file created",
+  CODING_FILE_DELETED: "Coding file deleted",
+  CODING_COMMAND_EXECUTED: "Coding command executed",
+  CODING_POLICY_DENIED: "Coding policy denied",
+  CODING_ESCALATION_CREATED: "Coding escalation created",
+  CODING_CHECKS_COMPLETED: "Coding checks completed",
+  CODING_READY_FOR_REVIEW: "Coding ready for review",
+  CODING_APPROVED: "Code changes approved",
+  CODING_CHANGES_REQUESTED: "Coding changes requested",
+  CODING_COMMIT_CREATED: "Coding commit created",
+  CODING_WORKSPACE_ABANDONED: "Coding workspace abandoned",
+  CODING_CONTRACT_STALE: "Execution contract stale",
+  CODING_TASK_APPROVED: "Implementation task approved",
+  CODING_PLAN_APPROVED: "Coding execution plan approved",
 };
 
 export const DISCOVERY_STATUS_LABEL: Record<DiscoveryStatus, string> = {
@@ -614,7 +652,8 @@ export const AGENT_CATALOG: Record<
   },
   CODING: {
     name: "Coding Agent",
-    responsibility: "Implement approved work under human review.",
+    responsibility:
+      "Execute one approved implementation task inside an isolated repository workspace. It cannot approve its own code, push, or merge.",
   },
   TESTING: {
     name: "Testing Agent",
@@ -765,6 +804,7 @@ export const IMPLEMENTATION_TASK_STATUSES = [
   "PROPOSED",
   "APPROVED",
   "IN_PROGRESS",
+  "CODE_REVIEW",
   "COMPLETED",
   "BLOCKED",
 ] as const;

@@ -24,4 +24,4 @@ If a person edits the policy after that approval, the policy is marked **CODING 
 
 The policy is product-wide. `CodingRiskAssessment` is per implementation task. A task can be `LOW` / `AUTONOMOUS`, `MEDIUM` or `HIGH` / `SUPERVISED`, or `PROHIBITED` / `HUMAN_ONLY`. A prohibited task blocks coding readiness until a person records an override and a rationale, even when the policy is approved.
 
-The future Coding Agent should refuse work that breaks the policy, and it should follow the effective risk and mode after any human override. This application does not run that agent, open pull requests, or deploy.
+The Coding Agent refuses work that breaks the policy, and it follows the effective risk and mode after any human override. It does not open pull requests or deploy. See [coding-agent.md](coding-agent.md).

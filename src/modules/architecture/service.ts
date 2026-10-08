@@ -10,6 +10,7 @@ import { architectureEntryBlockers, planEntryBlockers } from "@/modules/architec
 import { noteArchitectureChange } from "@/modules/architecture/impact";
 import { noteGovernanceReviewRequired } from "@/modules/governance/impact";
 import { assessCodingReadiness } from "@/modules/governance/coding-readiness";
+import { getCodingView } from "@/modules/coding/service";
 import { getGovernanceWorkspace } from "@/modules/governance/service";
 import { acceptAll, included, setReviewStatus } from "@/modules/architecture/proposal";
 import {
@@ -630,7 +631,8 @@ export async function getCodingReadiness(productId: string) {
 }
 
 export async function getBuildWorkspace(productId: string) {
-  const [gate, context, architecture, plan, proposal, planProposal, coding, nfrs, governance] = await Promise.all([
+  const [gate, context, architecture, plan, proposal, planProposal, coding, nfrs, governance, codingExecution] =
+    await Promise.all([
     architectureEntryBlockers(productId).catch((error: unknown) => {
       if (error instanceof DomainError && error.code === "NOT_FOUND") return null;
       throw error;
@@ -656,6 +658,7 @@ export async function getBuildWorkspace(productId: string) {
       if (error instanceof DomainError && error.code === "NOT_FOUND") return null;
       throw error;
     }),
+    getCodingView(productId),
   ]);
   if (!gate || !governance) return null;
   const readiness = assessTechnicalReadiness(readinessInput(architecture, plan, nfrs.length));
@@ -669,6 +672,7 @@ export async function getBuildWorkspace(productId: string) {
     planProposal,
     readiness,
     coding,
+    codingExecution,
     governance,
     diagram: architecture ? diagram(architecture.components, architecture.relationships) : "",
   };

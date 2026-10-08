@@ -24,7 +24,7 @@ async function Agents() {
       <PageHeader
         eyebrow="Agents"
         title="Agent control centre"
-        description="Product Discovery, the Requirements Agent, the Architecture Agent, and the Security & Engineering Governance Agent run when OPENAI_API_KEY is set on the server. Coding, testing, and review stay unavailable until they are introduced."
+        description="Product Discovery, the Requirements Agent, the Architecture Agent, and the Security & Engineering Governance Agent run when OPENAI_API_KEY is set. The Coding Agent also needs PRODUCT_REPOSITORY_ROOT. Testing and review stay unavailable."
       />
       <div className="grid gap-4 md:grid-cols-2">
         {agents.map((agent) => (
@@ -47,7 +47,8 @@ async function Agents() {
             {agent.agentType === "PRODUCT_DISCOVERY" ||
             agent.agentType === "REQUIREMENTS" ||
             agent.agentType === "ARCHITECTURE" ||
-            agent.agentType === "SECURITY" ? (
+            agent.agentType === "SECURITY" ||
+            agent.agentType === "CODING" ? (
               <dl className="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
                 <div>
                   <dt className="text-xs text-muted-foreground">Runs</dt>
@@ -61,6 +62,12 @@ async function Agents() {
                   <dt className="text-xs text-muted-foreground">Failed</dt>
                   <dd className="font-medium">{agent.failedCount}</dd>
                 </div>
+                {agent.agentType === "CODING" ? (
+                  <div>
+                    <dt className="text-xs text-muted-foreground">Escalated</dt>
+                    <dd className="font-medium">{agent.escalatedCount}</dd>
+                  </div>
+                ) : null}
                 <div>
                   <dt className="text-xs text-muted-foreground">Average duration</dt>
                   <dd className="font-medium">{formatDuration(agent.averageDurationMs)}</dd>

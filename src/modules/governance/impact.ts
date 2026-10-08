@@ -2,6 +2,7 @@ import "server-only";
 
 import { db } from "@/lib/db";
 import { recordActivity } from "@/modules/activity/service";
+import { noteCodingContractStale } from "@/modules/coding/impact";
 
 export async function noteGovernanceReviewRequired(productId: string, reason: string) {
   const rows = await db.engineeringGovernanceReview.findMany({
@@ -24,6 +25,7 @@ export async function noteGovernanceReviewRequired(productId: string, reason: st
     type: "GOVERNANCE_REVIEW_REQUIRED",
     description: reason,
   });
+  await noteCodingContractStale(productId, reason);
 }
 
 export async function noteCodingPolicyReapproval(productId: string, policyId: string, reason: string) {
@@ -46,4 +48,5 @@ export async function noteCodingPolicyReapproval(productId: string, policyId: st
     type: "CODING_POLICY_REAPPROVAL_REQUIRED",
     description: reason,
   });
+  await noteCodingContractStale(productId, reason);
 }

@@ -20,6 +20,17 @@ function daysAgo(days: number, hours = 10) {
 }
 
 async function main() {
+  await prisma.codeChangeApproval.deleteMany();
+  await prisma.codingDiff.deleteMany();
+  await prisma.codingRevision.deleteMany();
+  await prisma.codingSelfReview.deleteMany();
+  await prisma.codingToolEvent.deleteMany();
+  await prisma.codingEvidence.deleteMany();
+  await prisma.codingEscalation.deleteMany();
+  await prisma.codingExecutionPlan.deleteMany();
+  await prisma.codingExecutionContract.deleteMany();
+  await prisma.repositoryWorkspace.deleteMany();
+  await prisma.repository.deleteMany();
   await prisma.governanceFindingLink.deleteMany();
   await prisma.governanceEvidence.deleteMany();
   await prisma.governanceQuestion.deleteMany();

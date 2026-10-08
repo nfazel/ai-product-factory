@@ -1,6 +1,7 @@
 import "server-only";
 
 import { AGENT_CATALOG, AGENT_TYPES } from "@/domain/constants";
+import { codingConfigurationGap } from "@/modules/coding/config";
 import { safeErrorMessage } from "@/modules/ai/errors";
 import { recordActivity } from "@/modules/activity/service";
 import { ensureAgentsRegistered } from "@/modules/agent/bootstrap";
@@ -8,6 +9,7 @@ import {
   agentRunStatsByType,
   completeAgentRun,
   countAgentRuns,
+  countEscalatedCodingRuns,
   countRunsByAgentType,
   failAgentRun,
   insertAgentRun,
@@ -32,7 +34,11 @@ export class AgentNotConfiguredError extends DomainError {
             ? "The Architecture Agent is not configured. Add OPENAI_API_KEY on the server. No architecture was generated."
             : agentType === "SECURITY"
               ? "The Security & Engineering Governance Agent is not configured. Add OPENAI_API_KEY on the server. No governance review was generated."
-              : `${agentType} is not configured. AI agents will be introduced progressively as the Product Factory capabilities are enabled.`,
+              : agentType === "CODING"
+                ? codingConfigurationGap() === "repository"
+                  ? "The Coding Agent is not configured. Set PRODUCT_REPOSITORY_ROOT to a Git repository that is not this application. No code was changed."
+                  : "The Coding Agent is not configured. Add OPENAI_API_KEY on the server. No code was changed."
+                : `${agentType} is not configured. AI agents will be introduced progressively as the Product Factory capabilities are enabled.`,
       "INVALID",
     );
     this.name = "AgentNotConfiguredError";
@@ -52,10 +58,11 @@ export async function listAgentRuns(filters?: {
 
 export async function listAgentCatalogue(): Promise<AgentCatalogueEntry[]> {
   ensureAgentsRegistered();
-  const [counts, latest, stats] = await Promise.all([
+  const [counts, latest, stats, escalatedCount] = await Promise.all([
     countRunsByAgentType(),
     latestRunByAgentType(),
     agentRunStatsByType(),
+    countEscalatedCodingRuns(),
   ]);
 
   return AGENT_TYPES.map((agentType) => {
@@ -69,6 +76,7 @@ export async function listAgentCatalogue(): Promise<AgentCatalogueEntry[]> {
       runCount: counts.get(agentType) ?? 0,
       completedCount: agentStats?.completed ?? 0,
       failedCount: agentStats?.failed ?? 0,
+      escalatedCount: agentType === "CODING" ? escalatedCount : 0,
       averageDurationMs: agentStats?.averageDurationMs ?? null,
       latestStatus: latest.get(agentType) ?? null,
     };

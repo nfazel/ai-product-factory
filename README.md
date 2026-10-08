@@ -4,7 +4,7 @@ AI Product Factory is the foundation of an AI-native software product developmen
 
 **Explore → Define → Build → Prove → Ship → Learn**
 
-This repository is the product factory with four agents enabled. Product Discovery turns an incomplete idea into a Product Brief during Explore. The Requirements Agent turns an approved brief into an outcome-driven product definition during Define. The Architecture Agent, inside Build, turns an approved definition and an approved first slice into a solution architecture and an implementation plan. The Security & Engineering Governance Agent, also inside Build, independently reviews that approved architecture and plan before coding. Coding, testing, and review agents are not implemented. GitHub integration is not implemented.
+This repository is the product factory with five agents enabled. Product Discovery turns an incomplete idea into a Product Brief during Explore. The Requirements Agent turns an approved brief into an outcome-driven product definition during Define. The Architecture Agent, inside Build, turns an approved definition and an approved first slice into a solution architecture and an implementation plan. The Security & Engineering Governance Agent, also inside Build, independently reviews that approved architecture and plan before coding. The Coding Agent, still inside Build, executes one approved implementation task in an isolated Git worktree. Testing and review agents are not implemented. GitHub integration, push, and merge are not implemented.
 
 Humans remain in control of stage changes, decisions, and approval gates. Neither agent can approve its own work or move the product stage.
 
@@ -77,9 +77,11 @@ cp .env.example .env
 | Variable | Purpose |
 | --- | --- |
 | `DATABASE_URL` | PostgreSQL connection string used by Prisma and the Next.js server |
-| `OPENAI_API_KEY` | Server-only key for Product Discovery, the Requirements Agent, the Architecture Agent, and the Security & Engineering Governance Agent. Leave empty to run without model calls |
+| `OPENAI_API_KEY` | Server-only key for Product Discovery, the Requirements Agent, the Architecture Agent, the Security & Engineering Governance Agent, and the Coding Agent. Leave empty to run without model calls |
 | `OPENAI_MODEL` | Optional. Defaults to `gpt-4.1-mini` |
 | `CODEBASE_CONTEXT_ROOT` | Optional absolute path. When set, Build can read that directory's `package.json` and top-level folder names. It cannot browse an arbitrary path |
+| `PRODUCT_REPOSITORY_ROOT` | Optional absolute path to a local Git repository the Coding Agent may change. The browser cannot set this |
+| `PRODUCT_REPOSITORY_ALLOW_FACTORY` | Optional. Set to `true` only when a local demo should use this application's own source tree |
 
 The key is read only on the server. The browser never receives it. If it is missing, the app still runs and Discovery says that AI is not configured.
 
@@ -134,12 +136,30 @@ Open a product and choose Build. Architecture and implementation planning happen
 
 **Generate architecture** runs only in Build, and only when the product brief, the product definition, and the first product slice are approved, and `OPENAI_API_KEY` is set. The result is a proposal. A person accepts, edits, or rejects it, then commits a draft. Approve architecture is a separate human action. **Generate implementation plan** stays closed until that approval exists. Approve the plan yourself.
 
-**Run governance review** stays closed until the brief, the definition, the first slice, the solution architecture, and the implementation plan are approved. The governance agent does not approve its own review and does not write code. A person resolves findings, approves the coding policy, and approves the governance review. Coding readiness stays **NOT READY** until those approvals exist and no deterministic governance blocker remains. The label is **CODING READY** only then. There is no coding control yet.
+**Run governance review** stays closed until the brief, the definition, the first slice, the solution architecture, and the implementation plan are approved. The governance agent does not approve its own review and does not write code. A person resolves findings, approves the coding policy, and approves the governance review. Coding readiness stays **NOT READY** until those approvals exist and no deterministic governance blocker remains. The label is **CODING READY** only then.
+
+**Start Coding Task** also needs an approved implementation task, a coding-risk mode other than human-only, no unresolved task dependency, and `PRODUCT_REPOSITORY_ROOT`. The Coding Agent works in a Git worktree. A person approves the code and may create a commit. The commit is not pushed or merged.
 
 If an approved requirement changes after the architecture is approved, the page says **Architecture review required** and keeps the approval. If the architecture changes after the plan is approved, the page says **Implementation Plan review required** and keeps that approval. If the architecture or the plan changes after governance is approved, the page says **GOVERNANCE REVIEW REQUIRED** and keeps the approval. If the coding policy changes after it is approved, the page says **CODING POLICY REAPPROVAL REQUIRED** and keeps the approval.
 
-See [docs/security-governance-agent.md](docs/security-governance-agent.md) and [docs/coding-policy.md](docs/coding-policy.md).
+See [docs/security-governance-agent.md](docs/security-governance-agent.md), [docs/coding-policy.md](docs/coding-policy.md), [docs/coding-agent.md](docs/coding-agent.md), [docs/repository-workspace.md](docs/repository-workspace.md), and [docs/coding-execution-contract.md](docs/coding-execution-contract.md).
+
+## Demo repository
+
+The Coding Agent does not point itself at this source tree. Create a small Git repository and set `PRODUCT_REPOSITORY_ROOT` to its absolute path:
+
+```bash
+mkdir -p "$HOME/apf-demo-repo/src/claims"
+cd "$HOME/apf-demo-repo"
+git init -b main
+printf '%s\n' '{ "name": "demo-claims", "scripts": { "test": "node -e \"process.exit(0)\"" } }' > package.json
+printf '%s\n' 'export const claim = "notice"' > src/claims/submit.ts
+git add .
+git -c user.email=demo@localhost -c user.name="Demo" commit -m "Initial claims helper"
+```
+
+Add `PRODUCT_REPOSITORY_ROOT` to `.env`, then restart the server. Approve the upstream Build gates, approve one implementation task, and choose **Start Coding Task**. The seed does not invent Git evidence.
 
 ## Later agents
 
-Coding, testing, and review agents are not registered. `POST /api/agent-runs` still refuses those types. Authentication will replace `getCurrentActor()` and the pass-through `src/proxy.ts` without rewriting the domain model.
+Testing and review agents are not registered. GitHub, push, pull requests, and merge are not implemented. Authentication will replace `getCurrentActor()` and the pass-through `src/proxy.ts` without rewriting the domain model.

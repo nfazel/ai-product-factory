@@ -112,6 +112,6 @@ An edit to an approved solution architecture, or to an approved implementation p
 
 Otherwise the label is **NOT READY**, and every missing or blocking condition is listed. The product also needs to be in Build.
 
-## Future Coding Agent
+## Coding Agent
 
-The Coding Agent is not implemented. When it is, it should read the approved coding policy, stay inside the allowed paths, refuse prohibited actions, and follow each task’s effective coding-risk mode. It must not treat a model `PASS` as permission to code.
+The Coding Agent reads the approved coding policy, stays inside the allowed paths, refuses prohibited actions, and follows each task’s effective coding-risk mode. A model `PASS` is not permission to code. See [coding-agent.md](coding-agent.md).

@@ -64,4 +64,4 @@ Editing an approved architecture, or accepting an architecture decision on an ap
 
 ## Coding readiness
 
-Coding readiness stays **NOT READY** until the brief, the definition, the first slice, the solution architecture, the implementation plan, engineering governance, and the coding policy are approved, and no deterministic governance blocker remains. The Build page does not offer a coding action. A future Coding Agent will have to see those gates before it can run.
+Coding readiness stays **NOT READY** until the brief, the definition, the first slice, the solution architecture, the implementation plan, engineering governance, and the coding policy are approved, and no deterministic governance blocker remains. The Coding Agent reads that result before it can start a task. See [coding-agent.md](coding-agent.md).
