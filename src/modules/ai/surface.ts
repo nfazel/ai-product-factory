@@ -4,10 +4,11 @@ import {
   describeAIConfiguration,
   listProviderSpecs,
   ollamaEndpointIsLocal,
-  readProviderCredential,
+  ollamaEndpointLabel,
   type AIConfigurationView,
   type AIProviderId,
 } from "@/modules/ai/config";
+import { encryptionAvailable, ensureProviderCredentials, listPublicCredentials, type PublicCredential } from "@/modules/ai/credentials";
 import { aiNotConfiguredMessage } from "@/modules/ai/errors";
 import { AIFailure } from "@/modules/ai/failures";
 import { ollamaModelInstalled, probeOllama, type OllamaProbe } from "@/modules/ai/ollama";
@@ -21,6 +22,7 @@ export type AISurface =
 export async function getAISurface(capability: string): Promise<AISurface> {
   if (hasProviderOverride()) return { ready: true };
   await ensureAISelection();
+  await ensureProviderCredentials();
   const view = describeAIConfiguration();
   if (!view.configured || !view.providerId || !view.model) {
     return {
@@ -77,16 +79,24 @@ export type ProviderCard = {
   description: string;
   status: string;
   detail: string;
+  credentialSource: string | null;
+  connectionLabel: string | null;
+  endpoint: string | null;
 };
 
 export async function loadAIConfiguration() {
   await ensureAISelection();
+  await ensureProviderCredentials();
   const described = describeAIConfiguration();
   const ollama = await probeOllama();
   const active = withRuntimeStatus(described, ollama);
+  const credentials = await listPublicCredentials();
   return {
     active,
-    cards: providerCards(ollama, described),
+    cards: providerCards(ollama, active, credentials),
+    credentials,
+    encryptionAvailable: encryptionAvailable(),
+    ollamaEndpoint: ollamaEndpointLabel(),
     installedModels: ollama.running ? ollama.models : [],
     changes: await listAISelectionChanges(),
   };
@@ -116,22 +126,33 @@ function withRuntimeStatus(view: AIConfigurationView, ollama: OllamaProbe): AICo
   return view;
 }
 
-function providerCards(ollama: OllamaProbe, active: AIConfigurationView): ProviderCard[] {
+function providerCards(ollama: OllamaProbe, active: AIConfigurationView, credentials: PublicCredential[]): ProviderCard[] {
   return listProviderSpecs().map((spec) => {
     if (spec.id === "OLLAMA") return ollamaCard(spec, ollama, active);
-    const configured = Boolean(readProviderCredential(spec.id));
+    const credential = credentials.find((item) => item.provider === spec.id);
+    const configured = credential?.configured ?? false;
     return {
       id: spec.id,
       label: spec.label,
       description: spec.description,
       status: configured ? "Configured" : "Not configured",
-      detail: configured
-        ? "API key configured on server."
-        : spec.id === "GOOGLE_GEMINI"
-          ? "Add GOOGLE_GEMINI_API_KEY to the server environment and restart AI Product Builder."
-          : "Add OPENAI_API_KEY to the server environment and restart AI Product Builder.",
+      detail: cloudDetail(credential),
+      credentialSource: credential?.sourceLabel ?? "Not configured",
+      connectionLabel: credential?.connectionLabel ?? "Connection not tested",
+      endpoint: null,
     };
   });
+}
+
+function cloudDetail(credential: PublicCredential | undefined) {
+  if (!credential || credential.source === "none") {
+    return "Save an API key in Settings, or set the server environment variable. The key is not shown here.";
+  }
+  if (credential.source === "unreadable") {
+    return "The stored credential could not be read. Check AI_CREDENTIAL_ENCRYPTION_KEY and save the key again.";
+  }
+  if (credential.source === "application") return "API key saved in application configuration.";
+  return "API key configured in the server environment.";
 }
 
 function ollamaCard(
@@ -146,6 +167,9 @@ function ollamaCard(
       description: spec.description,
       status: "Not running",
       detail: "Ollama is not running.",
+      credentialSource: null,
+      connectionLabel: null,
+      endpoint: ollamaEndpointLabel(),
     };
   }
   if (ollama.models.length === 0) {
@@ -155,6 +179,9 @@ function ollamaCard(
       description: spec.description,
       status: "Available",
       detail: "No local models are installed. Install a model with Ollama before using this provider.",
+      credentialSource: null,
+      connectionLabel: null,
+      endpoint: ollamaEndpointLabel(),
     };
   }
   if (active.providerId === "OLLAMA" && !active.model) {
@@ -164,6 +191,9 @@ function ollamaCard(
       description: spec.description,
       status: "No model selected",
       detail: "Select an installed model.",
+      credentialSource: null,
+      connectionLabel: null,
+      endpoint: ollamaEndpointLabel(),
     };
   }
   if (active.providerId === "OLLAMA" && active.model && !ollamaModelInstalled(ollama.models, active.model)) {
@@ -173,6 +203,9 @@ function ollamaCard(
       description: spec.description,
       status: "Model unavailable",
       detail: "The selected model is not installed.",
+      credentialSource: null,
+      connectionLabel: null,
+      endpoint: ollamaEndpointLabel(),
     };
   }
   return {
@@ -181,5 +214,8 @@ function ollamaCard(
     description: spec.description,
     status: "Available",
     detail: ollamaEndpointIsLocal() ? "Local endpoint." : "Requests are sent to the configured Ollama endpoint.",
+    credentialSource: null,
+    connectionLabel: null,
+    endpoint: ollamaEndpointLabel(),
   };
 }

@@ -77,6 +77,12 @@ export class OpenAIProvider implements AIProvider {
   }
 }
 
+/** Confirms the key and model with a model lookup. This does not generate text. */
+export async function probeOpenAICredential(apiKey: string, model: string) {
+  const client = new OpenAI({ apiKey, timeout: 20_000 });
+  await client.models.retrieve(model);
+}
+
 async function callOpenAI<T>(apiKey: string, model: string, request: AIGenerateRequest<T>): Promise<OpenAICompletion> {
   const client = new OpenAI({ apiKey, timeout: 120_000 });
   const completion = await client.chat.completions.parse({

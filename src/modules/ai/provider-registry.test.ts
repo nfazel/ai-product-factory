@@ -16,7 +16,7 @@ import { requireStructured } from "@/modules/ai/structured";
 import { childEnv } from "@/modules/coding/git";
 import { DomainError } from "@/modules/shared/errors";
 
-const ENV_KEYS = ["AI_PROVIDER", "AI_MODEL", "OPENAI_API_KEY", "GOOGLE_GEMINI_API_KEY", "OLLAMA_BASE_URL"] as const;
+const ENV_KEYS = ["AI_PROVIDER", "AI_MODEL", "OPENAI_API_KEY", "GOOGLE_GEMINI_API_KEY", "OLLAMA_BASE_URL", "AI_CREDENTIAL_ENCRYPTION_KEY"] as const;
 const saved = Object.fromEntries(ENV_KEYS.map((key) => [key, process.env[key]]));
 
 const OPENAI_SECRET = "sk-live-openai-secret-value-xyz";
@@ -167,11 +167,14 @@ describe("AI provider registry", () => {
     expect(serialized).not.toContain("AIza");
     expect(view).not.toHaveProperty("apiKey");
 
+    process.env.AI_CREDENTIAL_ENCRYPTION_KEY = "b".repeat(44);
     const env = childEnv();
     expect(env.OPENAI_API_KEY).toBeUndefined();
     expect(env.GOOGLE_GEMINI_API_KEY).toBeUndefined();
+    expect(env.AI_CREDENTIAL_ENCRYPTION_KEY).toBeUndefined();
     expect(JSON.stringify(env)).not.toContain(OPENAI_SECRET);
     expect(JSON.stringify(env)).not.toContain(GEMINI_SECRET);
+    expect(JSON.stringify(env)).not.toContain("b".repeat(44));
 
     const settings = readFileSync(path.join(process.cwd(), "src/app/(app)/settings/page.tsx"), "utf8");
     expect(settings).not.toMatch(/use client/);
@@ -184,7 +187,10 @@ describe("AI provider registry", () => {
     expect(settings).not.toContain(GEMINI_SECRET);
 
     const form = readFileSync(path.join(process.cwd(), "src/components/ai/configuration-form.tsx"), "utf8");
-    expect(form).not.toMatch(/apiKey|baseUrl|OLLAMA_BASE_URL|OPENAI_API_KEY|GOOGLE_GEMINI_API_KEY|NEXT_PUBLIC_/);
+    expect(form).toMatch(/type="password"/);
+    expect(form).toMatch(/name="apiKey"/);
+    expect(form).toContain("••••••••••••");
+    expect(form).not.toMatch(/createDecipheriv|decryptSecret|credential-crypto|baseUrl|OLLAMA_BASE_URL|OPENAI_API_KEY|GOOGLE_GEMINI_API_KEY|NEXT_PUBLIC_/);
   });
 
   it("does not let product modules import a provider SDK", () => {

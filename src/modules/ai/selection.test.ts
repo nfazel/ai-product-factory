@@ -106,9 +106,13 @@ describe("AI selection store", () => {
     expect(serialized).not.toContain(ENDPOINT_SECRET);
     expect(serialized).not.toContain("baseUrl");
     const action = readFileSync(path.join(process.cwd(), "src/server/actions/ai-configuration.ts"), "utf8");
-    expect(action).toMatch(/provider: values\.provider/);
-    expect(action).toMatch(/model: values\.model/);
-    expect(action).not.toMatch(/values\.(apiKey|baseUrl|endpoint|key|secret)/);
+    const selectionAction = action.slice(0, action.indexOf("export async function saveProviderCredentialAction"));
+    expect(selectionAction).toMatch(/provider: values\.provider/);
+    expect(selectionAction).toMatch(/model: values\.model/);
+    expect(selectionAction).not.toMatch(/values\.apiKey/);
+    expect(selectionAction).not.toMatch(/saveAISelection\(\{[^}]*apiKey/);
+    expect(action).not.toMatch(/values\.(baseUrl|endpoint|secret)/);
     expect(action).not.toMatch(/process\.env\.[A-Z0-9_]+\s*=/);
+    expect(action).not.toMatch(/console\.error\(error\)/);
   });
 });

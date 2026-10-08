@@ -29,7 +29,7 @@ Rules:
 | Product | Product definition, status, and current stage. |
 | Discovery | Discovery sessions, messages, product briefs, and assumptions. |
 | Requirements | Outcomes, capabilities, proposals, the first slice, readiness, and the requirements runner. |
-| AI | `AIProvider`, the provider registry, and the Gemini, Ollama, and OpenAI adapters. Server-side only. See [ai-providers.md](ai-providers.md). |
+| AI | `AIProvider`, the provider registry, and the Gemini, Ollama, and OpenAI adapters. Server-side only. A cloud API key saved in Settings is AES-256-GCM ciphertext in `AiProviderCredential`. `AI_CREDENTIAL_ENCRYPTION_KEY` stays in the server environment, not in the database and not in the browser. See [ai-providers.md](ai-providers.md). |
 | Work item | Backlog items, hierarchy, and dependencies. |
 | Acceptance | Criteria on a work item, including pass and fail. |
 | Decision | Human decisions, optionally tied to a work item. |

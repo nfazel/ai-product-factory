@@ -1,3 +1,4 @@
+import { knownCredentialSecrets } from "@/modules/ai/credential-cache";
 import { DomainError } from "@/modules/shared/errors";
 
 const SECRET_PATTERNS = [
@@ -8,6 +9,7 @@ const SECRET_PATTERNS = [
   /OPENAI_API_KEY\s*[=:]\s*\S+/gi,
   /ANTHROPIC_API_KEY\s*[=:]\s*\S+/gi,
   /GOOGLE_GEMINI_API_KEY\s*[=:]\s*\S+/gi,
+  /AI_CREDENTIAL_ENCRYPTION_KEY\s*[=:]\s*\S+/gi,
 ];
 
 export function aiNotConfiguredMessage(capability: string, consequence: string) {
@@ -17,14 +19,26 @@ export function aiNotConfiguredMessage(capability: string, consequence: string) 
 /** A description safe to store and show. Secrets and stacks are removed. */
 export function safeErrorMessage(error: unknown) {
   const raw = error instanceof Error ? error.message : "The AI provider failed.";
-  const redacted = SECRET_PATTERNS.reduce(
+  let redacted = SECRET_PATTERNS.reduce(
     (message, pattern) => message.replace(pattern, "[redacted]"),
     raw,
-  )
-    .replace(/\s+/g, " ")
-    .trim();
+  );
+  for (const secret of liveSecrets()) {
+    redacted = redacted.split(secret).join("[redacted]");
+  }
+  redacted = redacted.replace(/\s+/g, " ").trim();
   const message = redacted || "The AI provider failed.";
   return message.length > 500 ? `${message.slice(0, 497)}...` : message;
+}
+
+function liveSecrets() {
+  const values = [
+    process.env.OPENAI_API_KEY,
+    process.env.GOOGLE_GEMINI_API_KEY,
+    process.env.AI_CREDENTIAL_ENCRYPTION_KEY,
+    ...knownCredentialSecrets(),
+  ];
+  return [...new Set(values.filter((value): value is string => Boolean(value && value.length > 8)))];
 }
 
 export class AINotConfiguredError extends DomainError {

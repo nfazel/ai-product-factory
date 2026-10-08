@@ -103,6 +103,16 @@ async function callGemini<T>(apiKey: string, model: string, request: AIGenerateR
   };
 }
 
+/** Confirms the key and model with a model lookup. This does not generate text. */
+export async function probeGeminiCredential(apiKey: string, model: string) {
+  const ai = new GoogleGenAI({
+    apiKey,
+    vertexai: false,
+    httpOptions: { timeout: 20_000 },
+  });
+  await ai.models.get({ model });
+}
+
 function normalise<T>(model: string, schema: ZodType<T>, completed: GeminiCompletion, durationMs: number): AIGenerateResult<T> {
   const finish = completed.finishReason;
   if (finish === "SAFETY" || finish === "PROHIBITED_CONTENT" || finish === "BLOCKLIST" || finish === "SPII") {

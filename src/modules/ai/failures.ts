@@ -32,6 +32,33 @@ export function cutOffResponse() {
   return new AIFailure(CUT_OFF, "INVALID_RESPONSE");
 }
 
+/** Category only. Connection tests use this so provider text is not returned to the browser. */
+export function providerFailureCategory(error: unknown): AIFailureCategory | "domain" {
+  if (error instanceof AIFailure) return error.category;
+  if (error instanceof DomainError) return "domain";
+  const status = statusOf(error);
+  const name = error instanceof Error ? error.name : "";
+  const message = error instanceof Error ? error.message : "";
+  if (name === "APIConnectionTimeoutError" || name === "AbortError" || /timeout|timed out/i.test(message)) {
+    return "TIMEOUT";
+  }
+  if (status === 401 || status === 403 || name === "AuthenticationError" || name === "PermissionDeniedError") {
+    return "AUTHENTICATION_FAILED";
+  }
+  if (status === 429 || name === "RateLimitError") return "RATE_LIMITED";
+  if (
+    status === 404 ||
+    /model[^\n]{0,80}(not found|does not exist)|invalid model|not_found_error/i.test(message)
+  ) {
+    return "MODEL_NOT_AVAILABLE";
+  }
+  if (/Failed to parse structured output|did not match the required structure/i.test(message)) {
+    return "SCHEMA_VALIDATION_FAILED";
+  }
+  if (name === "APIConnectionError" || (status !== undefined && status >= 500)) return "PROVIDER_UNAVAILABLE";
+  return "PROVIDER_UNAVAILABLE";
+}
+
 /** Maps a provider SDK failure to a product error. The original message is logged without secrets. */
 export function mapProviderFailure(error: unknown): never {
   if (error instanceof AIFailure || error instanceof DomainError) throw error;

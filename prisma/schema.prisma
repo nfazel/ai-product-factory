@@ -3215,6 +3215,22 @@ model AiSelectionChange {
   @@index([createdAt])
 }
 
+model AiProviderCredential {
+  provider            String   @id
+  encryptedCredential String
+  encryptionIv        String
+  authTag             String
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+}
+
+model AiProviderConnectionCheck {
+  provider  String   @id
+  model     String
+  outcome   String
+  checkedAt DateTime @updatedAt
+}
+
 model RequirementTraceLink {
   id                  String              @id @default(cuid())
   productId           String

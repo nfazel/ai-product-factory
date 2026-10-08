@@ -1,11 +1,14 @@
 import "server-only";
 
+import { readResolvedCredential } from "@/modules/ai/credential-cache";
+
 /**
  * Provider-neutral AI configuration.
  *
  * The active provider and model come from a saved administrator choice when one
- * exists, otherwise from AI_PROVIDER and AI_MODEL. Credentials stay in their
- * own server variables and are never returned from the public view.
+ * exists, otherwise from AI_PROVIDER and AI_MODEL. A cloud credential comes from
+ * the encrypted application store when one exists, otherwise from the server
+ * environment. The public view never includes the credential.
  *
  * resolveModel(task) is the one place a later change can choose a task-specific
  * model. Today every task uses the one active model. A future verification
@@ -149,9 +152,11 @@ export function resolveModel(task?: AITask) {
 }
 
 export function readProviderCredential(provider: AIProviderId) {
-  if (provider === "OPENAI") return process.env.OPENAI_API_KEY?.trim() ?? "";
-  if (provider === "GOOGLE_GEMINI") return process.env.GOOGLE_GEMINI_API_KEY?.trim() ?? "";
-  return "";
+  return readResolvedCredential(provider).value;
+}
+
+export function providerCredentialSource(provider: AIProviderId) {
+  return readResolvedCredential(provider).source;
 }
 
 export function modelFitsProvider(provider: AIProviderId, model: string) {
@@ -277,10 +282,19 @@ export function ollamaEndpointIsLocal() {
 }
 
 function credentialSetup(provider: AIProviderId) {
-  if (provider === "GOOGLE_GEMINI") {
-    return "Google Gemini is selected and the model is set. Add GOOGLE_GEMINI_API_KEY to the server environment and restart AI Product Builder. The key is not shown here.";
+  if (providerCredentialSource(provider) === "unreadable") {
+    return "The stored credential could not be read. Check AI_CREDENTIAL_ENCRYPTION_KEY and save the key again in Settings. Nothing was sent.";
   }
-  return "OpenAI is selected and the model is set. Add OPENAI_API_KEY to the server environment and restart AI Product Builder. The key is not shown here. A ChatGPT subscription does not by itself provide this API credential.";
+  if (provider === "GOOGLE_GEMINI") {
+    return "Google Gemini is selected and the model is set. Save a Gemini API key in Settings, or add GOOGLE_GEMINI_API_KEY to the server environment and restart AI Product Builder. The key is not shown here.";
+  }
+  return "OpenAI is selected and the model is set. Save an OpenAI API key in Settings, or add OPENAI_API_KEY to the server environment and restart AI Product Builder. The key is not shown here. A ChatGPT subscription does not by itself provide this API credential.";
+}
+
+export function ollamaEndpointLabel() {
+  if (ollamaEndpointIssue()) return "Not configured";
+  if (ollamaEndpointIsLocal()) return "Local endpoint";
+  return ollamaOrigin();
 }
 
 function publicToken(value: string) {

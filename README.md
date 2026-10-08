@@ -95,8 +95,9 @@ cp .env.example .env
 | `DATABASE_URL` | PostgreSQL connection string used by Prisma and the Next.js server |
 | `AI_PROVIDER` | `GOOGLE_GEMINI`, `OLLAMA`, or `OPENAI`. Required before any model call unless Settings has saved a provider. Empty does not assume a provider |
 | `AI_MODEL` | Model id for that provider. Required. Empty does not substitute a built-in model |
-| `GOOGLE_GEMINI_API_KEY` | Server-only credential used when Google Gemini is selected |
-| `OPENAI_API_KEY` | Server-only credential used when OpenAI is selected |
+| `AI_CREDENTIAL_ENCRYPTION_KEY` | 32 bytes as base64 or 64 hex characters. Encrypts API keys saved in Settings. Not stored in the database and not sent to the browser. Generate with `openssl rand -base64 32` |
+| `GOOGLE_GEMINI_API_KEY` | Optional server-only credential used when Google Gemini is selected and Settings has no saved key |
+| `OPENAI_API_KEY` | Optional server-only credential used when OpenAI is selected and Settings has no saved key |
 | `OLLAMA_BASE_URL` | Ollama address. Defaults to `http://127.0.0.1:11434`. No API key is required for normal local use |
 | `CODEBASE_CONTEXT_ROOT` | Optional absolute path. When set, Build can read that directory's `package.json` and top-level folder names. It cannot browse an arbitrary path |
 | `PRODUCT_REPOSITORY_ROOT` | Optional absolute path to a local Git repository the Coding Agent and the Testing & Verification Agent may use. The browser cannot set this |
@@ -107,7 +108,7 @@ cp .env.example .env
 | `GITHUB_MINIMUM_HUMAN_APPROVALS` | Optional. Defaults to 1. Branch protection can require more |
 | `GITHUB_SERVICE_ACCOUNT` | Optional login that must not count as a human reviewer |
 
-The credential is read only on the server. The browser never receives it. Settings shows the active provider, the model, and whether that provider is configured, not running, or missing a model. If the connection is missing, Discovery says that AI is not configured and links to Settings. See [docs/ai-providers.md](docs/ai-providers.md).
+The credential is read only on the server. The browser never receives it. Settings can store a Gemini or OpenAI API key after `AI_CREDENTIAL_ENCRYPTION_KEY` is set. That stored key is preferred over the environment variable for the selected provider. Environment variables still work if you do not save a key. Ollama does not use an API key. Settings shows the active provider, the model, whether a credential is configured, and whether the connection has been tested. Opening Settings does not call the model. If the connection is missing, Discovery says that AI is not configured and links to Settings. See [docs/ai-providers.md](docs/ai-providers.md).
 
 ## Run locally
 

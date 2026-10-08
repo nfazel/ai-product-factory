@@ -66,10 +66,18 @@ async function Settings() {
           {active.description ? <p className="mt-3 text-sm leading-6">{active.description}</p> : null}
           {active.privacy ? <p className="mt-1 text-sm leading-6 text-muted-foreground">{active.privacy}</p> : null}
           <p className="mt-3 text-sm leading-6">{active.setup}</p>
+          {!ai.encryptionAvailable ? (
+            <p className="mt-3 text-sm leading-6 text-muted-foreground">
+              Set AI_CREDENTIAL_ENCRYPTION_KEY before saving an API key on this page. Generate 32 bytes with openssl rand -base64 32, add that value to the server environment, and restart. Do not commit it. Server environment credentials still work without it.
+            </p>
+          ) : null}
           <AIConfigurationForm
             provider={active.providerId ?? ""}
             model={active.model ?? ""}
             installedModels={ai.installedModels}
+            credentials={ai.credentials}
+            ollamaEndpoint={ai.ollamaEndpoint}
+            ollamaStatus={ai.cards.find((card) => card.id === "OLLAMA")?.status ?? "Not configured"}
           />
           <div className="mt-5 grid gap-3 sm:grid-cols-3">
             {ai.cards.map((card) => (
@@ -77,15 +85,18 @@ async function Settings() {
                 <p className="font-medium">{card.label}</p>
                 <p className="mt-1 text-muted-foreground">{card.description}</p>
                 <p className="mt-2 font-medium">{card.status}</p>
+                {card.credentialSource ? <p className="mt-1 text-muted-foreground">{card.credentialSource}</p> : null}
+                {card.connectionLabel ? <p className="mt-1 text-muted-foreground">{card.connectionLabel}</p> : null}
+                {card.endpoint ? <p className="mt-1 text-muted-foreground">{card.endpoint}</p> : null}
                 <p className="mt-1 text-muted-foreground">{card.detail}</p>
               </div>
             ))}
           </div>
           <div className="mt-5 space-y-3 text-sm leading-6 text-muted-foreground">
-            <p>Google Gemini is a cloud AI provider and requires a Gemini API key. Obtain a key from Google, add GOOGLE_GEMINI_API_KEY to the server environment, restart AI Product Builder, select Google Gemini, then set the model. A current recommendation is gemini-flash-latest. That is a starting point, not a platform requirement. Data is sent to the configured cloud AI provider.</p>
+            <p>Google Gemini is a cloud AI provider. Save a Gemini API key here, or set GOOGLE_GEMINI_API_KEY in the server environment. A key saved here is encrypted and is not shown again. An application key is used before the environment variable. A current recommendation is gemini-flash-latest. That is a starting point, not a platform requirement. Data is sent to the configured cloud AI provider.</p>
             <p>Ollama runs supported models locally. No API key is required for normal local use. Install Ollama, start it, install a compatible model outside AI Product Builder, return here, and select the installed model. AI Product Builder does not download models. The server address is OLLAMA_BASE_URL. A loopback address is a local endpoint. Requests are sent to that configured endpoint.</p>
-            <p>OpenAI is a cloud AI provider and requires an OpenAI API key. Obtain a key, add OPENAI_API_KEY to the server environment, restart, select OpenAI, then set the model. A current recommendation is gpt-4.1-mini. That is a starting point, not a platform requirement. A ChatGPT subscription does not by itself provide this API credential. Data is sent to the configured cloud AI provider.</p>
-            <p>Credentials stay in the server environment. This page cannot show or store an API key.</p>
+            <p>OpenAI is a cloud AI provider. Save an OpenAI API key here, or set OPENAI_API_KEY in the server environment. A key saved here is encrypted and is not shown again. An application key is used before the environment variable. A current recommendation is gpt-4.1-mini. That is a starting point, not a platform requirement. A ChatGPT subscription does not by itself provide this API credential. Data is sent to the configured cloud AI provider.</p>
+            <p>Opening this page does not call a model. Saving a key does not call a model. Test Connection is the check that contacts the selected cloud provider. The stored key is never sent back to the browser.</p>
           </div>
           {ai.changes.length > 0 ? (
             <div className="mt-5">

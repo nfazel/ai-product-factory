@@ -1,6 +1,7 @@
 import type { ZodType } from "zod";
 
 import { describeAIConfiguration, type AITask } from "@/modules/ai/config";
+import { ensureProviderCredentials } from "@/modules/ai/credentials";
 import { ensureAISelection } from "@/modules/ai/selection";
 import { createConfiguredProvider } from "@/modules/ai/registry";
 
@@ -60,10 +61,12 @@ export function isAIConfigured() {
 export async function prepareAI() {
   if (providerOverride) return;
   await ensureAISelection();
+  await ensureProviderCredentials();
 }
 
 export async function getAIProvider(task?: AITask): Promise<AIProvider> {
   if (providerOverride) return providerOverride;
   await ensureAISelection();
+  await ensureProviderCredentials();
   return createConfiguredProvider(task);
 }
