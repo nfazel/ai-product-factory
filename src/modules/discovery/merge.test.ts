@@ -39,6 +39,7 @@ function brief(overrides: Partial<ProductBriefRecord> = {}): ProductBriefRecord 
     readyForReview: false,
     readinessReason: "",
     status: "DRAFT",
+    fromRequirements: false,
     ...overrides,
   };
 }

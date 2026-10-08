@@ -10,6 +10,8 @@ Product Discovery turns an incomplete idea into a Product Brief during Explore. 
 
 A person moves the stage. No agent can approve its own work. The next action on each product is chosen from those gates, not by a model. See [docs/product-experience.md](docs/product-experience.md).
 
+A product starts in one of two ways. **I have an idea** keeps the discovery conversation. **I already have requirements** stores the supplied text, analyses it, and still asks a person to approve the Product Brief and the Product Definition. Existing requirements are source material. They are not treated as complete, and they are not rewritten in place. See [docs/existing-requirements.md](docs/existing-requirements.md).
+
 ## Technology stack
 
 - Next.js (App Router), React, TypeScript
@@ -49,6 +51,8 @@ docs/release-governance.md       Release candidate, evidence, risk, and approval
 docs/deployment-governance.md    Human deployment records and rollback
 docs/learn-loop.md               Outcome observation and the next decision
 docs/product-experience.md  Navigation, next action, blockers, and evidence
+docs/discovery.md            Idea discovery and the existing-requirements entry
+docs/existing-requirements.md  Intake, findings, readiness, and traceability
 docs/factory-intelligence.md    Flow metrics, portfolio view, and Insights
 docs/metrics-catalogue.md       Definition, formula, source, and data-quality rule for every metric
 ```

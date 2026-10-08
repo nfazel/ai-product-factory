@@ -7,6 +7,7 @@ import {
   DiscoveryComposer,
   MoveToDefineButton,
 } from "@/components/discovery/composer";
+import { IntakeExplore } from "@/components/intake/intake-explore";
 import { BriefPanel } from "@/components/discovery/brief-panel";
 import { StartDiscoveryForm } from "@/components/discovery/start-form";
 import { PageSkeleton } from "@/components/feedback/states";
@@ -65,6 +66,18 @@ async function Discovery({
   if (!workspace || !guidance) notFound();
 
   const { product, session, brief, configured } = workspace;
+
+  if (product.startMode === "EXISTING_REQUIREMENTS") {
+    return (
+      <IntakeExplore
+        productId={product.id}
+        guidance={guidance}
+        brief={brief}
+        sessionStatus={session?.status ?? null}
+        stage={product.currentStage}
+      />
+    );
+  }
 
   return (
     <div className="space-y-5">

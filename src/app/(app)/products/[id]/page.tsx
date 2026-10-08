@@ -42,7 +42,12 @@ async function Overview({ params }: { params: Promise<{ id: string }> }) {
           <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">Current stage</p>
           <h2 className="mt-1 text-2xl font-semibold">{STAGE_META[guidance.stage].label}</h2>
           <p className="mt-2 text-sm text-muted-foreground">Status: {current?.label ?? STAGE_PROGRESS_LABEL.IN_PROGRESS}</p>
-          <p className="mt-3 text-sm leading-6">{overview.product.problemStatement}</p>
+          <p className="mt-3 text-sm leading-6">
+            {overview.product.problemStatement ||
+              (overview.product.startMode === "EXISTING_REQUIREMENTS"
+                ? "The problem is not stated in the supplied requirements yet. It will be asked for, not invented."
+                : "The problem has not been recorded.")}
+          </p>
         </article>
         <article className="rounded-2xl border bg-card p-5">
           <h2 className="text-sm font-semibold">Current outcome</h2>

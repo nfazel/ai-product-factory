@@ -37,6 +37,9 @@ yarn-error.log*
 # generated Prisma client
 /src/generated
 
+# uploaded requirement documents
+/data/requirement-uploads
+
 # vercel
 .vercel
 

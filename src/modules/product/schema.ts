@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { PRODUCT_STAGES, PRODUCT_STATUSES } from "@/domain/constants";
+import { PRODUCT_STAGES, PRODUCT_START_MODES, PRODUCT_STATUSES } from "@/domain/constants";
 
 const nameField = z
   .string()
@@ -14,13 +14,24 @@ const problemField = z
   .min(1, "Describe the problem you are trying to solve")
   .max(2000);
 
-export const createProductSchema = z.object({
-  name: nameField,
-  problemStatement: problemField,
-  description: z.string().trim().max(500).optional().default(""),
-  vision: z.string().trim().max(2000).optional().default(""),
-  targetUsers: z.string().trim().max(1000).optional().default(""),
-});
+export const createProductSchema = z
+  .object({
+    name: nameField,
+    startMode: z.enum(PRODUCT_START_MODES).optional().default("IDEA"),
+    problemStatement: z.string().trim().max(2000).optional().default(""),
+    description: z.string().trim().max(500).optional().default(""),
+    vision: z.string().trim().max(2000).optional().default(""),
+    targetUsers: z.string().trim().max(1000).optional().default(""),
+  })
+  .superRefine((value, context) => {
+    if (value.startMode === "IDEA" && value.problemStatement.trim().length < 1) {
+      context.addIssue({
+        code: "custom",
+        path: ["problemStatement"],
+        message: "Describe the problem you are trying to solve",
+      });
+    }
+  });
 
 export const updateProductSchema = z.object({
   id: z.string().trim().min(1),

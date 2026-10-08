@@ -1,4 +1,4 @@
-import type { ProductStage, ProductStatus } from "@/domain/constants";
+import type { ProductStage, ProductStartMode, ProductStatus } from "@/domain/constants";
 
 export type Product = {
   id: string;
@@ -9,6 +9,7 @@ export type Product = {
   targetUsers: string;
   status: ProductStatus;
   currentStage: ProductStage;
+  startMode: ProductStartMode;
   createdAt: Date;
   updatedAt: Date;
   workItemCount: number;
@@ -20,9 +21,10 @@ export type CreateProductInput = {
   vision: string;
   problemStatement: string;
   targetUsers: string;
+  startMode: ProductStartMode;
 };
 
-export type UpdateProductInput = CreateProductInput & {
+export type UpdateProductInput = Omit<CreateProductInput, "startMode"> & {
   id: string;
   status: ProductStatus;
   currentStage: ProductStage;

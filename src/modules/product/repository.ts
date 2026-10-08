@@ -17,6 +17,7 @@ function toProduct(row: {
   targetUsers: string;
   status: Product["status"];
   currentStage: Product["currentStage"];
+  startMode: Product["startMode"];
   createdAt: Date;
   updatedAt: Date;
   _count?: { workItems: number };
@@ -30,6 +31,7 @@ function toProduct(row: {
     targetUsers: row.targetUsers,
     status: row.status,
     currentStage: row.currentStage,
+    startMode: row.startMode,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     workItemCount: row._count?.workItems ?? 0,

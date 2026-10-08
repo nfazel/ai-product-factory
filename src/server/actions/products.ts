@@ -26,7 +26,7 @@ export async function createProductAction(
   try {
     const product = await createProduct(parsed.data);
     refreshWorkspace(product.id);
-    redirect(`/products/${product.id}`);
+    redirect(product.startMode === "EXISTING_REQUIREMENTS" ? `/products/${product.id}/discovery` : `/products/${product.id}`);
   } catch (error) {
     return actionFailure(error);
   }

@@ -57,6 +57,7 @@ export type ProductBriefRecord = {
   readyForReview: boolean;
   readinessReason: string;
   status: ProductBriefStatus;
+  fromRequirements: boolean;
 };
 
 export type DiscoveryMessageRecord = {

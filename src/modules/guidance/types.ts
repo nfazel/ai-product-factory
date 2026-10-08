@@ -40,6 +40,20 @@ export type GuidanceSnapshot = {
   name: string;
   stage: ProductStage;
   sample: boolean;
+  startMode: "IDEA" | "EXISTING_REQUIREMENTS";
+  requirementsChanged: boolean;
+  intake: {
+    activeSources: number;
+    extractionFailed: boolean;
+    analysed: boolean;
+    stale: boolean;
+    unreviewed: number;
+    needsChange: number;
+    blockingFindings: number;
+    openQuestions: number;
+    materialUnmapped: number;
+    updatedAt: string | null;
+  };
   discovery: {
     started: boolean;
     briefStatus: "NONE" | "DRAFT" | "READY_FOR_REVIEW" | "APPROVED";

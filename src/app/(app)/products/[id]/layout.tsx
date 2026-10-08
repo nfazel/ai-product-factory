@@ -6,7 +6,7 @@ import { PageSkeleton } from "@/components/feedback/states";
 import { ProgressStrip } from "@/components/guidance/guidance-ui";
 import { ProductTabs } from "@/components/products/product-tabs";
 import { ProductStatusBadge, StageBadge } from "@/components/status/badges";
-import { STAGE_META } from "@/domain/constants";
+import { PRODUCT_START_LABEL, STAGE_META } from "@/domain/constants";
 import { getProductGuidance } from "@/modules/guidance/service";
 import { getProduct } from "@/modules/product/service";
 import { markDynamic } from "@/server/dynamic";
@@ -56,7 +56,7 @@ async function ProductFrame({
         </div>
       </div>
       <p className="text-sm text-muted-foreground">
-        Current stage: {STAGE_META[product.currentStage].label}. A stage is complete only after its gate is met.
+        {STAGE_META[product.currentStage].label} · {PRODUCT_START_LABEL[product.startMode]}. A stage is complete only after its gate is met.
       </p>
       <ProgressStrip stages={guidance.stages} />
       <ProductTabs productId={product.id} />

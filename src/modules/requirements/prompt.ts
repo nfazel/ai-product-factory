@@ -100,6 +100,9 @@ export type RequirementsContext = {
   mode: "generate" | "regenerate" | "review";
   section?: string;
   currentProposalSummary?: string;
+  confirmedRequirements?: string[];
+  rejectedRequirements?: string[];
+  intakeWarnings?: string[];
 };
 
 function lines(label: string, values: string[]) {
@@ -177,6 +180,18 @@ export function requirementsMessages(context: RequirementsContext): AIChatMessag
     context.currentProposalSummary
       ? `Current open proposal\n${context.currentProposalSummary}`
       : "There is no open proposal.",
+    "",
+    "CONFIRMED SOURCE REQUIREMENTS",
+    "These are customer source text plus a human-confirmed interpretation. Do not treat rejected text as a requirement. Unresolved warnings stay warnings.",
+    (context.confirmedRequirements ?? []).length === 0
+      ? "None."
+      : (context.confirmedRequirements ?? []).map((line) => `- ${line}`).join("\n"),
+    (context.rejectedRequirements ?? []).length === 0
+      ? "Rejected interpretations: none."
+      : `Rejected interpretations, not requirements:\n${(context.rejectedRequirements ?? []).map((line) => `- ${line}`).join("\n")}`,
+    (context.intakeWarnings ?? []).length === 0
+      ? "Open material findings: none."
+      : `Open material findings:\n${(context.intakeWarnings ?? []).map((line) => `- ${line}`).join("\n")}`,
     "",
     instruction,
   ].join("\n");

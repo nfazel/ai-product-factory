@@ -27,7 +27,7 @@ async function ProductsContent() {
       <PageHeader
         eyebrow="Portfolio"
         title="Products"
-        description="Each product moves from an idea through Explore, Define, Build, Prove, Ship, and Learn."
+        description="Each product starts from an idea or from requirements you already have, then moves through Explore, Define, Build, Prove, Ship, and Learn."
         actions={
           <Button asChild size="lg">
             <Link href="/products/new">New product</Link>

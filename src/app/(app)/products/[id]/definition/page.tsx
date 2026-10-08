@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { DefinitionControls } from "@/components/definition/controls";
+import { RequirementsPanel } from "@/components/intake/requirements-panel";
 import { AnswerForm, EntityAction } from "@/components/definition/entity-actions";
 import { ProposalPanel } from "@/components/definition/proposal-panel";
 import { PageSkeleton } from "@/components/feedback/states";
@@ -114,6 +115,19 @@ async function Definition({ params }: { params: Promise<{ id: string }> }) {
         </div>
       </header>
       {guidance.stage === "DEFINE" || guidance.action?.stage === "DEFINE" ? <NextActionPanel guidance={guidance} /> : null}
+
+      {workspace.product.startMode === "EXISTING_REQUIREMENTS" ? (
+        <RequirementsPanel
+          productId={workspace.product.id}
+          targets={[
+            ...workspace.outcomes.map((item) => ({ value: `PRODUCT_OUTCOME|${item.id}`, label: `Outcome · ${item.title}` })),
+            ...workspace.capabilities.map((item) => ({ value: `PRODUCT_CAPABILITY|${item.id}`, label: `Capability · ${item.name}` })),
+            ...workspace.workItems.filter((item) => item.type === "STORY").map((item) => ({ value: `WORK_ITEM|${item.id}`, label: `Story · ${item.title}` })),
+            ...workspace.criteria.map((item) => ({ value: `ACCEPTANCE_CRITERION|${item.id}`, label: `Acceptance criterion · ${item.description}` })),
+            ...workspace.nfrs.map((item) => ({ value: `NFR|${item.id}`, label: `NFR · ${item.title}` })),
+          ]}
+        />
+      ) : null}
 
       <section className="rounded-2xl border bg-card p-5">
         <h2 className="text-lg font-semibold">Requirements readiness</h2>

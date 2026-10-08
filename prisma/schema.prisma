@@ -26,6 +26,11 @@ enum ProductStage {
   LEARN
 }
 
+enum ProductStartMode {
+  IDEA
+  EXISTING_REQUIREMENTS
+}
+
 enum WorkItemType {
   EPIC
   FEATURE
@@ -79,6 +84,8 @@ model Product {
   targetUsers      String
   status           ProductStatus @default(DRAFT)
   currentStage     ProductStage  @default(EXPLORE)
+  startMode        ProductStartMode @default(IDEA)
+  requirementsReviewRequired Boolean @default(false)
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
 
@@ -116,6 +123,12 @@ model Product {
   releaseCandidates ReleaseCandidate[]
   outcomeObservations OutcomeObservation[]
   learningRecords LearningRecord[]
+  requirementSources RequirementSource[]
+  sourceRequirements SourceRequirement[]
+  requirementsAnalyses RequirementsAnalysis[]
+  intakeFindings RequirementFinding[]
+  intakeQuestions IntakeQuestion[]
+  requirementTraceLinks RequirementTraceLink[]
 
   @@index([status])
   @@index([updatedAt])
@@ -391,6 +404,7 @@ model ProductBrief {
   riskClarity      SignalLevel        @default(LOW)
   readyForReview   Boolean            @default(false)
   readinessReason  String             @default("")
+  fromRequirements Boolean            @default(false)
   status           ProductBriefStatus @default(DRAFT)
   createdAt        DateTime           @default(now())
   updatedAt        DateTime           @updatedAt
@@ -2901,4 +2915,303 @@ model LearningProposal {
   @@index([learningRecordId])
   @@index([productId])
   @@index([status])
+}
+
+enum RequirementSourceKind {
+  PASTED_TEXT
+  UPLOADED_DOCUMENT
+}
+
+enum RequirementSourceStatus {
+  ACTIVE
+  SUPERSEDED
+  EXTRACTION_FAILED
+}
+
+enum SourceRequirementKind {
+  BUSINESS
+  FUNCTIONAL
+  NON_FUNCTIONAL
+  SECURITY
+  REGULATORY
+  DATA
+  INTEGRATION
+  TECHNICAL_CONSTRAINT
+  USER_EXPERIENCE
+  OPERATIONAL
+  UNKNOWN
+}
+
+enum InterpretationConfidence {
+  HIGH
+  MEDIUM
+  LOW
+  UNCERTAIN
+}
+
+enum RequirementConfirmation {
+  UNREVIEWED
+  CONFIRMED
+  NEEDS_CHANGE
+  REJECTED
+}
+
+enum RequirementDisposition {
+  UNSET
+  IN_SCOPE
+  OUT_OF_SCOPE
+  DEFERRED
+  DUPLICATE
+  SUPERSEDED
+  NOT_A_REQUIREMENT
+}
+
+enum IntakeFindingType {
+  AMBIGUOUS
+  INCOMPLETE
+  CONFLICT
+  DUPLICATE
+  MISSING_ACCEPTANCE_CRITERIA
+  MISSING_OUTCOME
+  UNCONFIRMED_ASSUMPTION
+  MISSING_ACTOR
+  MISSING_BUSINESS_RULE
+  UNTESTABLE
+  SECURITY_QUESTION
+  NFR_GAP
+  DEPENDENCY
+  OTHER
+}
+
+enum IntakeFindingSeverity {
+  INFO
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum IntakeFindingStatus {
+  OPEN
+  ADDRESSED
+  DISMISSED
+}
+
+enum IntakeQuestionPriority {
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum IntakeQuestionStatus {
+  OPEN
+  ANSWERED
+  DISMISSED
+}
+
+enum IntakeAnalysisStatus {
+  CURRENT
+  STALE
+  FAILED
+}
+
+enum TraceTargetKind {
+  PRODUCT_OUTCOME
+  PRODUCT_CAPABILITY
+  WORK_ITEM
+  ACCEPTANCE_CRITERION
+  NFR
+}
+
+enum TraceLinkProvenance {
+  AI_PROPOSED
+  HUMAN_CONFIRMED
+}
+
+model RequirementSource {
+  id               String                  @id @default(cuid())
+  productId        String
+  kind             RequirementSourceKind
+  title            String
+  originalFilename String                  @default("")
+  mediaType        String                  @default("")
+  sourceText       String
+  sourceHash       String
+  storageName      String                  @default("")
+  status           RequirementSourceStatus @default(ACTIVE)
+  extractionNote   String                  @default("")
+  pageCount        Int                     @default(0)
+  createdBy        String                  @default("")
+  createdAt        DateTime                @default(now())
+
+  product      Product               @relation(fields: [productId], references: [id], onDelete: Cascade)
+  requirements SourceRequirement[]
+  analyses     AnalysisSource[]
+
+  @@index([productId, status])
+  @@index([sourceHash])
+}
+
+model RequirementsAnalysis {
+  id               String               @id @default(cuid())
+  productId        String
+  version          Int
+  status           IntakeAnalysisStatus @default(CURRENT)
+  agentRunId       String               @default("")
+  problem          String               @default("")
+  value            String               @default("")
+  users            Json                 @default("[]")
+  needs            Json                 @default("[]")
+  outcomes         Json                 @default("[]")
+  assumptions      Json                 @default("[]")
+  constraints      Json                 @default("[]")
+  risks            Json                 @default("[]")
+  scope            Json                 @default("[]")
+  successMeasures  Json                 @default("[]")
+  suggestedCapabilities Json            @default("[]")
+  missingProblem   Boolean              @default(false)
+  missingOutcome   Boolean              @default(false)
+  createdAt        DateTime             @default(now())
+
+  product      Product              @relation(fields: [productId], references: [id], onDelete: Cascade)
+  sources      AnalysisSource[]
+  requirements SourceRequirement[]
+  findings     RequirementFinding[]
+  questions    IntakeQuestion[]
+
+  @@unique([productId, version])
+  @@index([productId, status])
+}
+
+model AnalysisSource {
+  id         String @id @default(cuid())
+  analysisId String
+  sourceId   String
+  sourceHash String
+
+  analysis RequirementsAnalysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+  source   RequirementSource    @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  @@unique([analysisId, sourceId])
+  @@index([sourceId])
+}
+
+model SourceRequirement {
+  id                      String                   @id @default(cuid())
+  productId               String
+  sourceId                String
+  analysisId              String
+  identifier              String                   @default("")
+  sourceText              String
+  sectionHeading          String                   @default("")
+  pageNumber              Int?
+  blockIndex              Int                      @default(0)
+  requirementType         SourceRequirementKind    @default(UNKNOWN)
+  interpretation          String                   @default("")
+  confirmedInterpretation String                   @default("")
+  confidence              InterpretationConfidence @default(UNCERTAIN)
+  confirmation            RequirementConfirmation  @default(UNREVIEWED)
+  confirmedBy             String                   @default("")
+  confirmedAt             DateTime?
+  disposition             RequirementDisposition   @default(UNSET)
+  dispositionReason       String                   @default("")
+  dispositionBy           String                   @default("")
+  suggestedCapability     String                   @default("")
+  createdAt               DateTime                 @default(now())
+  updatedAt               DateTime                 @updatedAt
+
+  product  Product              @relation(fields: [productId], references: [id], onDelete: Cascade)
+  source   RequirementSource    @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  analysis RequirementsAnalysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+  findingLinks FindingSourceLink[]
+  questionLinks IntakeQuestionLink[]
+  traces   RequirementTraceLink[]
+
+  @@index([productId])
+  @@index([sourceId])
+  @@index([analysisId])
+  @@index([confirmation])
+}
+
+model RequirementFinding {
+  id          String                @id @default(cuid())
+  productId   String
+  analysisId  String
+  findingType IntakeFindingType
+  severity    IntakeFindingSeverity
+  status      IntakeFindingStatus   @default(OPEN)
+  title       String
+  explanation String
+  gapNote     String                @default("")
+  createdAt   DateTime              @default(now())
+
+  product  Product              @relation(fields: [productId], references: [id], onDelete: Cascade)
+  analysis RequirementsAnalysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+  links    FindingSourceLink[]
+
+  @@index([productId, status])
+  @@index([analysisId])
+}
+
+model FindingSourceLink {
+  id                  String  @id @default(cuid())
+  findingId           String
+  sourceRequirementId String?
+
+  finding           RequirementFinding @relation(fields: [findingId], references: [id], onDelete: Cascade)
+  sourceRequirement SourceRequirement? @relation(fields: [sourceRequirementId], references: [id], onDelete: Cascade)
+
+  @@index([findingId])
+  @@index([sourceRequirementId])
+}
+
+model IntakeQuestion {
+  id         String                 @id @default(cuid())
+  productId  String
+  analysisId String
+  question   String
+  reason     String                 @default("")
+  priority   IntakeQuestionPriority @default(MEDIUM)
+  status     IntakeQuestionStatus   @default(OPEN)
+  answer     String                 @default("")
+  answeredBy String                 @default("")
+  answeredAt DateTime?
+  createdAt  DateTime               @default(now())
+
+  product  Product              @relation(fields: [productId], references: [id], onDelete: Cascade)
+  analysis RequirementsAnalysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+  links    IntakeQuestionLink[]
+
+  @@index([productId, status])
+  @@index([analysisId])
+  @@index([priority])
+}
+
+model IntakeQuestionLink {
+  id                  String @id @default(cuid())
+  questionId          String
+  sourceRequirementId String
+
+  question          IntakeQuestion    @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  sourceRequirement SourceRequirement @relation(fields: [sourceRequirementId], references: [id], onDelete: Cascade)
+
+  @@unique([questionId, sourceRequirementId])
+  @@index([sourceRequirementId])
+}
+
+model RequirementTraceLink {
+  id                  String              @id @default(cuid())
+  productId           String
+  sourceRequirementId String
+  targetKind          TraceTargetKind
+  targetId            String
+  provenance          TraceLinkProvenance
+  createdBy           String              @default("")
+  createdAt           DateTime            @default(now())
+
+  product           Product           @relation(fields: [productId], references: [id], onDelete: Cascade)
+  sourceRequirement SourceRequirement @relation(fields: [sourceRequirementId], references: [id], onDelete: Cascade)
+
+  @@unique([sourceRequirementId, targetKind, targetId])
+  @@index([productId])
+  @@index([targetId])
 }

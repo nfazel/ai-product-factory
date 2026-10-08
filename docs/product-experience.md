@@ -58,7 +58,11 @@ Approve is a human approval. Confirm is a person accepting proposed content, suc
 
 ## Stage pages
 
-Explore answers whether the problem is understood well enough to define the product: the conversation, the Product Brief, open questions, assumptions, and the next action.
+Explore answers whether the problem is understood well enough to define the product.
+
+For an idea, Explore is the discovery conversation, the Product Brief, open questions, assumptions, and the next action.
+
+For existing requirements, Explore is intake: add the source, analyse it, review findings, answer the questions that block a reliable brief, confirm interpretations, then review and approve a Product Brief drafted from those requirements. The idea conversation is not shown. Both paths use the same Product Brief approval and the same Move to Define gate. A product card can show Explore · Idea or Explore · Existing requirements so the start is visible. It is still one product, not a second product type.
 
 Define answers what is being built first: outcome, capabilities, First Slice, the backlog, open questions, and the next action.
 

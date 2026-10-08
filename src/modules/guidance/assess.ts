@@ -22,6 +22,20 @@ export function emptySnapshot(patch: Partial<GuidanceSnapshot> & Pick<GuidanceSn
     name: patch.name ?? "Product",
     stage: patch.stage ?? "EXPLORE",
     sample: patch.sample ?? false,
+    startMode: patch.startMode ?? "IDEA",
+    requirementsChanged: patch.requirementsChanged ?? false,
+    intake: {
+      activeSources: 0,
+      extractionFailed: false,
+      analysed: false,
+      stale: false,
+      unreviewed: 0,
+      needsChange: 0,
+      blockingFindings: 0,
+      openQuestions: 0,
+      materialUnmapped: 0,
+      updatedAt: null,
+    },
     discovery: {
       started: false,
       briefStatus: "NONE",
@@ -81,6 +95,7 @@ export function emptySnapshot(patch: Partial<GuidanceSnapshot> & Pick<GuidanceSn
     prove: { ...base.prove, ...patch.prove },
     release: { ...base.release, ...patch.release },
     learn: { ...base.learn, ...patch.learn },
+    intake: { ...base.intake, ...patch.intake },
     tasks: patch.tasks ?? base.tasks,
   };
 }
@@ -139,8 +154,185 @@ function gateDone(stage: ProductStage, snapshot: GuidanceSnapshot) {
   return false;
 }
 
+function existingRequirementsExplore(snapshot: GuidanceSnapshot): { action: NextAction | null; blocker: BlockerView | null } {
+  const intake = snapshot.intake;
+  if (intake.extractionFailed && intake.activeSources === 0) {
+    return {
+      action: action(snapshot, {
+        key: "add-requirements",
+        label: "Add your requirements",
+        why: "Readable text could not be extracted. Paste the requirements or upload a file that contains text.",
+        role: PRODUCT,
+        stage: "EXPLORE",
+        decision: false,
+        path: "/discovery",
+        hash: "add",
+      }),
+      blocker: blocker({
+        what: "The requirements file could not be read",
+        why: "No readable text was extracted. A scanned PDF is not read.",
+        required: "Paste the requirements, or upload a .txt, .md, .docx, or text-based .pdf.",
+        who: PRODUCT,
+        next: "Nothing is analysed until readable text is stored.",
+      }),
+    };
+  }
+  if (intake.activeSources === 0) {
+    return {
+      action: action(snapshot, {
+        key: "add-requirements",
+        label: "Add your requirements",
+        why: "Existing requirements are the source material. They are not a Product Brief yet.",
+        role: PRODUCT,
+        stage: "EXPLORE",
+        decision: false,
+        path: "/discovery",
+        hash: "add",
+      }),
+      blocker: null,
+    };
+  }
+  if (!intake.analysed || intake.stale) {
+    return {
+      action: action(snapshot, {
+        key: "analyse-requirements",
+        label: "Analyse requirements",
+        why: intake.stale
+          ? "The source changed, so the previous analysis is historical."
+          : "Analysis extracts requirements and keeps the original wording.",
+        role: PRODUCT,
+        stage: "EXPLORE",
+        decision: false,
+        path: "/discovery",
+        hash: "analyse",
+        waitingSince: intake.updatedAt,
+      }),
+      blocker: intake.stale
+        ? blocker({
+            what: "The previous analysis is out of date",
+            why: "The requirements source changed after it was analysed.",
+            required: "Analyse the current source. The old analysis stays on record.",
+            who: PRODUCT,
+            next: "A person still confirms the new interpretation.",
+          })
+        : null,
+    };
+  }
+  if (intake.blockingFindings > 0) {
+    const count = intake.blockingFindings;
+    return {
+      action: action(snapshot, {
+        key: "review-findings",
+        label: count === 1 ? "Review 1 important finding" : `Review ${count} important findings`,
+        why: "A material finding has to be understood before the Product Brief is reliable.",
+        role: PRODUCT,
+        stage: "EXPLORE",
+        decision: true,
+        path: "/discovery",
+        hash: "findings",
+        waitingSince: intake.updatedAt,
+      }),
+      blocker: blocker({
+        what: "Requirements need clarification",
+        why: "A possible conflict, ambiguity, or security question is still open.",
+        required: "A person reviews the finding and answers the question it raises.",
+        who: PRODUCT,
+        next: "The Product Brief stays a draft until this is addressed.",
+      }),
+    };
+  }
+  if (intake.openQuestions > 0) {
+    return {
+      action: action(snapshot, {
+        key: "answer-requirement-question",
+        label: "Answer requirement question",
+        why: "The question comes from the supplied requirements, not from a blank-sheet discovery.",
+        role: PRODUCT,
+        stage: "EXPLORE",
+        decision: true,
+        path: "/discovery",
+        hash: "questions",
+        waitingSince: intake.updatedAt,
+      }),
+      blocker: null,
+    };
+  }
+  if (intake.needsChange > 0 || intake.unreviewed > 0) {
+    return {
+      action: action(snapshot, {
+        key: "confirm-interpretation",
+        label: "Confirm requirement interpretation",
+        why: "The source wording stays as supplied. A person confirms or rejects the reading.",
+        role: PRODUCT,
+        stage: "EXPLORE",
+        decision: false,
+        path: "/discovery",
+        hash: "requirements",
+        waitingSince: intake.updatedAt,
+      }),
+      blocker: intake.needsChange > 0
+        ? blocker({
+            what: "A requirement could not be interpreted",
+            why: "A person marked the reading as needing a change.",
+            required: "Edit the interpretation or reject the requirement. The source text stays unchanged.",
+            who: PRODUCT,
+            next: "The Product Brief is not drafted from a rejected reading.",
+          })
+        : null,
+    };
+  }
+  if (snapshot.discovery.briefStatus === "NONE" || snapshot.discovery.briefStatus === "DRAFT") {
+    return {
+      action: action(snapshot, {
+        key: "review-requirements-brief",
+        label: "Review requirements-derived Product Brief",
+        why: "The brief is drafted from your requirements. It is not the customer's source text.",
+        role: PRODUCT,
+        stage: "EXPLORE",
+        decision: true,
+        path: "/discovery",
+        hash: "brief",
+        waitingSince: snapshot.discovery.updatedAt,
+      }),
+      blocker: null,
+    };
+  }
+  return {
+    action: action(snapshot, {
+      key: "approve-brief",
+      label: "Approve Product Brief",
+      why: "The brief is the agreement about the problem. Approval does not move the stage.",
+      role: PRODUCT,
+      stage: "EXPLORE",
+      decision: true,
+      path: "/discovery",
+      hash: "approve",
+      waitingSince: snapshot.discovery.updatedAt,
+    }),
+    blocker: null,
+  };
+}
+
 function chooseAction(snapshot: GuidanceSnapshot): { action: NextAction | null; blocker: BlockerView | null } {
+  if (snapshot.requirementsChanged) {
+    return {
+      action: action(snapshot, {
+        key: "review-changed-requirements",
+        label: "Review changed requirements",
+        why: "Requirements changed after the Product Definition was approved. The definition was not changed automatically.",
+        role: PRODUCT,
+        stage: snapshot.stage,
+        decision: true,
+        path: "/discovery",
+        hash: "sources",
+      }),
+      blocker: null,
+    };
+  }
   const discovery = snapshot.discovery;
+  if (snapshot.startMode === "EXISTING_REQUIREMENTS" && !exploreDone(snapshot)) {
+    return existingRequirementsExplore(snapshot);
+  }
   if (!exploreDone(snapshot)) {
     if (!discovery.started && discovery.briefStatus === "NONE") {
       return {
@@ -223,6 +415,22 @@ function chooseAction(snapshot: GuidanceSnapshot): { action: NextAction | null; 
 
   const definition = snapshot.definition;
   if (!defineDone(snapshot)) {
+    if (snapshot.startMode === "EXISTING_REQUIREMENTS" && snapshot.intake.materialUnmapped > 0 && definition.exists) {
+      return {
+        action: action(snapshot, {
+          key: "review-unmapped",
+          label: "Review unmapped requirements",
+          why: "Confirmed requirements are not yet represented in the Product Definition.",
+          role: PRODUCT,
+          stage: "DEFINE",
+          decision: true,
+          path: "/definition",
+          hash: "requirements",
+          waitingSince: snapshot.intake.updatedAt,
+        }),
+        blocker: null,
+      };
+    }
     if (definition.proposalOpen) {
       return {
         action: action(snapshot, {

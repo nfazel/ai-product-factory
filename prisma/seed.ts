@@ -2,6 +2,7 @@ import "dotenv/config";
 
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../src/generated/prisma/client";
+import { ensureClaimsRequirementsSample } from "./claims-requirements-sample";
 
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) {
@@ -114,6 +115,15 @@ async function main() {
   await prisma.productSlice.deleteMany();
   await prisma.nonFunctionalRequirement.deleteMany();
   await prisma.productDefinition.deleteMany();
+  await prisma.requirementTraceLink.deleteMany();
+  await prisma.intakeQuestionLink.deleteMany();
+  await prisma.intakeQuestion.deleteMany();
+  await prisma.findingSourceLink.deleteMany();
+  await prisma.requirementFinding.deleteMany();
+  await prisma.sourceRequirement.deleteMany();
+  await prisma.analysisSource.deleteMany();
+  await prisma.requirementsAnalysis.deleteMany();
+  await prisma.requirementSource.deleteMany();
   await prisma.product.deleteMany();
 
   const product = await prisma.product.create({
@@ -537,7 +547,9 @@ async function main() {
     storyId: story.id,
   });
 
+  const requirementsSampleId = await ensureClaimsRequirementsSample(prisma);
   console.log(`Seeded ${product.name} (${product.id}).`);
+  console.log(`Seeded Claims Requirements Sample (${requirementsSampleId}).`);
 }
 
 function note(

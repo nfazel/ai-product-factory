@@ -22,6 +22,7 @@ import {
 import { assertProposalReferences } from "@/modules/requirements/validate";
 import { listDecisions } from "@/modules/decision/service";
 import { db } from "@/lib/db";
+import { definitionIntakeLines } from "@/modules/intake/service";
 import { DomainError } from "@/modules/shared/errors";
 import type { AgentRunner } from "@/modules/agent/types";
 import type { DefinitionSection } from "@/domain/constants";
@@ -51,7 +52,7 @@ export const requirementsRunner: AgentRunner = {
       throw new DomainError("There is no open proposal to regenerate.");
     }
 
-    const [decisions, runs, workItems, outcomes, capabilities, assumptions] =
+    const [decisions, runs, workItems, outcomes, capabilities, assumptions, intake] =
       await Promise.all([
         listDecisions({ productId: request.productId }),
         listRecentRequirementRuns(request.productId),
@@ -71,6 +72,7 @@ export const requirementsRunner: AgentRunner = {
           where: { productId: request.productId },
           select: { description: true, impact: true, status: true, origin: true },
         }),
+        definitionIntakeLines(request.productId),
       ]);
 
     const brief = gate.brief;
@@ -127,6 +129,9 @@ export const requirementsRunner: AgentRunner = {
         })),
         mode,
         section,
+        confirmedRequirements: intake.confirmed,
+        rejectedRequirements: intake.rejected,
+        intakeWarnings: intake.warnings,
         currentProposalSummary: open?.summary,
       }),
       responseSchema: requirementsResponseSchema,

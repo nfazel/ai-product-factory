@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 
 import {
   PRODUCT_STATUSES,
@@ -22,6 +22,7 @@ import {
 
 export function CreateProductForm() {
   const [state, action] = useActionState(createProductAction, idleState);
+  const [startMode, setStartMode] = useState<"IDEA" | "EXISTING_REQUIREMENTS">("IDEA");
 
   return (
     <form action={action} className="space-y-5">
@@ -32,15 +33,50 @@ export function CreateProductForm() {
         required
         autoFocus
       />
-      <TextAreaField
-        label="What problem are you trying to solve?"
-        name="problemStatement"
-        error={state.fieldErrors?.problemStatement}
-        required
-      />
+      <fieldset className="space-y-3">
+        <legend className="text-sm font-medium">What are you starting with?</legend>
+        <label className="flex gap-3 rounded-xl border p-3">
+          <input
+            type="radio"
+            name="startMode"
+            value="IDEA"
+            checked={startMode === "IDEA"}
+            onChange={() => setStartMode("IDEA")}
+          />
+          <span>
+            <span className="block text-sm font-medium">I have an idea</span>
+            <span className="mt-1 block text-sm leading-6 text-muted-foreground">Help me explore and define what to build.</span>
+          </span>
+        </label>
+        <label className="flex gap-3 rounded-xl border p-3">
+          <input
+            type="radio"
+            name="startMode"
+            value="EXISTING_REQUIREMENTS"
+            checked={startMode === "EXISTING_REQUIREMENTS"}
+            onChange={() => setStartMode("EXISTING_REQUIREMENTS")}
+          />
+          <span>
+            <span className="block text-sm font-medium">I already have requirements</span>
+            <span className="mt-1 block text-sm leading-6 text-muted-foreground">Analyse my existing requirements and prepare them for delivery.</span>
+          </span>
+        </label>
+      </fieldset>
+      {startMode === "IDEA" ? (
+        <TextAreaField
+          label="What problem are you trying to solve?"
+          name="problemStatement"
+          error={state.fieldErrors?.problemStatement}
+          required
+        />
+      ) : (
+        <p className="text-sm leading-6 text-muted-foreground">
+          You will add the requirements next. The problem is taken from that material, or asked for when it is missing.
+        </p>
+      )}
       <FormMessage state={state} />
       <p className="text-xs text-muted-foreground">
-        New products start in Explore. Discovery will shape the brief. You do not need a vision or a solution yet.
+        New products start in Explore. An idea goes through discovery. Existing requirements are analysed first. You do not need a vision or a solution yet.
       </p>
       <SubmitButton pendingLabel="Creating product…">Create product</SubmitButton>
     </form>

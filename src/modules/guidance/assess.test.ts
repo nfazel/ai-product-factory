@@ -454,3 +454,100 @@ describe("evidence", () => {
     expect(twice).toEqual(once);
   });
 });
+
+describe("existing requirements next action", () => {
+  function intake(patch: Partial<GuidanceSnapshot["intake"]> = {}): GuidanceSnapshot["intake"] {
+    return {
+      activeSources: 0,
+      extractionFailed: false,
+      analysed: false,
+      stale: false,
+      unreviewed: 0,
+      needsChange: 0,
+      blockingFindings: 0,
+      openQuestions: 0,
+      materialUnmapped: 0,
+      updatedAt: null,
+      ...patch,
+    };
+  }
+
+  const openExplore = {
+    startMode: "EXISTING_REQUIREMENTS" as const,
+    discovery: { ...briefApproved, started: false, briefStatus: "NONE" as const, readyForReview: false },
+  };
+
+  it("asks for requirements before analysis", () => {
+    expect(assessGuidance(snap(openExplore)).action?.label).toBe("Add your requirements");
+    const analysed = assessGuidance(snap({ ...openExplore, intake: intake({ activeSources: 1, analysed: false }) }));
+    expect(analysed.action?.label).toBe("Analyse requirements");
+  });
+
+  it("treats a changed source as a stale analysis", () => {
+    const guidance = assessGuidance(snap({ ...openExplore, intake: intake({ activeSources: 1, analysed: false, stale: true }) }));
+    expect(guidance.action?.label).toBe("Analyse requirements");
+    expect(guidance.blocker?.what).toMatch(/out of date/i);
+  });
+
+  it("puts material findings and questions ahead of routine confirmation", () => {
+    const findings = assessGuidance(snap({
+      ...openExplore,
+      intake: intake({ activeSources: 1, analysed: true, blockingFindings: 3, openQuestions: 2, unreviewed: 4 }),
+    }));
+    expect(findings.action?.label).toBe("Review 3 important findings");
+    expect(findings.action?.decision).toBe(true);
+    const question = assessGuidance(snap({
+      ...openExplore,
+      intake: intake({ activeSources: 1, analysed: true, openQuestions: 1, unreviewed: 4 }),
+    }));
+    expect(question.action?.label).toBe("Answer requirement question");
+    const confirm = assessGuidance(snap({
+      ...openExplore,
+      intake: intake({ activeSources: 1, analysed: true, unreviewed: 2 }),
+    }));
+    expect(confirm.action?.label).toBe("Confirm requirement interpretation");
+    expect(confirm.action?.decision).toBe(false);
+  });
+
+  it("reviews and approves the requirements brief, then moves to Define", () => {
+    expect(assessGuidance(snap({
+      ...openExplore,
+      intake: intake({ activeSources: 1, analysed: true }),
+      discovery: { ...briefApproved, briefStatus: "DRAFT", readyForReview: false },
+    })).action?.label).toBe("Review requirements-derived Product Brief");
+    expect(assessGuidance(snap({
+      ...openExplore,
+      intake: intake({ activeSources: 1, analysed: true }),
+      discovery: { ...briefApproved, briefStatus: "READY_FOR_REVIEW" },
+    })).action?.label).toBe("Approve Product Brief");
+    expect(assessGuidance(snap({
+      startMode: "EXISTING_REQUIREMENTS",
+      discovery: briefApproved,
+      intake: intake({ activeSources: 1, analysed: true }),
+    })).action?.label).toBe("Move to Define");
+  });
+
+  it("asks to review unmapped requirements and a change after approval", () => {
+    const unmapped = assessGuidance(snap({
+      stage: "DEFINE",
+      startMode: "EXISTING_REQUIREMENTS",
+      discovery: briefApproved,
+      definition: { ...defined, status: "IN_PROGRESS", approved: false, exists: true },
+      intake: intake({ materialUnmapped: 2 }),
+    }));
+    expect(unmapped.action?.label).toBe("Review unmapped requirements");
+    expect(unmapped.action?.decision).toBe(true);
+    const changed = assessGuidance(snap({
+      stage: "DEFINE",
+      startMode: "EXISTING_REQUIREMENTS",
+      discovery: briefApproved,
+      definition: defined,
+      requirementsChanged: true,
+    }));
+    expect(changed.action?.label).toBe("Review changed requirements");
+  });
+
+  it("leaves the idea path on discovery", () => {
+    expect(assessGuidance(snap()).action?.label).toBe("Start Discovery");
+  });
+});

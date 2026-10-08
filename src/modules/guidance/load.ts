@@ -2,6 +2,7 @@ import "server-only";
 
 import { db } from "@/lib/db";
 import type { ProductStage } from "@/domain/constants";
+import { BLOCKING_FINDING_TYPES } from "@/modules/intake/readiness";
 import { entryBlockers, learnBlockers, type ReleaseFacts, type ReleaseTaskFact } from "@/modules/release/readiness";
 import type { GuidanceSnapshot, TaskSnapshot } from "@/modules/guidance/types";
 
@@ -65,6 +66,14 @@ export async function loadSnapshots(productId?: string): Promise<GuidanceSnapsho
       db.workItem.findMany({ where: { productId: { in: ids }, type: "DEFECT" } }),
       db.integratedVerificationSession.findMany({ where: { productId: { in: ids } }, orderBy: { createdAt: "desc" } }),
     ]);
+
+  const [requirementSources, analyses, intakeRequirements, intakeFindings, intakeQuestions] = await Promise.all([
+    db.requirementSource.findMany({ where: { productId: { in: ids } } }),
+    db.requirementsAnalysis.findMany({ where: { productId: { in: ids } }, include: { sources: true }, orderBy: { version: "desc" } }),
+    db.sourceRequirement.findMany({ where: { productId: { in: ids } }, include: { traces: true } }),
+    db.requirementFinding.findMany({ where: { productId: { in: ids }, status: "OPEN" } }),
+    db.intakeQuestion.findMany({ where: { productId: { in: ids }, status: "OPEN" } }),
+  ]);
 
   return products.map((product) => {
     const brief = briefs.find((item) => item.productId === product.id);
@@ -188,11 +197,38 @@ export async function loadSnapshots(productId?: string): Promise<GuidanceSnapsho
         })
       : ["No release candidate exists."];
     const shown = latestObservation ?? sampleObservation;
+    const activeSources = requirementSources.filter((item) => item.productId === product.id && item.status === "ACTIVE" && item.sourceText.trim().length > 0);
+    const currentAnalysis = analyses.find((item) => item.productId === product.id && item.status === "CURRENT");
+    const staleAnalysis = analyses.some((item) => item.productId === product.id && item.status === "STALE");
+    const hashMatch = Boolean(
+      currentAnalysis &&
+        activeSources.every((source) => currentAnalysis.sources.some((link) => link.sourceId === source.id && link.sourceHash === source.sourceHash)),
+    );
+    const productRequirements = intakeRequirements.filter((item) => item.productId === product.id && item.analysisId === currentAnalysis?.id);
+    const productFindings = intakeFindings.filter((item) => item.productId === product.id && item.analysisId === currentAnalysis?.id);
+    const productQuestions = intakeQuestions.filter((item) => item.productId === product.id && item.analysisId === currentAnalysis?.id && item.priority !== "LOW");
+    const materialUnmapped = productRequirements.filter(
+      (item) => item.confirmation === "CONFIRMED" && (item.disposition === "UNSET" || item.disposition === "IN_SCOPE") && item.traces.length === 0,
+    ).length;
     return {
       productId: product.id,
       name: product.name,
       stage: stageOf(product.currentStage),
       sample: Boolean(definition?.seededDemo || architecture?.seededDemo || plan?.seededDemo || review?.seededDemo || releaseRows.some((item) => item.demo)),
+      startMode: product.startMode === "EXISTING_REQUIREMENTS" ? "EXISTING_REQUIREMENTS" : "IDEA",
+      requirementsChanged: product.requirementsReviewRequired,
+      intake: {
+        activeSources: activeSources.length,
+        extractionFailed: requirementSources.some((item) => item.productId === product.id && item.status === "EXTRACTION_FAILED"),
+        analysed: Boolean(currentAnalysis) && hashMatch,
+        stale: staleAnalysis && !hashMatch,
+        unreviewed: productRequirements.filter((item) => item.confirmation === "UNREVIEWED").length,
+        needsChange: productRequirements.filter((item) => item.confirmation === "NEEDS_CHANGE").length,
+        blockingFindings: productFindings.filter((item) => item.severity === "HIGH" && BLOCKING_FINDING_TYPES.has(item.findingType)).length,
+        openQuestions: productQuestions.length,
+        materialUnmapped,
+        updatedAt: iso(currentAnalysis?.createdAt ?? activeSources[0]?.createdAt),
+      },
       discovery: {
         started: sessions.some((item) => item.productId === product.id) || Boolean(brief),
         briefStatus: brief ? (brief.status === "APPROVED" || brief.status === "READY_FOR_REVIEW" || brief.status === "DRAFT" ? brief.status : "DRAFT") : "NONE",

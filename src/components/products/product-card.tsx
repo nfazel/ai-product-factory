@@ -4,6 +4,7 @@ import {
   ProductStatusBadge,
   StageBadge,
 } from "@/components/status/badges";
+import { PRODUCT_START_LABEL, STAGE_META } from "@/domain/constants";
 import { formatRelative } from "@/lib/format";
 import type { Product } from "@/modules/product/types";
 
@@ -22,6 +23,9 @@ export function ProductCard({ product }: { product: Product }) {
       </p>
       <div className="mt-4 flex items-center justify-between gap-3">
         <StageBadge stage={product.currentStage} />
+        <p className="text-xs text-muted-foreground">
+          {STAGE_META[product.currentStage].label} · {PRODUCT_START_LABEL[product.startMode]}
+        </p>
       </div>
       <dl className="mt-4 flex items-center justify-between border-t pt-3 text-xs text-muted-foreground">
         <div>

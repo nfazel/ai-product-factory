@@ -105,6 +105,7 @@ export function toBrief(row: BriefRow): ProductBriefRecord {
     readyForReview: row.readyForReview,
     readinessReason: row.readinessReason,
     status: row.status,
+    fromRequirements: row.fromRequirements,
   };
 }
 

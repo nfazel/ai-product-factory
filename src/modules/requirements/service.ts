@@ -8,6 +8,7 @@ import {
   type DefinitionSection,
   type ProductStage,
 } from "@/domain/constants";
+import { db } from "@/lib/db";
 import { isAIConfigured } from "@/modules/ai/provider";
 import { recordActivity } from "@/modules/activity/service";
 import { executeAgent } from "@/modules/agent/service";
@@ -34,6 +35,7 @@ import {
 import { assessRequirementsReadiness, assessStoryReadiness, isTestableCriterion, hasUserValueStatement } from "@/modules/requirements/readiness";
 import { storedProposalSchema } from "@/modules/requirements/schema";
 import { assertProposalReferences } from "@/modules/requirements/validate";
+import { listMaterialUnmapped, syncSuggestedLinks } from "@/modules/intake/service";
 import { DomainError } from "@/modules/shared/errors";
 
 async function requireGate(productId: string) {
@@ -183,6 +185,7 @@ export async function commitProductDefinition(productId: string, proposalId: str
       ? `Committed accepted definition items. ${result.skipped.join(" ")}`
       : "Committed accepted definition items onto the product definition and backlog.",
   });
+  await syncSuggestedLinks(productId);
   return result;
 }
 
@@ -300,6 +303,31 @@ export async function approveProductDefinition(productId: string) {
   const snapshot = await definitionSnapshot(productId);
   if (snapshot.outcomes.length === 0) {
     throw new DomainError("Confirm the shape of the definition before approving it. There are no outcomes yet.");
+  }
+  const unmapped = await listMaterialUnmapped(productId);
+  if (unmapped.length > 0) {
+    const names = unmapped.map((item) => item.identifier || "a requirement").join(", ");
+    throw new DomainError(`Material requirements are not represented in the Product Definition: ${names}. Map them or record a disposition.`);
+  }
+  const intakeProduct = await db.product.findUnique({ where: { id: productId }, select: { startMode: true } });
+  if (intakeProduct?.startMode === "EXISTING_REQUIREMENTS") {
+    const current = await db.requirementsAnalysis.findFirst({
+      where: { productId, status: "CURRENT" },
+      select: { id: true },
+    });
+    const openMaterial = current
+      ? await db.requirementFinding.count({
+          where: {
+            analysisId: current.id,
+            status: "OPEN",
+            severity: "HIGH",
+            findingType: { in: ["CONFLICT", "AMBIGUOUS", "INCOMPLETE", "SECURITY_QUESTION", "MISSING_OUTCOME"] },
+          },
+        })
+      : 0;
+    if (openMaterial > 0) {
+      throw new DomainError("Unresolved material findings must be addressed before the Product Definition is approved.");
+    }
   }
   const stageBefore = (await definitionEntryBlockers(productId)).product.currentStage;
   const approval = await requestApproval({

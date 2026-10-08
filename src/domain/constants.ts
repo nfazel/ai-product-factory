@@ -1,6 +1,14 @@
 export const PRODUCT_STATUSES = ["DRAFT", "ACTIVE", "PAUSED", "ARCHIVED"] as const;
 export type ProductStatus = (typeof PRODUCT_STATUSES)[number];
 
+export const PRODUCT_START_MODES = ["IDEA", "EXISTING_REQUIREMENTS"] as const;
+export type ProductStartMode = (typeof PRODUCT_START_MODES)[number];
+
+export const PRODUCT_START_LABEL: Record<ProductStartMode, string> = {
+  IDEA: "Idea",
+  EXISTING_REQUIREMENTS: "Existing requirements",
+};
+
 export const PRODUCT_STAGES = [
   "EXPLORE",
   "DEFINE",
