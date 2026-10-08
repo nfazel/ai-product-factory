@@ -6,6 +6,8 @@ It turns an approved product definition, an approved first product slice, and an
 
 It behaves as a solution architect and technical lead. It designs the approach. It does not write production code, create branches or pull requests, deploy, approve its own architecture, approve its own plan, or change product requirements.
 
+The Security & Engineering Governance Agent is a separate reviewer. It does not ask this agent whether its own design is safe. Governance runs only after a person has approved the architecture and the implementation plan. See [security-governance-agent.md](security-governance-agent.md).
+
 ## Entry conditions
 
 A real run starts only when all of these are true:
@@ -95,4 +97,4 @@ The component diagram is generated from `ArchitectureComponent` and `Architectur
 
 ## Future coding agent
 
-Coding readiness is **NOT READY** until both `SOLUTION_ARCHITECTURE` and `IMPLEMENTATION_PLAN` approvals exist. Even then, this application does not start coding. A later Coding Agent must require both approvals before it runs.
+Coding readiness is **NOT READY** until the brief, the definition, the first slice, the solution architecture, the implementation plan, engineering governance, and the coding policy are approved, and no deterministic governance blocker remains. The label is then **CODING READY**. This application still does not start coding. A later Coding Agent must honour those gates, the coding policy, and each task's coding-risk recommendation.

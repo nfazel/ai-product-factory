@@ -4,7 +4,7 @@ AI Product Factory is the foundation of an AI-native software product developmen
 
 **Explore → Define → Build → Prove → Ship → Learn**
 
-This repository is the product factory with three agents enabled. Product Discovery turns an incomplete idea into a Product Brief during Explore. The Requirements Agent turns an approved brief into an outcome-driven product definition during Define. The Architecture Agent, inside Build, turns an approved definition and an approved first slice into a solution architecture and an implementation plan. Security, coding, and testing agents are not implemented. GitHub integration is not implemented.
+This repository is the product factory with four agents enabled. Product Discovery turns an incomplete idea into a Product Brief during Explore. The Requirements Agent turns an approved brief into an outcome-driven product definition during Define. The Architecture Agent, inside Build, turns an approved definition and an approved first slice into a solution architecture and an implementation plan. The Security & Engineering Governance Agent, also inside Build, independently reviews that approved architecture and plan before coding. Coding, testing, and review agents are not implemented. GitHub integration is not implemented.
 
 Humans remain in control of stage changes, decisions, and approval gates. Neither agent can approve its own work or move the product stage.
 
@@ -77,7 +77,7 @@ cp .env.example .env
 | Variable | Purpose |
 | --- | --- |
 | `DATABASE_URL` | PostgreSQL connection string used by Prisma and the Next.js server |
-| `OPENAI_API_KEY` | Server-only key for Product Discovery, the Requirements Agent, and the Architecture Agent. Leave empty to run without model calls |
+| `OPENAI_API_KEY` | Server-only key for Product Discovery, the Requirements Agent, the Architecture Agent, and the Security & Engineering Governance Agent. Leave empty to run without model calls |
 | `OPENAI_MODEL` | Optional. Defaults to `gpt-4.1-mini` |
 | `CODEBASE_CONTEXT_ROOT` | Optional absolute path. When set, Build can read that directory's `package.json` and top-level folder names. It cannot browse an arbitrary path |
 
@@ -132,10 +132,14 @@ Tests mock the provider. They do not call OpenAI.
 
 Open a product and choose Build. Architecture and implementation planning happen here. They are not a new pipeline stage.
 
-**Generate architecture** runs only in Build, and only when the product brief, the product definition, and the first product slice are approved, and `OPENAI_API_KEY` is set. The result is a proposal. A person accepts, edits, or rejects it, then commits a draft. Approve architecture is a separate human action. **Generate implementation plan** stays closed until that approval exists. Approve the plan yourself. Coding readiness stays **NOT READY** until both approvals exist. There is no coding control yet.
+**Generate architecture** runs only in Build, and only when the product brief, the product definition, and the first product slice are approved, and `OPENAI_API_KEY` is set. The result is a proposal. A person accepts, edits, or rejects it, then commits a draft. Approve architecture is a separate human action. **Generate implementation plan** stays closed until that approval exists. Approve the plan yourself.
 
-If an approved requirement changes after the architecture is approved, the page says **Architecture review required** and keeps the approval. If the architecture changes after the plan is approved, the page says **Implementation Plan review required** and keeps that approval.
+**Run governance review** stays closed until the brief, the definition, the first slice, the solution architecture, and the implementation plan are approved. The governance agent does not approve its own review and does not write code. A person resolves findings, approves the coding policy, and approves the governance review. Coding readiness stays **NOT READY** until those approvals exist and no deterministic governance blocker remains. The label is **CODING READY** only then. There is no coding control yet.
+
+If an approved requirement changes after the architecture is approved, the page says **Architecture review required** and keeps the approval. If the architecture changes after the plan is approved, the page says **Implementation Plan review required** and keeps that approval. If the architecture or the plan changes after governance is approved, the page says **GOVERNANCE REVIEW REQUIRED** and keeps the approval. If the coding policy changes after it is approved, the page says **CODING POLICY REAPPROVAL REQUIRED** and keeps the approval.
+
+See [docs/security-governance-agent.md](docs/security-governance-agent.md) and [docs/coding-policy.md](docs/coding-policy.md).
 
 ## Later agents
 
-Security, coding, and testing agents are not registered. `POST /api/agent-runs` still refuses those types. Authentication will replace `getCurrentActor()` and the pass-through `src/proxy.ts` without rewriting the domain model.
+Coding, testing, and review agents are not registered. `POST /api/agent-runs` still refuses those types. Authentication will replace `getCurrentActor()` and the pass-through `src/proxy.ts` without rewriting the domain model.

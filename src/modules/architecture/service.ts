@@ -8,6 +8,9 @@ import { requestApproval, resolveApproval } from "@/modules/approval/service";
 import { analyseConfiguredRoot } from "@/modules/architecture/context";
 import { architectureEntryBlockers, planEntryBlockers } from "@/modules/architecture/gates";
 import { noteArchitectureChange } from "@/modules/architecture/impact";
+import { noteGovernanceReviewRequired } from "@/modules/governance/impact";
+import { assessCodingReadiness } from "@/modules/governance/coding-readiness";
+import { getGovernanceWorkspace } from "@/modules/governance/service";
 import { acceptAll, included, setReviewStatus } from "@/modules/architecture/proposal";
 import {
   architectureGraph,
@@ -18,7 +21,7 @@ import {
   planGraph,
   saveProposalPayload,
 } from "@/modules/architecture/repository";
-import { assessTechnicalReadiness, codingReadinessLabel } from "@/modules/architecture/readiness";
+import { assessTechnicalReadiness } from "@/modules/architecture/readiness";
 import { findDependencyCycle } from "@/modules/architecture/validate";
 import { getCurrentActor } from "@/modules/identity/actor";
 import { DomainError } from "@/modules/shared/errors";
@@ -352,6 +355,10 @@ export async function acceptArchitectureDecision(productId: string, adrId: strin
       "Implementation Plan review required. An architecture decision was accepted after the plan was approved.",
     );
   }
+  await noteGovernanceReviewRequired(
+    productId,
+    "GOVERNANCE REVIEW REQUIRED. The solution architecture changed after governance was approved.",
+  );
   return updated;
 }
 
@@ -378,6 +385,10 @@ export async function updateArchitectureSummary(input: {
       "Implementation Plan review required. The approved architecture was edited by a person.",
     );
   }
+  await noteGovernanceReviewRequired(
+    input.productId,
+    "GOVERNANCE REVIEW REQUIRED. The solution architecture changed after governance was approved.",
+  );
   await recordActivity({
     productId: input.productId,
     type: "ARCHITECTURE_COMMITTED",
@@ -415,6 +426,10 @@ export async function updateArchitectureComponent(input: {
       "Implementation Plan review required. An architecture component changed after the plan was approved.",
     );
   }
+  await noteGovernanceReviewRequired(
+    input.productId,
+    "GOVERNANCE REVIEW REQUIRED. The solution architecture changed after governance was approved.",
+  );
   return updated;
 }
 
@@ -452,7 +467,7 @@ export async function updateImplementationTask(input: {
     where: { id: input.taskId, plan: { productId: input.productId } },
   });
   if (!task) throw new DomainError("Implementation task not found.", "NOT_FOUND");
-  return db.implementationTask.update({
+  const updated = await db.implementationTask.update({
     where: { id: task.id },
     data: {
       title: input.title,
@@ -462,6 +477,11 @@ export async function updateImplementationTask(input: {
       humanLocked: true,
     },
   });
+  await noteGovernanceReviewRequired(
+    input.productId,
+    "GOVERNANCE REVIEW REQUIRED. The implementation plan changed after governance was approved.",
+  );
+  return updated;
 }
 
 export async function answerArchitectureQuestion(input: {
@@ -524,6 +544,10 @@ export async function addImplementationDependency(input: {
     where: { id: input.taskId },
     data: { dependenciesIdentified: true },
   });
+  await noteGovernanceReviewRequired(
+    input.productId,
+    "GOVERNANCE REVIEW REQUIRED. The implementation plan changed after governance was approved.",
+  );
 }
 
 export async function saveManualCodebaseContext(input: {
@@ -602,25 +626,11 @@ export async function captureLocalCodebaseContext(productId: string) {
 }
 
 export async function getCodingReadiness(productId: string) {
-  const [architecture, plan] = await Promise.all([
-    db.approval.findFirst({
-      where: { productId, approvalType: "SOLUTION_ARCHITECTURE", status: "APPROVED" },
-    }),
-    db.approval.findFirst({
-      where: { productId, approvalType: "IMPLEMENTATION_PLAN", status: "APPROVED" },
-    }),
-  ]);
-  const ready = Boolean(architecture && plan);
-  return {
-    ready,
-    label: codingReadinessLabel(ready),
-    architectureApproved: Boolean(architecture),
-    planApproved: Boolean(plan),
-  };
+  return assessCodingReadiness(productId);
 }
 
 export async function getBuildWorkspace(productId: string) {
-  const [gate, context, architecture, plan, proposal, planProposal, coding, nfrs] = await Promise.all([
+  const [gate, context, architecture, plan, proposal, planProposal, coding, nfrs, governance] = await Promise.all([
     architectureEntryBlockers(productId).catch((error: unknown) => {
       if (error instanceof DomainError && error.code === "NOT_FOUND") return null;
       throw error;
@@ -642,8 +652,12 @@ export async function getBuildWorkspace(productId: string) {
     }),
     getCodingReadiness(productId),
     db.nonFunctionalRequirement.findMany({ where: { productId }, select: { id: true } }),
+    getGovernanceWorkspace(productId).catch((error: unknown) => {
+      if (error instanceof DomainError && error.code === "NOT_FOUND") return null;
+      throw error;
+    }),
   ]);
-  if (!gate) return null;
+  if (!gate || !governance) return null;
   const readiness = assessTechnicalReadiness(readinessInput(architecture, plan, nfrs.length));
   return {
     product: gate.product,
@@ -655,6 +669,7 @@ export async function getBuildWorkspace(productId: string) {
     planProposal,
     readiness,
     coding,
+    governance,
     diagram: architecture ? diagram(architecture.components, architecture.relationships) : "",
   };
 }

@@ -20,6 +20,15 @@ function daysAgo(days: number, hours = 10) {
 }
 
 async function main() {
+  await prisma.governanceFindingLink.deleteMany();
+  await prisma.governanceEvidence.deleteMany();
+  await prisma.governanceQuestion.deleteMany();
+  await prisma.threat.deleteMany();
+  await prisma.codingRiskAssessment.deleteMany();
+  await prisma.codingPolicy.deleteMany();
+  await prisma.governanceFinding.deleteMany();
+  await prisma.engineeringGovernanceReview.deleteMany();
+  await prisma.governanceProposal.deleteMany();
   await prisma.implementationTaskDependency.deleteMany();
   await prisma.implementationTaskComponent.deleteMany();
   await prisma.implementationTask.deleteMany();
@@ -1363,6 +1372,274 @@ async function seedArchitectureDemo(input: {
       type: "ARCHITECTURE_GENERATED",
       description:
         "Demo data. Prepared a sample architecture, security assessment, and implementation plan. Not an Architecture Agent run.",
+      actor: "Demo seed",
+      createdAt: input.createdAt,
+    },
+  });
+
+  await seedGovernanceDemo({
+    productId: input.productId,
+    architectureId: architecture.id,
+    planId: plan.id,
+    apiId: api.id,
+    serviceId: service.id,
+    notificationId: notification.id,
+    securityNfrId: input.securityId,
+    storyId: input.storyId,
+    taskIds: createdTasks,
+    createdAt: input.createdAt,
+  });
+}
+
+async function seedGovernanceDemo(input: {
+  productId: string;
+  architectureId: string;
+  planId: string;
+  apiId: string;
+  serviceId: string;
+  notificationId: string;
+  securityNfrId: string;
+  storyId: string;
+  taskIds: string[];
+  createdAt: Date;
+}) {
+  const review = await prisma.engineeringGovernanceReview.create({
+    data: {
+      productId: input.productId,
+      solutionArchitectureId: input.architectureId,
+      implementationPlanId: input.planId,
+      version: 1,
+      status: "DRAFT",
+      overallAssessment: "PASS_WITH_ACTIONS",
+      summary:
+        "Demo governance review. The first claim slice can be built with actions on file validation, logging, and notification failure. This is not an agent run and it is not approved.",
+      assistantSummary:
+        "Demo governance review prepared for the sample. Not a Security & Engineering Governance Agent run.",
+      securityAssessment:
+        "Authentication is still an open architecture question. The claims API must scope each notice to the customer who submitted it. Uploaded evidence and logs need explicit controls before coding treats them as safe. This is an AI-style review of the seeded design, not a penetration test.",
+      privacyAssessment:
+        "A claim notice can contain personal data about the customer and the incident. GDPR applicability requires confirmation. Retention for uploaded documents is not known, so that stays an open question rather than a compliance conclusion.",
+      engineeringAssessment:
+        "A modular monolith matches the first slice. The notification path needs a clearer failure behaviour. Observability should record success and failure without copying the notice body into logs. No extra runtime platform is justified for this slice.",
+      implementationPlanAssessment:
+        "The five tasks follow the customer journey rather than a backend, middleware, UI, then QA sequence. Each task has a validation note. The screen task is small enough for supervised or autonomous work. Authentication changes are not in this plan.",
+      dependencyReview:
+        "AI REVIEW. The sample names PostgreSQL and a web application. No vulnerability scanner has run, so this is not tool verified. Pin dependencies before production and do not add a high-privilege SDK for the first slice.",
+      readinessNote: "Demo readiness is computed from the seeded findings. It is not a model score.",
+      seededDemo: true,
+      createdAt: input.createdAt,
+      updatedAt: input.createdAt,
+    },
+  });
+
+  const fileFinding = await prisma.governanceFinding.create({
+    data: {
+      reviewId: review.id,
+      category: "SECURITY",
+      severity: "MEDIUM",
+      title: "Uploaded claim evidence requires file-type and size validation.",
+      description:
+        "The first slice may accept a photo of damage. The API boundary does not yet say which types and sizes are allowed.",
+      evidence: "The claims API accepts a notice. The seeded plan does not name an upload check.",
+      recommendation: "Reject unexpected types and oversized files at the claims API before the object is stored.",
+      status: "OPEN",
+      dueBeforeCoding: false,
+      owner: "Claims API",
+      createdAt: input.createdAt,
+      updatedAt: input.createdAt,
+    },
+  });
+  await prisma.governanceFindingLink.create({
+    data: {
+      findingId: fileFinding.id,
+      componentId: input.apiId,
+      nfrId: input.securityNfrId,
+      workItemId: input.storyId,
+      taskId: input.taskIds[2],
+    },
+  });
+
+  const logFinding = await prisma.governanceFinding.create({
+    data: {
+      reviewId: review.id,
+      category: "DATA",
+      severity: "MEDIUM",
+      title: "Sensitive claim information must not be written to application logs.",
+      description:
+        "A claim notice can include contact details and a description of damage. Writing that body to logs exposes it to anyone who can read the log stream.",
+      evidence: "The observability approach logs submission success and failure with the claim reference.",
+      recommendation: "Log the claim reference and the outcome. Do not log the notice body, document contents, or contact details.",
+      status: "OPEN",
+      dueBeforeCoding: false,
+      owner: "Claims Service",
+      createdAt: input.createdAt,
+      updatedAt: input.createdAt,
+    },
+  });
+  await prisma.governanceFindingLink.create({
+    data: {
+      findingId: logFinding.id,
+      componentId: input.serviceId,
+      nfrId: input.securityNfrId,
+      workItemId: input.storyId,
+    },
+  });
+
+  const notificationFinding = await prisma.governanceFinding.create({
+    data: {
+      reviewId: review.id,
+      category: "RELIABILITY",
+      severity: "LOW",
+      title: "Notification service failure handling needs clarification.",
+      description:
+        "The customer should still receive a claim reference if the notification cannot be sent. The plan does not say whether that failure is retried or only recorded.",
+      evidence: "The notification service is a component of the first slice, and its failure behaviour is not stated on the task.",
+      recommendation: "Record the failure and still return the claim reference. Do not block submission on notification delivery.",
+      status: "OPEN",
+      dueBeforeCoding: false,
+      owner: "Notification Service",
+      createdAt: input.createdAt,
+      updatedAt: input.createdAt,
+    },
+  });
+  await prisma.governanceFindingLink.create({
+    data: { findingId: notificationFinding.id, componentId: input.notificationId },
+  });
+
+  await prisma.threat.createMany({
+    data: [
+      {
+        reviewId: review.id,
+        title: "Unauthorised access to another customer's claim",
+        description: "A customer who can guess or reuse a claim reference might read someone else's notice.",
+        affectedComponentId: input.apiId,
+        attackSurface: "Claims API read path",
+        likelihood: "MEDIUM",
+        impact: "HIGH",
+        mitigation: "Scope every read and write to the authenticated customer.",
+        status: "OPEN",
+        createdAt: input.createdAt,
+        updatedAt: input.createdAt,
+      },
+      {
+        reviewId: review.id,
+        title: "Malicious file upload",
+        description: "An uploaded damage photo could be an unexpected type or an oversized payload.",
+        affectedComponentId: input.apiId,
+        attackSurface: "Claim evidence upload",
+        likelihood: "MEDIUM",
+        impact: "MEDIUM",
+        mitigation: "Allow only the agreed types and sizes, and store the file outside the application process.",
+        status: "OPEN",
+        createdAt: input.createdAt,
+        updatedAt: input.createdAt,
+      },
+      {
+        reviewId: review.id,
+        title: "Sensitive information appearing in application logs",
+        description: "Support staff or a log vendor could see the notice body if it is written to the log line.",
+        affectedComponentId: input.serviceId,
+        attackSurface: "Application logs",
+        likelihood: "MEDIUM",
+        impact: "MEDIUM",
+        mitigation: "Log the claim reference only.",
+        status: "OPEN",
+        createdAt: input.createdAt,
+        updatedAt: input.createdAt,
+      },
+      {
+        reviewId: review.id,
+        title: "Compromised third-party API credentials",
+        description: "A notification or identity credential in the application config could be reused if it is committed or logged.",
+        affectedComponentId: input.notificationId,
+        attackSurface: "Service credentials",
+        likelihood: "LOW",
+        impact: "HIGH",
+        mitigation: "Keep credentials in the environment, not in source, and do not print them.",
+        status: "OPEN",
+        createdAt: input.createdAt,
+        updatedAt: input.createdAt,
+      },
+    ],
+  });
+
+  const riskLevels = [
+    ["MEDIUM", "SUPERVISED", "The domain model stores a customer notice. A person should review the change."],
+    ["MEDIUM", "SUPERVISED", "The submission service writes customer data. Keep a person in the loop."],
+    ["MEDIUM", "SUPERVISED", "A new API endpoint accepts the notice. Review the boundary before it is merged."],
+    ["LOW", "AUTONOMOUS", "The screen change has a clear acceptance check and does not decide access."],
+    ["LOW", "SUPERVISED", "End-to-end verification can be drafted with supervision because it touches the whole slice."],
+  ] as const;
+  for (const [index, taskId] of input.taskIds.entries()) {
+    const [riskLevel, mode, reason] = riskLevels[index];
+    await prisma.codingRiskAssessment.create({
+      data: {
+        reviewId: review.id,
+        implementationTaskId: taskId,
+        riskLevel,
+        recommendedExecutionMode: mode,
+        reason,
+        requiredHumanReview: mode !== "AUTONOMOUS",
+        createdAt: input.createdAt,
+        updatedAt: input.createdAt,
+      },
+    });
+  }
+
+  await prisma.codingPolicy.create({
+    data: {
+      productId: input.productId,
+      reviewId: review.id,
+      allowedPaths: ["src/claims/**", "src/app/claims/**"],
+      restrictedPaths: ["prisma/migrations/**", ".github/workflows/**"],
+      prohibitedActions: [
+        "Modify production credentials",
+        "Disable security controls",
+        "Force push",
+        "Merge own pull request",
+        "Delete production data",
+        "Modify CI security controls without approval",
+        "Commit secrets",
+        "Bypass failing tests",
+      ],
+      requiredChecks: ["typecheck", "lint", "unit tests"],
+      maxFilesPerTask: 8,
+      requireTests: true,
+      requireHumanReview: true,
+      createdAt: input.createdAt,
+      updatedAt: input.createdAt,
+    },
+  });
+
+  await prisma.governanceQuestion.create({
+    data: {
+      reviewId: review.id,
+      question: "What retention policy applies to uploaded documents?",
+      reason: "The notice may include a photo, and no retention period is confirmed.",
+      impact: "MEDIUM",
+      topic: "PRIVACY",
+      blocking: true,
+      status: "OPEN",
+      createdAt: input.createdAt,
+    },
+  });
+  await prisma.governanceEvidence.create({
+    data: {
+      reviewId: review.id,
+      findingId: fileFinding.id,
+      type: "AI_ANALYSIS",
+      source: "AI_REVIEW",
+      description: "Demo evidence for the file-validation finding. No scanner was run.",
+      result: "AI REVIEW",
+      createdAt: input.createdAt,
+    },
+  });
+  await prisma.activity.create({
+    data: {
+      productId: input.productId,
+      type: "GOVERNANCE_GENERATED",
+      description:
+        "Demo data. Prepared a sample governance review, threat model, coding risks, and coding policy. Not a Security & Engineering Governance Agent run.",
       actor: "Demo seed",
       createdAt: input.createdAt,
     },

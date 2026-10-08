@@ -30,7 +30,9 @@ export class AgentNotConfiguredError extends DomainError {
           ? "The Requirements Agent is not configured. Add OPENAI_API_KEY on the server. No product definition was generated."
           : agentType === "ARCHITECTURE"
             ? "The Architecture Agent is not configured. Add OPENAI_API_KEY on the server. No architecture was generated."
-            : `${agentType} is not configured. AI agents will be introduced progressively as the Product Factory capabilities are enabled.`,
+            : agentType === "SECURITY"
+              ? "The Security & Engineering Governance Agent is not configured. Add OPENAI_API_KEY on the server. No governance review was generated."
+              : `${agentType} is not configured. AI agents will be introduced progressively as the Product Factory capabilities are enabled.`,
       "INVALID",
     );
     this.name = "AgentNotConfiguredError";
@@ -83,6 +85,7 @@ export async function executeAgent(request: AgentExecutionRequest) {
   if (!runner || !runner.isConfigured()) {
     throw new AgentNotConfiguredError(request.agentType);
   }
+  if (runner.assertCanRun) await runner.assertCanRun(request);
 
   const startedAt = new Date();
   const run = await insertAgentRun({

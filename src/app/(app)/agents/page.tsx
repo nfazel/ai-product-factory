@@ -24,7 +24,7 @@ async function Agents() {
       <PageHeader
         eyebrow="Agents"
         title="Agent control centre"
-        description="Product Discovery, the Requirements Agent, and the Architecture Agent run when OPENAI_API_KEY is set on the server. Security, coding, testing, and review stay unavailable until they are introduced."
+        description="Product Discovery, the Requirements Agent, the Architecture Agent, and the Security & Engineering Governance Agent run when OPENAI_API_KEY is set on the server. Coding, testing, and review stay unavailable until they are introduced."
       />
       <div className="grid gap-4 md:grid-cols-2">
         {agents.map((agent) => (
@@ -46,7 +46,8 @@ async function Agents() {
             </p>
             {agent.agentType === "PRODUCT_DISCOVERY" ||
             agent.agentType === "REQUIREMENTS" ||
-            agent.agentType === "ARCHITECTURE" ? (
+            agent.agentType === "ARCHITECTURE" ||
+            agent.agentType === "SECURITY" ? (
               <dl className="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
                 <div>
                   <dt className="text-xs text-muted-foreground">Runs</dt>

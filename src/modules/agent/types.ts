@@ -11,6 +11,8 @@ export type AgentRunner = {
   agentType: AgentType;
   /** True only when this agent can make a real model call. */
   isConfigured: () => boolean;
+  /** Called before an AgentRun row is written. Throw to refuse without a run. */
+  assertCanRun?: (request: AgentExecutionRequest) => Promise<void>;
   execute: (request: AgentExecutionRequest) => Promise<{
     output: Record<string, unknown>;
     estimatedCost?: string | null;

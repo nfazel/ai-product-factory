@@ -14,6 +14,8 @@ import {
   TaskEditor,
   TechnologyEditor,
 } from "@/components/build/controls";
+import { BuildReadiness, GovernancePanel } from "@/components/build/governance-panel";
+import { CODING_EXECUTION_LABEL, CODING_RISK_LABEL } from "@/domain/constants";
 import { PageSkeleton } from "@/components/feedback/states";
 import {
   ADR_STATUS_LABEL,
@@ -103,8 +105,10 @@ async function Build({
           <Status label="Coding readiness" value={workspace.coding.label} />
         </div>
         <p className="mt-4 text-sm leading-6 text-muted-foreground">
-          {workspace.readiness.summary} Coding stays closed until a person has approved both the
-          solution architecture and the implementation plan. The Coding Agent is not available yet.
+          {workspace.readiness.summary} Coding stays closed until a person has approved the brief,
+          the definition, the first slice, the architecture, the implementation plan, engineering
+          governance, and the coding policy, and no governance blocker remains. The Coding Agent is
+          not available yet.
         </p>
         {architecture?.reviewRequired ? (
           <p className="mt-3 rounded-xl bg-amber-50 p-3 text-sm leading-6 text-amber-950">
@@ -133,6 +137,8 @@ async function Build({
           <BuildControls productId={id} />
         </div>
       </header>
+
+      <BuildReadiness coding={workspace.coding} />
 
       <section className="rounded-2xl border bg-card p-4 sm:p-5">
         <h2 className="text-base font-semibold">Technical readiness</h2>
@@ -524,6 +530,11 @@ async function Build({
                       {task.components.map((link) => link.component.name).join(", ") || "Not linked"}
                     </p>
                     <p className="text-muted-foreground">Validation: {task.validation}</p>
+                    <TaskCodingRisk
+                      risk={workspace.governance.review?.codingRisks.find(
+                        (item) => item.implementationTaskId === task.id,
+                      )}
+                    />
                     {task.dependencies.length > 0 ? (
                       <p className="font-medium text-amber-900">
                         BLOCKED BY {task.dependencies.map((item) => item.dependsOn.title).join(", ")}
@@ -549,7 +560,36 @@ async function Build({
           ))}
         </div>
       </section>
+
+      <GovernancePanel productId={id} governance={workspace.governance} />
     </div>
+  );
+}
+
+function TaskCodingRisk({
+  risk,
+}: {
+  risk:
+    | {
+        riskLevel: keyof typeof CODING_RISK_LABEL;
+        recommendedExecutionMode: keyof typeof CODING_EXECUTION_LABEL;
+        reason: string;
+        overrideRiskLevel: keyof typeof CODING_RISK_LABEL | null;
+        overrideExecutionMode: keyof typeof CODING_EXECUTION_LABEL | null;
+        overrideReason: string;
+        overriddenBy: string;
+        implementationTaskId: string;
+      }
+    | undefined;
+}) {
+  if (!risk) return null;
+  const level = risk.overrideRiskLevel ?? risk.riskLevel;
+  const mode = risk.overrideExecutionMode ?? risk.recommendedExecutionMode;
+  return (
+    <p className="text-muted-foreground">
+      AI coding risk {CODING_RISK_LABEL[level]}. Recommended mode {CODING_EXECUTION_LABEL[mode]}. {risk.reason}
+      {risk.overriddenBy ? ` Human override by ${risk.overriddenBy}: ${risk.overrideReason}` : ""}
+    </p>
   );
 }
 

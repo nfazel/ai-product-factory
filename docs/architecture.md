@@ -84,9 +84,12 @@ The catalogue in `src/domain/constants.ts` names the agents:
 - Product Discovery — implemented
 - Requirements — implemented
 - Architecture — implemented, inside Build
-- Security, Planning, Coding, Testing, and Review — not configured
+- Security & Engineering Governance — implemented, inside Build, as the existing `SECURITY` agent type
+- Planning, Coding, Testing, and Review — not configured
 
-Product Discovery, the Requirements Agent, and the Architecture Agent are **CONFIGURED** only when `OPENAI_API_KEY` is set on the server, or when a test supplies a provider. Every other agent stays **NOT CONFIGURED**. The control centre reads run counts, completed runs, failed runs, and average duration from `AgentRun` for the implemented agents. Token counts are stored when the provider returns them. Cost is left empty rather than guessed.
+Product Discovery, the Requirements Agent, the Architecture Agent, and the Security & Engineering Governance Agent are **CONFIGURED** only when `OPENAI_API_KEY` is set on the server, or when a test supplies a provider. Every other agent stays **NOT CONFIGURED**. The control centre reads run counts, completed runs, failed runs, and average duration from `AgentRun` for the implemented agents. Token counts are stored when the provider returns them. Cost is left empty rather than guessed.
+
+The governance agent is not a mode of the Architecture Agent. The Architecture Agent proposes how to build. The governance agent independently asks whether that proposal is safe, supportable, and ready to build. See [security-governance-agent.md](security-governance-agent.md).
 
 A runner implements:
 

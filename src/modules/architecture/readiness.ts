@@ -174,5 +174,5 @@ export function assessTechnicalReadiness(input: TechnicalReadinessInput): Techni
 }
 
 export function codingReadinessLabel(ready: boolean) {
-  return ready ? "READY" : "NOT READY";
+  return ready ? "CODING READY" : "NOT READY";
 }

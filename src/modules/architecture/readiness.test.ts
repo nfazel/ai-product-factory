@@ -61,6 +61,6 @@ describe("technical readiness", () => {
 
   it("keeps coding readiness false until both approvals exist", () => {
     expect(codingReadinessLabel(false)).toBe("NOT READY");
-    expect(codingReadinessLabel(true)).toBe("READY");
+    expect(codingReadinessLabel(true)).toBe("CODING READY");
   });
 });

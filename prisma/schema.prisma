@@ -103,6 +103,9 @@ model Product {
   architectureQuestions ArchitectureQuestion[]
   implementationPlans ImplementationPlan[]
   architectureProposals ArchitectureProposal[]
+  governanceReviews EngineeringGovernanceReview[]
+  codingPolicies CodingPolicy[]
+  governanceProposals GovernanceProposal[]
 
   @@index([status])
   @@index([updatedAt])
@@ -142,6 +145,7 @@ model WorkItem {
   requirementAssumptions RequirementAssumption[]
   componentTraces ComponentTrace[]
   implementationTasks ImplementationTask[]
+  findingLinks       GovernanceFindingLink[]
   decisions          Decision[]
   approvals          Approval[]
   activities         Activity[]
@@ -588,6 +592,7 @@ model NonFunctionalRequirement {
   product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
   coverages NfrCoverage[]
   componentTraces ComponentTrace[]
+  findingLinks GovernanceFindingLink[]
 
   @@index([productId])
   @@index([category])
@@ -630,6 +635,7 @@ model RequirementAssumption {
 
   product  Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
   workItem WorkItem? @relation(fields: [workItemId], references: [id], onDelete: SetNull)
+  findingLinks GovernanceFindingLink[]
 
   @@index([productId])
   @@index([workItemId])
@@ -810,6 +816,7 @@ model SolutionArchitecture {
   technologies  TechnologyChoice[]
   nfrCoverages  NfrCoverage[]
   plans         ImplementationPlan[]
+  governanceReviews EngineeringGovernanceReview[]
 
   @@unique([productId, version])
   @@index([productId])
@@ -836,6 +843,8 @@ model ArchitectureComponent {
   traces       ComponentTrace[]
   nfrCoverages NfrCoverage[]
   taskLinks    ImplementationTaskComponent[]
+  findingLinks GovernanceFindingLink[]
+  threats      Threat[]
 
   @@index([solutionArchitectureId])
   @@index([type])
@@ -878,6 +887,7 @@ model ArchitectureDecisionRecord {
   architecture SolutionArchitecture   @relation(fields: [solutionArchitectureId], references: [id], onDelete: Cascade)
   traces       ComponentTrace[]
   nfrCoverages NfrCoverage[]
+  findingLinks GovernanceFindingLink[]
 
   @@index([productId])
   @@index([solutionArchitectureId])
@@ -1031,6 +1041,7 @@ model ImplementationPlan {
   productSlice ProductSlice?        @relation(fields: [productSliceId], references: [id], onDelete: SetNull)
   architecture SolutionArchitecture @relation(fields: [solutionArchitectureId], references: [id], onDelete: Cascade)
   tasks        ImplementationTask[]
+  governanceReviews EngineeringGovernanceReview[]
 
   @@unique([productId, version])
   @@index([productId])
@@ -1064,6 +1075,8 @@ model ImplementationTask {
   components   ImplementationTaskComponent[]
   dependencies ImplementationTaskDependency[] @relation("TaskDependent")
   dependents   ImplementationTaskDependency[] @relation("TaskDependency")
+  codingRisks  CodingRiskAssessment[]
+  findingLinks GovernanceFindingLink[]
 
   @@index([implementationPlanId])
   @@index([workItemId])
@@ -1111,4 +1124,336 @@ model ArchitectureProposal {
 
   @@index([productId, createdAt])
   @@index([kind, status])
+}
+
+enum GovernanceReviewStatus {
+  DRAFT
+  READY_FOR_REVIEW
+  APPROVED
+  SUPERSEDED
+}
+
+enum GovernanceAssessment {
+  PASS
+  PASS_WITH_ACTIONS
+  BLOCKED
+}
+
+enum FindingCategory {
+  SECURITY
+  PRIVACY
+  ARCHITECTURE
+  RELIABILITY
+  OBSERVABILITY
+  DATA
+  INTEGRATION
+  TESTABILITY
+  MAINTAINABILITY
+  DEPENDENCY
+  DELIVERY
+  COMPLIANCE
+  OPERABILITY
+  OTHER
+}
+
+enum FindingSeverity {
+  INFO
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum FindingStatus {
+  OPEN
+  ACCEPTED
+  MITIGATED
+  RISK_ACCEPTED
+  CLOSED
+}
+
+enum ThreatLikelihood {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum ThreatImpact {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum ThreatStatus {
+  OPEN
+  MITIGATED
+  ACCEPTED
+  CLOSED
+}
+
+enum CodingRiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+  PROHIBITED
+}
+
+enum CodingExecutionMode {
+  AUTONOMOUS
+  SUPERVISED
+  HUMAN_ONLY
+}
+
+enum EvidenceType {
+  AI_ANALYSIS
+  HUMAN_CONFIRMATION
+  TEST_RESULT
+  STATIC_ANALYSIS
+  DEPENDENCY_SCAN
+  SECURITY_SCAN
+  DOCUMENT
+}
+
+enum GovernanceTopic {
+  SECURITY
+  PRIVACY
+  PLAN
+  ARCHITECTURE
+  GENERAL
+}
+
+enum GovernanceProposalSection {
+  FULL
+  SECURITY
+  PRIVACY
+  PLAN
+  ARCHITECTURE
+  TASK
+}
+
+model EngineeringGovernanceReview {
+  id                         String                 @id @default(cuid())
+  productId                  String
+  solutionArchitectureId     String
+  implementationPlanId       String
+  version                    Int
+  status                     GovernanceReviewStatus @default(DRAFT)
+  overallAssessment          GovernanceAssessment
+  summary                    String                 @default("")
+  assistantSummary           String                 @default("")
+  securityAssessment         String                 @default("")
+  privacyAssessment          String                 @default("")
+  engineeringAssessment      String                 @default("")
+  implementationPlanAssessment String               @default("")
+  dependencyReview           String                 @default("")
+  readinessNote              String                 @default("")
+  seededDemo                 Boolean                @default(false)
+  humanLocked                Boolean                @default(false)
+  reviewRequired             Boolean                @default(false)
+  reviewReason               String                 @default("")
+  reviewFlaggedAt            DateTime?
+  createdAt                  DateTime               @default(now())
+  updatedAt                  DateTime               @updatedAt
+
+  product      Product              @relation(fields: [productId], references: [id], onDelete: Cascade)
+  architecture SolutionArchitecture @relation(fields: [solutionArchitectureId], references: [id], onDelete: Cascade)
+  plan         ImplementationPlan   @relation(fields: [implementationPlanId], references: [id], onDelete: Cascade)
+  findings     GovernanceFinding[]
+  threats      Threat[]
+  codingRisks  CodingRiskAssessment[]
+  policy       CodingPolicy?
+  questions    GovernanceQuestion[]
+  evidence     GovernanceEvidence[]
+
+  @@unique([productId, version])
+  @@index([productId])
+  @@index([solutionArchitectureId])
+  @@index([implementationPlanId])
+  @@index([status])
+}
+
+model GovernanceFinding {
+  id               String          @id @default(cuid())
+  reviewId         String
+  category         FindingCategory
+  severity         FindingSeverity
+  title            String
+  description      String          @default("")
+  evidence         String          @default("")
+  recommendation   String          @default("")
+  status           FindingStatus   @default(OPEN)
+  owner            String          @default("")
+  dueBeforeCoding  Boolean         @default(false)
+  rationale        String          @default("")
+  humanLocked      Boolean         @default(false)
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  review   EngineeringGovernanceReview @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  links    GovernanceFindingLink[]
+  evidenceItems GovernanceEvidence[]
+
+  @@index([reviewId])
+  @@index([category])
+  @@index([severity])
+  @@index([status])
+}
+
+model GovernanceFindingLink {
+  id            String  @id @default(cuid())
+  findingId     String
+  componentId   String?
+  adrId         String?
+  taskId        String?
+  nfrId         String?
+  workItemId    String?
+  assumptionId  String?
+  createdAt     DateTime @default(now())
+
+  finding    GovernanceFinding           @relation(fields: [findingId], references: [id], onDelete: Cascade)
+  component  ArchitectureComponent?      @relation(fields: [componentId], references: [id], onDelete: SetNull)
+  adr        ArchitectureDecisionRecord? @relation(fields: [adrId], references: [id], onDelete: SetNull)
+  task       ImplementationTask?         @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  nfr        NonFunctionalRequirement?   @relation(fields: [nfrId], references: [id], onDelete: SetNull)
+  workItem   WorkItem?                   @relation(fields: [workItemId], references: [id], onDelete: SetNull)
+  assumption RequirementAssumption?      @relation(fields: [assumptionId], references: [id], onDelete: SetNull)
+
+  @@index([findingId])
+  @@index([componentId])
+  @@index([adrId])
+  @@index([taskId])
+  @@index([nfrId])
+  @@index([workItemId])
+  @@index([assumptionId])
+}
+
+model Threat {
+  id                   String           @id @default(cuid())
+  reviewId             String
+  title                String
+  description          String           @default("")
+  affectedComponentId  String?
+  attackSurface        String           @default("")
+  likelihood           ThreatLikelihood @default(MEDIUM)
+  impact               ThreatImpact     @default(MEDIUM)
+  mitigation           String           @default("")
+  status               ThreatStatus     @default(OPEN)
+  humanLocked          Boolean          @default(false)
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+
+  review    EngineeringGovernanceReview @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  component ArchitectureComponent?      @relation(fields: [affectedComponentId], references: [id], onDelete: SetNull)
+
+  @@index([reviewId])
+  @@index([affectedComponentId])
+  @@index([status])
+}
+
+model CodingRiskAssessment {
+  id                       String              @id @default(cuid())
+  reviewId                 String
+  implementationTaskId     String
+  riskLevel                CodingRiskLevel
+  reason                   String              @default("")
+  recommendedExecutionMode CodingExecutionMode
+  requiredHumanReview      Boolean             @default(false)
+  overrideRiskLevel        CodingRiskLevel?
+  overrideExecutionMode    CodingExecutionMode?
+  overrideReason           String              @default("")
+  overriddenBy             String              @default("")
+  overriddenAt             DateTime?
+  createdAt                DateTime            @default(now())
+  updatedAt                DateTime            @updatedAt
+
+  review EngineeringGovernanceReview @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  task   ImplementationTask           @relation(fields: [implementationTaskId], references: [id], onDelete: Cascade)
+
+  @@unique([reviewId, implementationTaskId])
+  @@index([implementationTaskId])
+  @@index([riskLevel])
+}
+
+model CodingPolicy {
+  id                   String    @id @default(cuid())
+  productId            String
+  reviewId             String    @unique
+  allowedPaths         Json      @default("[]")
+  restrictedPaths      Json      @default("[]")
+  prohibitedActions    Json      @default("[]")
+  requiredChecks       Json      @default("[]")
+  maxFilesPerTask      Int?
+  requireTests         Boolean   @default(true)
+  requireHumanReview   Boolean   @default(true)
+  humanLocked          Boolean   @default(false)
+  reapprovalRequired   Boolean   @default(false)
+  reapprovalReason     String    @default("")
+  reapprovalFlaggedAt  DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  product Product                     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  review  EngineeringGovernanceReview @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+}
+
+model GovernanceEvidence {
+  id          String       @id @default(cuid())
+  reviewId    String
+  findingId   String?
+  type        EvidenceType
+  source      String       @default("")
+  description String       @default("")
+  result      String       @default("")
+  createdAt   DateTime     @default(now())
+
+  review  EngineeringGovernanceReview @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  finding GovernanceFinding?          @relation(fields: [findingId], references: [id], onDelete: SetNull)
+
+  @@index([reviewId])
+  @@index([findingId])
+  @@index([type])
+}
+
+model GovernanceQuestion {
+  id         String           @id @default(cuid())
+  reviewId   String
+  question   String
+  reason     String           @default("")
+  impact     AssumptionImpact @default(MEDIUM)
+  topic      GovernanceTopic  @default(GENERAL)
+  blocking   Boolean          @default(false)
+  status     QuestionStatus   @default(OPEN)
+  answer     String           @default("")
+  answeredBy String           @default("")
+  humanLocked Boolean         @default(false)
+  createdAt  DateTime         @default(now())
+  resolvedAt DateTime?
+
+  review EngineeringGovernanceReview @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+
+  @@index([reviewId])
+  @@index([status])
+  @@index([blocking])
+}
+
+model GovernanceProposal {
+  id         String                     @id @default(cuid())
+  productId  String
+  agentRunId String?
+  section    GovernanceProposalSection  @default(FULL)
+  taskRef    String                     @default("")
+  status     ProposalStatus             @default(OPEN)
+  summary    String                     @default("")
+  payload    Json
+  seededDemo Boolean                    @default(false)
+  createdAt  DateTime                   @default(now())
+  updatedAt  DateTime                   @updatedAt
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId, createdAt])
+  @@index([section, status])
 }

@@ -423,8 +423,9 @@ describe("architecture commit, approval, and planning", () => {
     await markPlanReady(setup.product.id);
     await approveImplementationPlan(setup.product.id);
     const coding = await getCodingReadiness(setup.product.id);
-    expect(coding.label).toBe("READY");
-    expect(coding.ready).toBe(true);
+    expect(coding.label).toBe("NOT READY");
+    expect(coding.ready).toBe(false);
+    expect(coding.blockers.join(" ")).toMatch(/Engineering Governance is not approved/);
     const planApproval = await db.approval.findFirst({
       where: { productId: setup.product.id, approvalType: "IMPLEMENTATION_PLAN" },
     });

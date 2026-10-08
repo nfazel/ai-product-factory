@@ -49,6 +49,8 @@ export const APPROVAL_TYPES = [
   "PRODUCT_DEFINITION",
   "SOLUTION_ARCHITECTURE",
   "IMPLEMENTATION_PLAN",
+  "ENGINEERING_GOVERNANCE",
+  "CODING_POLICY",
 ] as const;
 export type ApprovalType = (typeof APPROVAL_TYPES)[number];
 
@@ -102,6 +104,17 @@ export const ACTIVITY_TYPES = [
   "ADR_UPDATED",
   "CODEBASE_CONTEXT_UPDATED",
   "ARCHITECTURE_QUESTION_ANSWERED",
+  "GOVERNANCE_GENERATED",
+  "GOVERNANCE_COMMITTED",
+  "GOVERNANCE_READY_FOR_REVIEW",
+  "GOVERNANCE_APPROVED",
+  "GOVERNANCE_REVIEW_REQUIRED",
+  "FINDING_UPDATED",
+  "CODING_RISK_OVERRIDDEN",
+  "CODING_POLICY_UPDATED",
+  "CODING_POLICY_APPROVED",
+  "CODING_POLICY_REAPPROVAL_REQUIRED",
+  "GOVERNANCE_QUESTION_ANSWERED",
 ] as const;
 export type ActivityType = (typeof ACTIVITY_TYPES)[number];
 
@@ -275,6 +288,8 @@ export const APPROVAL_TYPE_LABEL: Record<ApprovalType, string> = {
   PRODUCT_DEFINITION: "Product definition",
   SOLUTION_ARCHITECTURE: "Solution architecture",
   IMPLEMENTATION_PLAN: "Implementation plan",
+  ENGINEERING_GOVERNANCE: "Engineering governance",
+  CODING_POLICY: "Coding policy",
 };
 
 export const ACTIVITY_TYPE_LABEL: Record<ActivityType, string> = {
@@ -318,6 +333,17 @@ export const ACTIVITY_TYPE_LABEL: Record<ActivityType, string> = {
   ADR_UPDATED: "Architecture decision updated",
   CODEBASE_CONTEXT_UPDATED: "Codebase context updated",
   ARCHITECTURE_QUESTION_ANSWERED: "Architecture question answered",
+  GOVERNANCE_GENERATED: "Governance review generated",
+  GOVERNANCE_COMMITTED: "Governance review committed",
+  GOVERNANCE_READY_FOR_REVIEW: "Governance review ready for review",
+  GOVERNANCE_APPROVED: "Governance review approved",
+  GOVERNANCE_REVIEW_REQUIRED: "Governance review required",
+  FINDING_UPDATED: "Governance finding updated",
+  CODING_RISK_OVERRIDDEN: "Coding risk overridden",
+  CODING_POLICY_UPDATED: "Coding policy updated",
+  CODING_POLICY_APPROVED: "Coding policy approved",
+  CODING_POLICY_REAPPROVAL_REQUIRED: "Coding policy reapproval required",
+  GOVERNANCE_QUESTION_ANSWERED: "Governance question answered",
 };
 
 export const DISCOVERY_STATUS_LABEL: Record<DiscoveryStatus, string> = {
@@ -578,8 +604,9 @@ export const AGENT_CATALOG: Record<
       "Propose a solution architecture and an implementation plan for an approved product slice. It does not write production code.",
   },
   SECURITY: {
-    name: "Security Agent",
-    responsibility: "Raise security concerns before work is approved.",
+    name: "Security & Engineering Governance Agent",
+    responsibility:
+      "Independently review an approved architecture and implementation plan before coding. It does not write production code or approve its own review.",
   },
   PLANNING: {
     name: "Planning Agent",
@@ -772,6 +799,181 @@ export const ARCHITECTURE_SECTION_LABEL: Record<ArchitectureSection, string> = {
   tasks: "Implementation tasks",
   alternatives: "Architecture alternatives",
 };
+
+export const GOVERNANCE_ASSESSMENTS = ["PASS", "PASS_WITH_ACTIONS", "BLOCKED"] as const;
+export type GovernanceAssessmentName = (typeof GOVERNANCE_ASSESSMENTS)[number];
+
+export const GOVERNANCE_ASSESSMENT_LABEL: Record<GovernanceAssessmentName, string> = {
+  PASS: "Pass",
+  PASS_WITH_ACTIONS: "Pass with actions",
+  BLOCKED: "Blocked",
+};
+
+export const GOVERNANCE_REVIEW_STATUSES = [
+  "DRAFT",
+  "READY_FOR_REVIEW",
+  "APPROVED",
+  "SUPERSEDED",
+] as const;
+export type GovernanceReviewStatusName = (typeof GOVERNANCE_REVIEW_STATUSES)[number];
+
+export const FINDING_CATEGORIES = [
+  "SECURITY",
+  "PRIVACY",
+  "ARCHITECTURE",
+  "RELIABILITY",
+  "OBSERVABILITY",
+  "DATA",
+  "INTEGRATION",
+  "TESTABILITY",
+  "MAINTAINABILITY",
+  "DEPENDENCY",
+  "DELIVERY",
+  "COMPLIANCE",
+  "OPERABILITY",
+  "OTHER",
+] as const;
+export type FindingCategoryName = (typeof FINDING_CATEGORIES)[number];
+
+export const FINDING_CATEGORY_LABEL: Record<FindingCategoryName, string> = {
+  SECURITY: "Security",
+  PRIVACY: "Privacy",
+  ARCHITECTURE: "Architecture",
+  RELIABILITY: "Reliability",
+  OBSERVABILITY: "Observability",
+  DATA: "Data",
+  INTEGRATION: "Integration",
+  TESTABILITY: "Testability",
+  MAINTAINABILITY: "Maintainability",
+  DEPENDENCY: "Dependency",
+  DELIVERY: "Delivery",
+  COMPLIANCE: "Compliance",
+  OPERABILITY: "Operability",
+  OTHER: "Other",
+};
+
+export const FINDING_SEVERITIES = ["INFO", "LOW", "MEDIUM", "HIGH", "CRITICAL"] as const;
+export type FindingSeverityName = (typeof FINDING_SEVERITIES)[number];
+
+export const FINDING_SEVERITY_LABEL: Record<FindingSeverityName, string> = {
+  INFO: "Info",
+  LOW: "Low",
+  MEDIUM: "Medium",
+  HIGH: "High",
+  CRITICAL: "Critical",
+};
+
+export const FINDING_STATUSES = [
+  "OPEN",
+  "ACCEPTED",
+  "MITIGATED",
+  "RISK_ACCEPTED",
+  "CLOSED",
+] as const;
+export type FindingStatusName = (typeof FINDING_STATUSES)[number];
+
+export const FINDING_STATUS_LABEL: Record<FindingStatusName, string> = {
+  OPEN: "Open",
+  ACCEPTED: "Accepted",
+  MITIGATED: "Mitigated",
+  RISK_ACCEPTED: "Risk accepted",
+  CLOSED: "Closed",
+};
+
+export const THREAT_LIKELIHOODS = ["LOW", "MEDIUM", "HIGH"] as const;
+export type ThreatLikelihoodName = (typeof THREAT_LIKELIHOODS)[number];
+
+export const THREAT_IMPACTS = ["LOW", "MEDIUM", "HIGH", "CRITICAL"] as const;
+export type ThreatImpactName = (typeof THREAT_IMPACTS)[number];
+
+export const THREAT_STATUSES = ["OPEN", "MITIGATED", "ACCEPTED", "CLOSED"] as const;
+export type ThreatStatusName = (typeof THREAT_STATUSES)[number];
+
+export const THREAT_STATUS_LABEL: Record<ThreatStatusName, string> = {
+  OPEN: "Open",
+  MITIGATED: "Mitigated",
+  ACCEPTED: "Accepted",
+  CLOSED: "Closed",
+};
+
+export const CODING_RISK_LEVELS = ["LOW", "MEDIUM", "HIGH", "PROHIBITED"] as const;
+export type CodingRiskLevelName = (typeof CODING_RISK_LEVELS)[number];
+
+export const CODING_RISK_LABEL: Record<CodingRiskLevelName, string> = {
+  LOW: "Low",
+  MEDIUM: "Medium",
+  HIGH: "High",
+  PROHIBITED: "Prohibited",
+};
+
+export const CODING_EXECUTION_MODES = ["AUTONOMOUS", "SUPERVISED", "HUMAN_ONLY"] as const;
+export type CodingExecutionModeName = (typeof CODING_EXECUTION_MODES)[number];
+
+export const CODING_EXECUTION_LABEL: Record<CodingExecutionModeName, string> = {
+  AUTONOMOUS: "Autonomous",
+  SUPERVISED: "Supervised",
+  HUMAN_ONLY: "Human only",
+};
+
+export const EVIDENCE_TYPES = [
+  "AI_ANALYSIS",
+  "HUMAN_CONFIRMATION",
+  "TEST_RESULT",
+  "STATIC_ANALYSIS",
+  "DEPENDENCY_SCAN",
+  "SECURITY_SCAN",
+  "DOCUMENT",
+] as const;
+export type EvidenceTypeName = (typeof EVIDENCE_TYPES)[number];
+
+export const EVIDENCE_TYPE_LABEL: Record<EvidenceTypeName, string> = {
+  AI_ANALYSIS: "AI review",
+  HUMAN_CONFIRMATION: "Human confirmation",
+  TEST_RESULT: "Test result",
+  STATIC_ANALYSIS: "Static analysis",
+  DEPENDENCY_SCAN: "Dependency scan",
+  SECURITY_SCAN: "Security scan",
+  DOCUMENT: "Document",
+};
+
+export const GOVERNANCE_TOPICS = [
+  "SECURITY",
+  "PRIVACY",
+  "PLAN",
+  "ARCHITECTURE",
+  "GENERAL",
+] as const;
+export type GovernanceTopicName = (typeof GOVERNANCE_TOPICS)[number];
+
+export const GOVERNANCE_SECTIONS = [
+  "security",
+  "privacy",
+  "plan",
+  "architecture",
+  "task",
+] as const;
+export type GovernanceSection = (typeof GOVERNANCE_SECTIONS)[number];
+
+export const GOVERNANCE_SECTION_LABEL: Record<GovernanceSection, string> = {
+  security: "Security",
+  privacy: "Privacy",
+  plan: "Implementation plan",
+  architecture: "Architecture",
+  task: "Implementation task",
+};
+
+export const GOVERNANCE_READINESS_AREAS = [
+  { key: "security", label: "Security" },
+  { key: "privacy", label: "Privacy" },
+  { key: "architectureQuality", label: "Architecture quality" },
+  { key: "reliability", label: "Reliability" },
+  { key: "observability", label: "Observability" },
+  { key: "dataProtection", label: "Data protection" },
+  { key: "planQuality", label: "Implementation plan quality" },
+  { key: "testability", label: "Testability" },
+  { key: "codingSuitability", label: "AI coding suitability" },
+  { key: "openQuestions", label: "Open governance questions" },
+] as const;
 
 export const TECHNICAL_READINESS_AREAS = [
   { key: "architectureClarity", label: "Architecture clarity" },
