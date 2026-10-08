@@ -36,7 +36,7 @@ export function ComingSoon({
         {title}
       </p>
       <h2 className="mx-auto mt-3 max-w-lg text-xl font-semibold tracking-tight">
-        This capability will be introduced in a later stage.
+        This view is not part of the current path.
       </h2>
       {note ? (
         <p className="mx-auto mt-3 max-w-md text-sm leading-6 text-muted-foreground">

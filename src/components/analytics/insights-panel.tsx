@@ -10,7 +10,7 @@ export function InsightsPanel({ productId, window }: { productId: string; window
 
   return (
     <section className="rounded-2xl border bg-card p-5">
-      <h2 className="text-base font-semibold">Factory Insights</h2>
+      <h2 className="text-base font-semibold">Insights</h2>
       <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
         An explanation of the numbers above. It cannot change a metric, a lifecycle record, or an approval.
       </p>

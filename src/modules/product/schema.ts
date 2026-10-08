@@ -2,36 +2,33 @@ import { z } from "zod";
 
 import { PRODUCT_STAGES, PRODUCT_STATUSES } from "@/domain/constants";
 
+const nameField = z
+  .string()
+  .trim()
+  .min(1, "Product name is required")
+  .max(120, "Keep the name under 120 characters");
+
+const problemField = z
+  .string()
+  .trim()
+  .min(1, "Describe the problem you are trying to solve")
+  .max(2000);
+
 export const createProductSchema = z.object({
-  name: z
-    .string()
-    .trim()
-    .min(1, "Product name is required")
-    .max(120, "Keep the name under 120 characters"),
-  description: z
-    .string()
-    .trim()
-    .min(1, "A short description is required")
-    .max(500, "Keep the description under 500 characters"),
-  vision: z
-    .string()
-    .trim()
-    .min(1, "Product vision is required")
-    .max(2000),
-  problemStatement: z
-    .string()
-    .trim()
-    .min(1, "Problem statement is required")
-    .max(2000),
-  targetUsers: z
-    .string()
-    .trim()
-    .min(1, "Target users are required")
-    .max(1000),
+  name: nameField,
+  problemStatement: problemField,
+  description: z.string().trim().max(500).optional().default(""),
+  vision: z.string().trim().max(2000).optional().default(""),
+  targetUsers: z.string().trim().max(1000).optional().default(""),
 });
 
-export const updateProductSchema = createProductSchema.extend({
+export const updateProductSchema = z.object({
   id: z.string().trim().min(1),
+  name: nameField,
+  problemStatement: problemField,
+  description: z.string().trim().max(500),
+  vision: z.string().trim().max(2000),
+  targetUsers: z.string().trim().max(1000),
   status: z.enum(PRODUCT_STATUSES),
   currentStage: z.enum(PRODUCT_STAGES),
 });

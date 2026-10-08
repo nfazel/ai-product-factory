@@ -22,7 +22,7 @@ export function buildPullRequestBody(input: {
 }) {
   const lines = [
     "## Summary",
-    input.summary || "Implementation prepared in AI Product Factory.",
+    input.summary || "Implementation prepared in AI Product Builder.",
     "",
     "## Product Outcome",
     input.outcome || "Not linked.",
@@ -58,7 +58,7 @@ export function buildPullRequestBody(input: {
     "## Human Approvals",
     ...(input.approvals.length > 0 ? input.approvals.map((item) => `- ${item}`) : ["- None recorded."]),
     "",
-    "## Factory identifiers",
+    "## Record identifiers",
     `Product ID: ${input.productId}`,
     `Story ID: ${input.storyId || "none"}`,
     `Task ID: ${input.taskId}`,

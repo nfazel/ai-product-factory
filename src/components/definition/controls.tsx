@@ -18,7 +18,7 @@ function GateButton({
   action,
   label,
   pendingLabel,
-  variant = "default",
+  variant = "outline",
 }: {
   productId: string;
   action: typeof generateDefinitionAction;
@@ -59,14 +59,14 @@ export function DefinitionControls({
         <GateButton
           productId={productId}
           action={requestDefinitionReviewAction}
-          label="Request AI Review"
+          label="Ask AI to Review"
           pendingLabel="Reviewing…"
           variant="outline"
         />
         <GateButton
           productId={productId}
           action={reviewDefinitionAction}
-          label="Review Product Definition"
+          label="Prepare for Approval"
           pendingLabel="Saving…"
           variant="secondary"
         />

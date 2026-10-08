@@ -16,11 +16,11 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: {
-    default: "AI Product Factory",
-    template: "%s · AI Product Factory",
+    default: "AI Product Builder",
+    template: "%s · AI Product Builder",
   },
   description:
-    "An AI-native software product development platform. Humans remain in control of decisions and approval gates.",
+    "From idea to outcome — AI-native product development, end to end.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

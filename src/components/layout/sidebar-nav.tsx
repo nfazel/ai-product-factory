@@ -24,10 +24,10 @@ export function BrandMark() {
       </span>
       <span>
         <span className="block text-sm font-semibold tracking-tight text-white">
-          AI Product Factory
+          AI Product Builder
         </span>
         <span className="block text-xs text-sidebar-foreground/70">
-          Product development
+          From idea to outcome
         </span>
       </span>
     </div>
@@ -64,7 +64,7 @@ export function SidebarNav({
             >
               <Icon className="size-4 shrink-0" />
               <span className="flex-1">{item.label}</span>
-              {item.href === "/approvals" && pendingApprovals > 0 ? (
+              {item.href === "/decisions" && pendingApprovals > 0 ? (
                 <span className="rounded-full bg-amber-400/20 px-1.5 py-0.5 text-[11px] font-medium text-amber-100">
                   {pendingApprovals}
                 </span>

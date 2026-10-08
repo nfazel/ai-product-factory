@@ -37,7 +37,7 @@ async function ProductsContent() {
       {products.length === 0 ? (
         <EmptyState
           title="No products yet"
-          description="Start with the problem, the people it affects, and the outcome you want. The pipeline begins in Explore."
+          description="AI Product Builder helps teams take a product idea through discovery, definition, engineering, independent verification, release and learning, while keeping material decisions under human control. Start with the problem. The pipeline begins in Explore."
           action={
             <Button asChild size="lg">
               <Link href="/products/new">New product</Link>

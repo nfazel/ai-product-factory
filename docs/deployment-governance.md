@@ -1,6 +1,6 @@
 # Deployment governance
 
-A deployment plan is a governance record. It names the environment, a strategy, the steps, pre-deployment checks, post-deployment checks, and the rollback plan. Strategies include manual, rolling, blue-green, canary, feature flag, and other. Any strategy other than manual needs a written justification. In every case a person performs the deployment. The factory does not execute the plan, edit GitHub Actions, or change branch protection.
+A deployment plan is a governance record. It names the environment, a strategy, the steps, pre-deployment checks, post-deployment checks, and the rollback plan. Strategies include manual, rolling, blue-green, canary, feature flag, and other. Any strategy other than manual needs a written justification. In every case a person performs the deployment. AI Product Builder does not execute the plan, edit GitHub Actions, or change branch protection. There is no deploy button.
 
 ## Rollback
 
@@ -12,7 +12,7 @@ Checks are pre-deployment, post-deployment, or rollback. A person records passed
 
 ## Recording what happened
 
-**Record Deployment** stores a human report: environment, started, succeeded, or failed, the deployed version, an optional deployed commit SHA, an external reference, and notes. The commit SHA is whatever the person entered. It is not copied from the merge SHA. The activity text says the factory did not deploy it.
+**Record Deployment** stores a human report: environment, started, succeeded, or failed, the deployed version, an optional deployed commit SHA, an external reference, and notes. The commit SHA is whatever the person entered. It is not copied from the merge SHA. The activity text says AI Product Builder did not deploy it.
 
 The candidate becomes **DEPLOYED** only when the latest record succeeded, every required post-deployment check passed or was waived with a rationale, and no critical post-deployment issue is open. A model narrative cannot set that status.
 

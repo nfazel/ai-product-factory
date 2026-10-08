@@ -1,6 +1,6 @@
-# Factory Intelligence
+# Intelligence
 
-Factory Intelligence answers whether delivery is getting faster, more predictable, and safer, and whether a released capability is producing its outcome. It is not an agent. It does not approve work, move a stage, change scope, or set a target.
+The product page is Intelligence. The calculation module remains Factory Intelligence in code. It answers whether delivery is getting faster, more predictable, and safer, and whether a released capability is producing its outcome. It is not an agent. It does not approve work, move a stage, change scope, or set a target. Leadership leads with waiting work, blocked work, risk, release, and outcome. AI contribution is secondary. One explanation covers insufficient history instead of a wall of empty cards.
 
 ## Where it lives
 

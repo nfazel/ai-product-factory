@@ -3,10 +3,8 @@
 import { useActionState } from "react";
 
 import {
-  PRODUCT_STAGES,
   PRODUCT_STATUSES,
   PRODUCT_STATUS_LABEL,
-  STAGE_META,
 } from "@/domain/constants";
 import { idleState } from "@/lib/action-state";
 import {
@@ -35,33 +33,14 @@ export function CreateProductForm() {
         autoFocus
       />
       <TextAreaField
-        label="Short description"
-        name="description"
-        error={state.fieldErrors?.description}
-        required
-      />
-      <TextAreaField
-        label="Product vision"
-        name="vision"
-        error={state.fieldErrors?.vision}
-        required
-      />
-      <TextAreaField
-        label="Problem statement"
+        label="What problem are you trying to solve?"
         name="problemStatement"
         error={state.fieldErrors?.problemStatement}
         required
       />
-      <TextAreaField
-        label="Target users"
-        name="targetUsers"
-        error={state.fieldErrors?.targetUsers}
-        required
-      />
       <FormMessage state={state} />
       <p className="text-xs text-muted-foreground">
-        New products start as Active in Explore. Move the stage when the work
-        is ready.
+        New products start in Explore. Discovery will shape the brief. You do not need a vision or a solution yet.
       </p>
       <SubmitButton pendingLabel="Creating product…">Create product</SubmitButton>
     </form>
@@ -79,6 +58,7 @@ export function StageControlForm({ product }: { product: Product }) {
       <input type="hidden" name="vision" value={product.vision} />
       <input type="hidden" name="problemStatement" value={product.problemStatement} />
       <input type="hidden" name="targetUsers" value={product.targetUsers} />
+      <input type="hidden" name="currentStage" value={product.currentStage} />
       <SelectField label="Status" name="status" defaultValue={product.status}>
         {PRODUCT_STATUSES.map((status) => (
           <option key={status} value={status}>
@@ -86,20 +66,8 @@ export function StageControlForm({ product }: { product: Product }) {
           </option>
         ))}
       </SelectField>
-      <SelectField
-        label="Current stage"
-        name="currentStage"
-        defaultValue={product.currentStage}
-        hint="Humans move the stage. Agents will not advance it on their own."
-      >
-        {PRODUCT_STAGES.map((stage) => (
-          <option key={stage} value={stage}>
-            {STAGE_META[stage].label}
-          </option>
-        ))}
-      </SelectField>
       <FormMessage state={state} />
-      <SubmitButton pendingLabel="Saving…">Update stage</SubmitButton>
+      <SubmitButton pendingLabel="Saving…">Save status</SubmitButton>
     </form>
   );
 }
@@ -122,14 +90,12 @@ export function EditProductForm({ product }: { product: Product }) {
         name="description"
         defaultValue={product.description}
         error={state.fieldErrors?.description}
-        required
       />
       <TextAreaField
-        label="Product vision"
+        label="Vision, if discovery has already settled it"
         name="vision"
         defaultValue={product.vision}
         error={state.fieldErrors?.vision}
-        required
       />
       <TextAreaField
         label="Problem statement"
@@ -139,11 +105,10 @@ export function EditProductForm({ product }: { product: Product }) {
         required
       />
       <TextAreaField
-        label="Target users"
+        label="Target users, if discovery has already settled them"
         name="targetUsers"
         defaultValue={product.targetUsers}
         error={state.fieldErrors?.targetUsers}
-        required
       />
       <div className="grid gap-4 sm:grid-cols-2">
         <SelectField label="Status" name="status" defaultValue={product.status}>
@@ -153,17 +118,7 @@ export function EditProductForm({ product }: { product: Product }) {
             </option>
           ))}
         </SelectField>
-        <SelectField
-          label="Current stage"
-          name="currentStage"
-          defaultValue={product.currentStage}
-        >
-          {PRODUCT_STAGES.map((stage) => (
-            <option key={stage} value={stage}>
-              {STAGE_META[stage].label}
-            </option>
-          ))}
-        </SelectField>
+        <input type="hidden" name="currentStage" value={product.currentStage} />
       </div>
       <FormMessage state={state} />
       <SubmitButton pendingLabel="Saving…">Save product</SubmitButton>

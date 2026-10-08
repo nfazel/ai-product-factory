@@ -4,19 +4,17 @@ import { notFound } from "next/navigation";
 
 import { ActivityFeed } from "@/components/activity/activity-feed";
 import { PageSkeleton } from "@/components/feedback/states";
-import { EditProductForm, StageControlForm } from "@/components/products/product-forms";
-import { RecordDecisionForm } from "@/components/work-items/work-item-forms";
-import { formatDateTime } from "@/lib/format";
+import { EvidencePanel, EvidenceSummary, NextActionPanel } from "@/components/guidance/guidance-ui";
+import { EditProductForm } from "@/components/products/product-forms";
+import { STAGE_META } from "@/domain/constants";
+import { STAGE_PROGRESS_LABEL } from "@/modules/guidance/types";
+import { getProductGuidance } from "@/modules/guidance/service";
 import { getProductOverview } from "@/modules/product/overview";
 import { markDynamic } from "@/server/dynamic";
 
 export const metadata = { title: "Overview" };
 
-export default function OverviewPage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
+export default function OverviewPage({ params }: { params: Promise<{ id: string }> }) {
   return (
     <Suspense fallback={<PageSkeleton />}>
       <Overview params={params} />
@@ -27,126 +25,75 @@ export default function OverviewPage({
 async function Overview({ params }: { params: Promise<{ id: string }> }) {
   await markDynamic();
   const { id } = await params;
-  const overview = await getProductOverview(id);
-  if (!overview) notFound();
-
-  const { product, counts, activity, decisions } = overview;
-  const summary = [
-    { label: "Epics", value: counts.epics },
-    { label: "Features", value: counts.features },
-    { label: "Stories", value: counts.stories },
-    { label: "Defects", value: counts.defects },
-    {
-      label: "Pending approvals",
-      value: counts.pendingApprovals,
-      attention: counts.pendingApprovals > 0,
-    },
-  ];
+  const [overview, guidance] = await Promise.all([getProductOverview(id), getProductGuidance(id)]);
+  if (!overview || !guidance) notFound();
+  const current = guidance.stages.find((stage) => stage.stage === guidance.stage);
 
   return (
     <div className="space-y-6">
+      {guidance.sample ? (
+        <p className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-950">
+          Sample product. Demo records stay labelled and cannot satisfy a real release or deployment gate.
+        </p>
+      ) : null}
+
       <section className="grid gap-4 lg:grid-cols-3">
         <article className="rounded-2xl border bg-card p-5 lg:col-span-2">
-          <h2 className="text-sm font-semibold">Product definition</h2>
-          <dl className="mt-4 space-y-4">
-            <Definition term="Product vision" value={product.vision} />
-            <Definition term="Problem statement" value={product.problemStatement} />
-            <Definition term="Target users" value={product.targetUsers} />
-          </dl>
+          <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">Current stage</p>
+          <h2 className="mt-1 text-2xl font-semibold">{STAGE_META[guidance.stage].label}</h2>
+          <p className="mt-2 text-sm text-muted-foreground">Status: {current?.label ?? STAGE_PROGRESS_LABEL.IN_PROGRESS}</p>
+          <p className="mt-3 text-sm leading-6">{overview.product.problemStatement}</p>
         </article>
         <article className="rounded-2xl border bg-card p-5">
-          <h2 className="text-sm font-semibold">Stage and status</h2>
-          <p className="mt-1 text-xs leading-5 text-muted-foreground">
-            Changing the stage updates the pipeline. This stays a human decision.
-          </p>
-          <div className="mt-4">
-            <StageControlForm product={product} />
-          </div>
-        </article>
-      </section>
-
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-        {summary.map((item) => (
-          <article key={item.label} className="rounded-2xl border bg-card p-4">
-            <p className="text-sm text-muted-foreground">{item.label}</p>
-            <p
-              className={
-                item.attention
-                  ? "mt-2 text-3xl font-semibold text-amber-800"
-                  : "mt-2 text-3xl font-semibold"
-              }
-            >
-              {item.value}
-            </p>
-          </article>
-        ))}
-      </section>
-
-      <section className="grid gap-6 lg:grid-cols-2">
-        <article className="rounded-2xl border bg-card p-5">
-          <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-base font-semibold">Recent activity</h2>
-            <Link
-              href={`/products/${product.id}/activity`}
-              className="text-sm text-primary hover:underline"
-            >
-              Product log
-            </Link>
-          </div>
-          <ActivityFeed items={activity} />
-        </article>
-        <article className="rounded-2xl border bg-card p-5">
-          <h2 className="text-base font-semibold">Recent decisions</h2>
-          {decisions.length === 0 ? (
-            <p className="mt-3 text-sm text-muted-foreground">
-              No decisions recorded for this product yet.
-            </p>
-          ) : (
-            <ul className="mt-4 space-y-4">
-              {decisions.map((decision) => (
-                <li key={decision.id} className="border-b pb-4 last:border-0 last:pb-0">
-                  <p className="text-sm font-medium">{decision.title}</p>
-                  <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                    {decision.decision}
-                  </p>
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    {decision.decisionMaker} · {formatDateTime(decision.createdAt)}
-                    {decision.workItemTitle ? ` · ${decision.workItemTitle}` : ""}
-                  </p>
-                </li>
-              ))}
-            </ul>
-          )}
-          <details className="mt-4 border-t pt-4">
-            <summary className="cursor-pointer text-sm font-medium">
-              Record a decision
-            </summary>
-            <div className="mt-4">
-              <RecordDecisionForm productId={product.id} />
+          <h2 className="text-sm font-semibold">Current outcome</h2>
+          {guidance.outcome ? (
+            <div className="mt-3 space-y-2 text-sm leading-6">
+              <p className="font-medium">{guidance.outcome.title}</p>
+              <p>Status: {guidance.outcome.status === "ACHIEVED" ? "Achieved" : "Not achieved"}</p>
+              <p>Success measure: {guidance.outcome.measure || "Not recorded"}</p>
+              <p>Target: {guidance.outcome.target || "Not recorded"}</p>
+              <p>Latest evidence: {guidance.outcome.latest || "None recorded"}</p>
+              <p className="text-muted-foreground">Deployed does not mean the outcome is achieved.</p>
             </div>
-          </details>
+          ) : (
+            <p className="mt-3 text-sm leading-6 text-muted-foreground">
+              No outcome yet. The outcome is why the product is being built, and it is confirmed during Define.
+            </p>
+          )}
         </article>
       </section>
 
-      <details className="rounded-2xl border bg-card p-5">
-        <summary className="cursor-pointer text-sm font-semibold">
-          Edit product definition
-        </summary>
-        <div className="mt-4 max-w-2xl">
-          <EditProductForm product={product} />
-        </div>
-      </details>
-    </div>
-  );
-}
+      <NextActionPanel guidance={guidance} />
 
-function Definition({ term, value }: { term: string; value: string }) {
-  return (
-    <div>
-      <dt className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-        {term}
-      </dt>
-      <dd className="mt-1 text-sm leading-6">{value}</dd>
+      {guidance.risk ? (
+        <section className="rounded-2xl border bg-card p-5">
+          <h2 className="text-sm font-semibold">Important risk</h2>
+          <p className="mt-2 text-sm leading-6">{guidance.risk}</p>
+        </section>
+      ) : null}
+
+      <EvidenceSummary items={guidance.evidence.items} summary={guidance.evidence.summary} ready={guidance.evidence.ready} />
+
+      <EvidencePanel title="Product record and history">
+        <div>
+          <h3 className="text-sm font-semibold">What you can explore</h3>
+          <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-muted-foreground">
+            <li>Explore holds the Product Brief.</li>
+            <li>Define holds the outcome, the First Slice, and the backlog.</li>
+            <li>Build holds design, engineering review, and code.</li>
+            <li>Prove holds the independent check and publication. Merge stays in GitHub.</li>
+            <li>Ship records a release. It does not deploy.</li>
+            <li>Learn records outcome evidence.</li>
+          </ul>
+        </div>
+        <ActivityFeed items={overview.activity} />
+        <p className="text-sm">
+          <Link className="text-primary hover:underline" href={`/products/${id}/activity`}>
+            Stage history
+          </Link>
+        </p>
+        <EditProductForm product={overview.product} />
+      </EvidencePanel>
     </div>
   );
 }

@@ -475,7 +475,7 @@ export async function refreshPullRequest(productId: string, pullRequestId: strin
       await recordActivity({
         productId,
         type: "PULL_REQUEST_MERGED",
-        description: `GitHub reports pull request #${record.number} merged. The factory did not merge it.`,
+        description: `GitHub reports pull request #${record.number} merged. AI Product Builder did not merge it.`,
       });
     }
   }

@@ -32,7 +32,7 @@ function ProductForm({
   action,
   label,
   pendingLabel,
-  variant = "default",
+  variant = "outline",
 }: {
   productId: string;
   action: typeof generateArchitectureAction;
@@ -60,7 +60,7 @@ export function BuildControls({ productId }: { productId: string }) {
         <ProductForm
           productId={productId}
           action={generateArchitectureAction}
-          label="Generate architecture"
+          label="Generate design"
           pendingLabel="Generating architecture…"
         />
         <ProductForm
@@ -73,7 +73,7 @@ export function BuildControls({ productId }: { productId: string }) {
         <ProductForm
           productId={productId}
           action={generatePlanAction}
-          label="Generate implementation plan"
+          label="Generate delivery plan"
           pendingLabel="Generating plan…"
           variant="secondary"
         />
@@ -100,27 +100,27 @@ export function BuildControls({ productId }: { productId: string }) {
         <ProductForm
           productId={productId}
           action={markArchitectureReadyAction}
-          label="Mark architecture ready"
+          label="Prepare design for approval"
           pendingLabel="Saving…"
           variant="outline"
         />
         <ProductForm
           productId={productId}
           action={approveArchitectureAction}
-          label="Approve architecture"
+          label="Approve Design"
           pendingLabel="Approving…"
         />
         <ProductForm
           productId={productId}
           action={markPlanReadyAction}
-          label="Mark plan ready"
+          label="Prepare delivery plan"
           pendingLabel="Saving…"
           variant="outline"
         />
         <ProductForm
           productId={productId}
           action={approvePlanAction}
-          label="Approve implementation plan"
+          label="Approve Delivery Plan"
           pendingLabel="Approving…"
         />
       </div>

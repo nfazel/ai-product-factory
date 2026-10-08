@@ -120,9 +120,9 @@ function ProposalButton({
 export function GovernanceApprovalControls({ productId }: { productId: string }) {
   return (
     <div className="flex flex-wrap gap-2">
-      <ProductForm productId={productId} action={markGovernanceReadyAction} label="Mark ready for review" pendingLabel="Saving" />
-      <ProductForm productId={productId} action={approveGovernanceAction} label="Approve governance review" pendingLabel="Approving" />
-      <ProductForm productId={productId} action={approveCodingPolicyAction} label="Approve coding policy" pendingLabel="Approving" />
+      <ProductForm productId={productId} action={markGovernanceReadyAction} label="Prepare engineering review for approval" pendingLabel="Saving" />
+      <ProductForm productId={productId} action={approveGovernanceAction} label="Approve Engineering Review" pendingLabel="Approving" />
+      <ProductForm productId={productId} action={approveCodingPolicyAction} label="Approve Coding Rules" pendingLabel="Approving" />
     </div>
   );
 }
@@ -322,7 +322,7 @@ export function CodingPolicyEditor({
         <input type="checkbox" name="requireHumanReview" defaultChecked={requireHumanReview} />
         Human review required
       </label>
-      <SubmitButton pendingLabel="Saving">Save coding policy</SubmitButton>
+      <SubmitButton pendingLabel="Saving">Save coding rules</SubmitButton>
       <FormMessage state={state} />
     </form>
   );

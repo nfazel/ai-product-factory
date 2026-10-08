@@ -213,17 +213,17 @@ async function WorkItem({ params }: { params: Promise<{ id: string }> }) {
             )}
             <p className="mt-4 text-sm">
               <Link
-                href={`/approvals?productId=${item.productId}&workItemId=${item.id}`}
+                href="/decisions"
                 className="text-primary hover:underline"
               >
-                Open in the approval centre
+                Open decisions
               </Link>
             </p>
           </Section>
 
           <Section
             title="Agent activity"
-            description="AI agents will be introduced progressively as the Product Factory capabilities are enabled."
+            description="Agent runs recorded for this work item."
           >
             {agentRuns.length === 0 ? (
               <p className="text-sm text-muted-foreground">

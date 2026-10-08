@@ -76,8 +76,13 @@ export function CodingPanel({
                 ))}
               </ul>
             ) : null}
-            <Trace trace={task.trace} />
-            {task.preview ? <ContractPreview preview={task.preview} story={task.trace.story} /> : null}
+            <details className="mt-3">
+              <summary className="cursor-pointer text-sm font-medium">Evidence</summary>
+              <div className="mt-3 space-y-3">
+                <Trace trace={task.trace} />
+                {task.preview ? <ContractPreview preview={task.preview} story={task.trace.story} /> : null}
+              </div>
+            </details>
             <div className="mt-4 flex flex-wrap gap-3">
               {task.status === "PROPOSED" || task.status === "BLOCKED" ? (
                 <ApproveTaskButton productId={productId} taskId={task.id} />
@@ -156,7 +161,7 @@ function WorkspaceDetail({
     <div className="mt-4 space-y-4 border-t pt-4">
       {workspace.stale ? (
         <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-950">
-          EXECUTION CONTRACT STALE. {workspace.staleReason} Review the contract, regenerate it, and resume, or abandon the workspace.
+          The approved coding instructions are out of date. {workspace.staleReason} Review them, then resume or abandon this workspace.
         </p>
       ) : null}
       <div className="grid gap-3 text-sm md:grid-cols-2">

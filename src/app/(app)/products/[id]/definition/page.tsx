@@ -19,10 +19,12 @@ import {
   SLICE_STATUS_LABEL,
   type SignalLevel,
 } from "@/domain/constants";
+import { NextActionPanel } from "@/components/guidance/guidance-ui";
+import { getProductGuidance } from "@/modules/guidance/service";
 import { getDefinitionWorkspace } from "@/modules/requirements/service";
 import { markDynamic } from "@/server/dynamic";
 
-export const metadata = { title: "Definition" };
+export const metadata = { title: "Define" };
 export const maxDuration = 60;
 
 const LEVEL_TONE: Record<SignalLevel, string> = {
@@ -46,8 +48,8 @@ export default function DefinitionPage({
 async function Definition({ params }: { params: Promise<{ id: string }> }) {
   await markDynamic();
   const { id } = await params;
-  const workspace = await getDefinitionWorkspace(id);
-  if (!workspace || !workspace.definition) notFound();
+  const [workspace, guidance] = await Promise.all([getDefinitionWorkspace(id), getProductGuidance(id)]);
+  if (!workspace || !workspace.definition || !guidance) notFound();
 
   const approved = workspace.definition.status === "APPROVED";
   const showReview =
@@ -111,6 +113,7 @@ async function Definition({ params }: { params: Promise<{ id: string }> }) {
           />
         </div>
       </header>
+      {guidance.stage === "DEFINE" || guidance.action?.stage === "DEFINE" ? <NextActionPanel guidance={guidance} /> : null}
 
       <section className="rounded-2xl border bg-card p-5">
         <h2 className="text-lg font-semibold">Requirements readiness</h2>
@@ -144,7 +147,7 @@ async function Definition({ params }: { params: Promise<{ id: string }> }) {
           <p className="text-sm text-muted-foreground">Why are we building this?</p>
         </div>
         {workspace.outcomes.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No outcomes yet.</p>
+          <p className="text-sm leading-6 text-muted-foreground">No outcome yet. An outcome says why this product is worth building. Draft the Product Definition to propose one.</p>
         ) : (
           <ul className="grid gap-3 lg:grid-cols-2">
             {workspace.outcomes.map((outcome) => (
@@ -207,7 +210,7 @@ async function Definition({ params }: { params: Promise<{ id: string }> }) {
           <p className="text-sm text-muted-foreground">What should we prove first?</p>
         </div>
         {workspace.slices.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No first slice yet.</p>
+          <p className="text-sm leading-6 text-muted-foreground">No First Slice yet. The First Slice is the smallest valuable part of the product you are committing to build first. Next, review the Product Definition.</p>
         ) : (
           workspace.slices.map((slice) => (
             <article key={slice.id} className="rounded-2xl border bg-card p-4">
@@ -217,7 +220,7 @@ async function Definition({ params }: { params: Promise<{ id: string }> }) {
               <p className="mt-2 text-sm leading-6 text-muted-foreground">{slice.rationale}</p>
               {slice.status === "PROPOSED" ? (
                 <div className="mt-3">
-                  <EntityAction productId={workspace.product.id} entityId={slice.id} kind="slice" label="Approve slice" />
+                  <EntityAction productId={workspace.product.id} entityId={slice.id} kind="slice" label="Confirm First Slice" />
                 </div>
               ) : null}
             </article>
@@ -227,8 +230,14 @@ async function Definition({ params }: { params: Promise<{ id: string }> }) {
 
       <section className="space-y-3">
         <div>
-          <h2 className="text-lg font-semibold">Backlog</h2>
-          <p className="text-sm text-muted-foreground">Epics, features, and stories. Tasks stay on the work item.</p>
+          <h2 className="text-lg font-semibold">Backlog for this product</h2>
+          <p className="text-sm text-muted-foreground">
+            Epics, features, and stories live here during Define.{" "}
+            <Link href={`/products/${workspace.product.id}/backlog`} className="text-primary hover:underline">
+              Open the full backlog
+            </Link>
+            .
+          </p>
         </div>
         <ul className="space-y-4">
           {epics.map((epic) => (

@@ -52,8 +52,17 @@ export function IntelligenceView({
   mode: "leadership" | "engineering";
 }) {
   const byKey = new Map(view.metrics.map((metric) => [metric.key, metric]));
+  const sections = mode === "leadership"
+    ? ["GOVERNANCE", "RELEASE", "OUTCOME", "FLOW", "QUALITY", "DELIVERY", "AI"].map((category) => SECTIONS.find((section) => section.category === category)).filter((section) => section != null)
+    : SECTIONS;
+  const deliveryHistory = view.metrics.some((metric) => metric.quality !== "INSUFFICIENT" && (metric.sampleSize ?? 0) > 0 && metric.key !== "agent_runs");
   return (
     <div className="space-y-8">
+      {mode === "leadership" && !deliveryHistory ? (
+        <p className="rounded-2xl border bg-card p-4 text-sm leading-6">
+          There is not enough delivery history to summarise speed, predictability, or release performance. The outcome and the current risk are below. Sample records are not treated as production history.
+        </p>
+      ) : null}
       <section className="space-y-3">
         <h2 className="text-base font-semibold">Where time goes</h2>
         <FlowTimeline segments={view.segments} />
@@ -81,24 +90,27 @@ export function IntelligenceView({
         <p className="text-sm text-muted-foreground">No bottleneck rule fired. That is not a claim that the product is fast.</p>
       )}
 
-      {SECTIONS.map((section) => (
+      {sections.map((section) => {
+        const metrics = pick(byKey, section.keys, mode);
+        if (mode === "leadership" && metrics.length === 0 && section.category !== "OUTCOME") return null;
+        return (
         <section key={section.category} className="space-y-4" data-section={section.category}>
-          <h2 className="text-base font-semibold">{section.title}</h2>
-          <MetricGrid metrics={pick(byKey, section.keys, mode)} />
-          {section.category === "FLOW" ? (
+          <h2 className="text-base font-semibold">{section.title === "AI contribution" && mode === "leadership" ? "AI contribution" : section.title}</h2>
+          <MetricGrid metrics={metrics} />
+          {section.category === "FLOW" && (mode === "engineering" || deliveryHistory) ? (
             <div className="rounded-2xl border bg-card p-5">
               <h3 className="mb-3 text-sm font-medium">Wait breakdown</h3>
               <BarList points={view.charts.waitBreakdown} empty="INSUFFICIENT DATA. No closed wait has both a start and a finish." />
             </div>
           ) : null}
-          {section.category === "QUALITY" ? (
+          {section.category === "QUALITY" && (mode === "engineering" || deliveryHistory) ? (
             <div className="rounded-2xl border bg-card p-5">
               <h3 className="mb-3 text-sm font-medium">Defects by where they were found</h3>
               <BarList points={view.charts.defectsByStage} empty="INSUFFICIENT DATA. Defect counts are not both available." />
             </div>
           ) : null}
           {section.category === "AI" && mode === "engineering" ? <AgentTable view={view} /> : null}
-          {section.category === "AI" ? (
+          {section.category === "AI" && mode === "engineering" ? (
             <div className="rounded-2xl border bg-card p-5">
               <h3 className="mb-3 text-sm font-medium">Agent runs by result</h3>
               <BarList points={view.charts.agentRunsByResult} empty="INSUFFICIENT DATA. No agent run was recorded in this period." />
@@ -113,7 +125,8 @@ export function IntelligenceView({
           {section.category === "OUTCOME" ? <OutcomeList view={view} /> : null}
           {mode === "engineering" ? <Remainder metrics={view.metrics} category={section.category} shown={section.keys} /> : null}
         </section>
-      ))}
+        );
+      })}
 
       {mode === "engineering" ? (
         <section className="space-y-3">
@@ -155,6 +168,7 @@ function pick(byKey: Map<string, MetricValue>, keys: string[], mode: "leadership
     .filter((metric): metric is MetricValue => Boolean(metric))
     .filter((metric) => {
       if (mode === "engineering") return true;
+      if (metric.quality === "INSUFFICIENT") return false;
       const definition = getMetricDefinition(metric.key);
       return definition?.audience !== "engineering";
     });

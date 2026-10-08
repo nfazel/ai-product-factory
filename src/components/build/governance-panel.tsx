@@ -64,22 +64,22 @@ export function BuildReadiness({ coding }: { coding: CodingReadiness }) {
       <h2 className="text-base font-semibold">Build readiness</h2>
       <dl className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <Check label="Architecture" value={coding.architectureApproved ? "✓ Approved" : "○ Not approved"} />
-        <Check label="Implementation plan" value={coding.planApproved ? "✓ Approved" : "○ Not approved"} />
+        <Check label="Delivery plan" value={coding.planApproved ? "✓ Approved" : "○ Not approved"} />
         <Check
-          label="Engineering governance"
+          label="Engineering review"
           value={
             coding.governanceReviewRequired
-              ? "● Review required"
+              ? "● Needs attention"
               : coding.governanceApproved
                 ? "✓ Approved"
                 : "○ Not approved"
           }
         />
         <Check
-          label="Coding policy"
+          label="Coding rules"
           value={
             coding.policyReapprovalRequired
-              ? "● Reapproval required"
+              ? "● Needs approval again"
               : coding.policyApproved
                 ? "✓ Approved"
                 : "○ Not approved"
@@ -89,13 +89,13 @@ export function BuildReadiness({ coding }: { coding: CodingReadiness }) {
       </dl>
       {coding.governanceReviewRequired ? (
         <p className="mt-3 rounded-xl bg-amber-50 p-3 text-sm leading-6 text-amber-950">
-          GOVERNANCE REVIEW REQUIRED. {coding.governanceReviewReason}
+          Engineering review needs attention. {coding.governanceReviewReason}
           {coding.governanceReviewFlaggedAt ? ` Flagged ${coding.governanceReviewFlaggedAt}.` : ""}
         </p>
       ) : null}
       {coding.policyReapprovalRequired ? (
         <p className="mt-3 rounded-xl bg-amber-50 p-3 text-sm leading-6 text-amber-950">
-          CODING POLICY REAPPROVAL REQUIRED. {coding.policyReapprovalReason}
+          Coding rules need approval again. {coding.policyReapprovalReason}
           {coding.policyReapprovalFlaggedAt ? ` Flagged ${coding.policyReapprovalFlaggedAt}.` : ""}
         </p>
       ) : null}
@@ -107,7 +107,7 @@ export function BuildReadiness({ coding }: { coding: CodingReadiness }) {
         </ul>
       ) : (
         <p className="mt-3 text-sm leading-6 text-emerald-800">
-          Coding readiness is clear. The Coding Agent is not available yet.
+          Coding readiness is clear. A person still approves the task and the change.
         </p>
       )}
     </section>
@@ -135,9 +135,9 @@ export function GovernancePanel({
   return (
     <section className="space-y-4 rounded-2xl border bg-card p-4 sm:p-5">
       <div>
-        <h2 className="text-base font-semibold">Governance</h2>
+        <h2 id="review" className="scroll-mt-20 text-base font-semibold">Engineering review</h2>
         <p className="mt-2 text-sm leading-6 text-muted-foreground">
-          Independent review of the approved definition, architecture, and implementation plan.
+          Independent review of the approved definition, design, and delivery plan.
           This is not a penetration test. Dependency comments are an AI review until a scanner is connected.
           The agent cannot approve its own review.
         </p>
@@ -164,7 +164,7 @@ export function GovernancePanel({
       ) : null}
       {review?.seededDemo ? (
         <p className="text-sm leading-6 text-amber-900">
-          Demo data. This governance review, threat model, coding-risk assessments, and coding policy were prepared for the sample product. They were not produced by an agent run.
+          Demo data. This engineering review, threat model, coding-risk assessments, and coding rules were prepared for the sample product. They were not produced by an agent run.
         </p>
       ) : null}
       <div>
@@ -266,7 +266,7 @@ export function GovernancePanel({
         </ul>
       </div>
       <div>
-        <h3 className="text-sm font-semibold">Coding policy</h3>
+        <h3 className="text-sm font-semibold">Coding rules</h3>
         {policy ? (
           <>
             <ul className="mt-2 space-y-1 text-sm leading-6">
@@ -291,7 +291,7 @@ export function GovernancePanel({
             />
           </>
         ) : (
-          <p className="mt-1 text-sm text-muted-foreground">No coding policy has been committed.</p>
+          <p className="mt-1 text-sm text-muted-foreground">No coding rules have been committed.</p>
         )}
       </div>
       <div>

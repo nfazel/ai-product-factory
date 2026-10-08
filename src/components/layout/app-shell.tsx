@@ -3,8 +3,7 @@ import { Suspense } from "react";
 import { BrandMark, SidebarNav } from "@/components/layout/sidebar-nav";
 import { MobileNav } from "@/components/layout/mobile-nav";
 import { Skeleton } from "@/components/ui/skeleton";
-import { getCurrentActor } from "@/modules/identity/actor";
-import { countPendingApprovals } from "@/modules/approval/service";
+import { listPendingDecisions } from "@/modules/guidance/service";
 import { markDynamic } from "@/server/dynamic";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -17,8 +16,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
 async function Shell({ children }: { children: React.ReactNode }) {
   await markDynamic();
-  const actor = getCurrentActor();
-  const pendingApprovals = await countPendingApprovals();
+  const pendingApprovals = (await listPendingDecisions()).length;
 
   return (
     <div className="flex min-h-screen bg-background">
@@ -31,11 +29,11 @@ async function Shell({ children }: { children: React.ReactNode }) {
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b bg-background/90 px-4 backdrop-blur lg:px-8">
           <MobileNav pendingApprovals={pendingApprovals} />
-          <p className="text-sm font-medium lg:hidden">AI Product Factory</p>
+          <p className="text-sm font-medium lg:hidden">AI Product Builder</p>
           <div className="ml-auto text-right">
-            <p className="text-sm font-medium leading-tight">{actor.name}</p>
+            <p className="text-sm font-medium leading-tight">Human approval required</p>
             <p className="text-[11px] text-muted-foreground">
-              Authentication not configured
+              Signed-in identity is not configured
             </p>
           </div>
         </header>

@@ -3,9 +3,11 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { PageSkeleton } from "@/components/feedback/states";
-import { ProductPipeline } from "@/components/pipeline/product-pipeline";
+import { ProgressStrip } from "@/components/guidance/guidance-ui";
 import { ProductTabs } from "@/components/products/product-tabs";
 import { ProductStatusBadge, StageBadge } from "@/components/status/badges";
+import { STAGE_META } from "@/domain/constants";
+import { getProductGuidance } from "@/modules/guidance/service";
 import { getProduct } from "@/modules/product/service";
 import { markDynamic } from "@/server/dynamic";
 
@@ -32,8 +34,8 @@ async function ProductFrame({
 }) {
   await markDynamic();
   const { id } = await params;
-  const product = await getProduct(id);
-  if (!product) notFound();
+  const [product, guidance] = await Promise.all([getProduct(id), getProductGuidance(id)]);
+  if (!product || !guidance) notFound();
 
   return (
     <div className="space-y-6">
@@ -53,7 +55,10 @@ async function ProductFrame({
           <StageBadge stage={product.currentStage} />
         </div>
       </div>
-      <ProductPipeline currentStage={product.currentStage} />
+      <p className="text-sm text-muted-foreground">
+        Current stage: {STAGE_META[product.currentStage].label}. A stage is complete only after its gate is met.
+      </p>
+      <ProgressStrip stages={guidance.stages} />
       <ProductTabs productId={product.id} />
       {children}
     </div>

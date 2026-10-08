@@ -29,6 +29,7 @@ export function refreshWorkspace(productId?: string, workItemId?: string) {
   revalidatePath("/products");
   revalidatePath("/work-items");
   revalidatePath("/approvals");
+  revalidatePath("/decisions");
   revalidatePath("/activity");
   revalidatePath("/agents");
   revalidatePath("/settings");

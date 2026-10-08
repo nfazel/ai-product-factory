@@ -41,8 +41,7 @@ async function Backlog({ params }: { params: Promise<{ id: string }> }) {
         <div>
           <h2 className="text-lg font-semibold">Backlog</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Grouped from epic to feature to story. Tasks and defects stay with
-            their parent.
+            This is part of Define. Stories are grouped under features and epics. Tasks and defects stay with their parent.
           </p>
         </div>
         <CreateWorkItemDialog
@@ -61,7 +60,7 @@ async function Backlog({ params }: { params: Promise<{ id: string }> }) {
       {items.length === 0 ? (
         <EmptyState
           title="The backlog is empty"
-          description="Add an epic first, then the features and stories that belong under it."
+          description="The backlog is the work you are committing to after the Product Definition. Add an epic, then the features and stories under it, or return to Define to draft the definition first."
         />
       ) : (
         <BacklogTree nodes={tree} />

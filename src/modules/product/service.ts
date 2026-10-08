@@ -5,6 +5,7 @@ import {
   STAGE_META,
 } from "@/domain/constants";
 import { recordActivity } from "@/modules/activity/service";
+import { findCurrentBrief } from "@/modules/discovery/repository";
 import { stageMoveBlockers } from "@/modules/release/service";
 import { buildProgressionBlockers } from "@/modules/requirements/gates";
 import { DomainError } from "@/modules/shared/errors";
@@ -64,11 +65,22 @@ export async function updateProduct(input: UpdateProductInput) {
     changes.push(`status to ${PRODUCT_STATUS_LABEL[input.status]}`);
   }
   if (existing.currentStage !== input.currentStage) {
+    if (input.currentStage === "DEFINE") {
+      const brief = await findCurrentBrief(existing.id);
+      if (existing.currentStage !== "EXPLORE" || brief?.status !== "APPROVED") {
+        throw new DomainError("Approve the product brief before moving to Define.");
+      }
+    }
     if (input.currentStage === "BUILD") {
       const gate = await buildProgressionBlockers(existing.id);
       if (gate.reasons.length > 0) {
         throw new DomainError(gate.reasons.join(" "));
       }
+    }
+    if (input.currentStage === "PROVE") {
+      const { proveAdvanceBlockers } = await import("@/modules/guidance/advance");
+      const reasons = await proveAdvanceBlockers(existing.id);
+      if (reasons.length > 0) throw new DomainError(reasons.join(" "));
     }
     if (input.currentStage === "SHIP" || input.currentStage === "LEARN") {
       const reasons = await stageMoveBlockers(existing.id, input.currentStage);

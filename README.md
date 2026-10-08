@@ -1,12 +1,14 @@
-# AI Product Factory
+# AI Product Builder
 
-AI Product Factory is the foundation of an AI-native software product development platform. It takes a product from an initial idea through a human-controlled pipeline:
+From idea to outcome — AI-native product development, end to end.
+
+AI Product Builder helps teams take a product idea through discovery, definition, engineering, independent verification, release and learning, while keeping material decisions under human control.
 
 **Explore → Define → Build → Prove → Ship → Learn**
 
-This repository is the product factory with six agents enabled. Product Discovery turns an incomplete idea into a Product Brief during Explore. The Requirements Agent turns an approved brief into an outcome-driven product definition during Define. The Architecture Agent, inside Build, turns an approved definition and an approved first slice into a solution architecture and an implementation plan. The Security & Engineering Governance Agent, also inside Build, independently reviews that approved architecture and plan before coding. The Coding Agent, still inside Build, executes one approved implementation task in an isolated Git worktree. The Testing & Verification Agent independently checks that completed work against the approved acceptance criteria. Task-level verification can start during Build. Prove considers the approved product slice as an integrated release candidate. Ship is where a person approves that candidate and records a deployment the person performed. Learn is where a person records what the release did to the product outcome. The review agent is not implemented. GitHub publication is a human-triggered integration. Automatic merge and autonomous deployment are not implemented.
+Product Discovery turns an incomplete idea into a Product Brief during Explore. The Requirements Agent turns an approved brief into a Product Definition during Define. Inside Build, the Architecture Agent proposes the design and the delivery plan, the engineering review checks that proposal, and the Coding Agent executes one approved task in an isolated Git worktree. The Testing & Verification Agent checks completed work against the approved acceptance criteria. Task checks can start during Build. Prove treats the First Slice as an integrated candidate and can publish a branch and open a pull request. A person merges that pull request in GitHub. Ship is where a person approves the release and records a deployment they performed. Learn is where a person records outcome evidence. The product does not deploy, merge, or mark an outcome achieved.
 
-Humans remain in control of stage changes, decisions, and approval gates. No agent can approve its own work or move the product stage.
+A person moves the stage. No agent can approve its own work. The next action on each product is chosen from those gates, not by a model. See [docs/product-experience.md](docs/product-experience.md).
 
 ## Technology stack
 
@@ -16,11 +18,11 @@ Humans remain in control of stage changes, decisions, and approval gates. No age
 - Zod for server-side validation
 - Modular monolith: UI, domain services, and data access are separate
 
-Authentication is structured so it can be added later. The app runs without a login. The current actor is **Local user**.
+The app runs without a login. Signed-in identity is not configured, so the interface asks for a product, engineering, or release decision instead of naming a person. `getCurrentActor()` remains the internal placeholder until authentication is added.
 
 ## Architecture
 
-Each domain module exposes a service. Repositories are the only code that talks to Prisma. Pages and API routes call services. Future agents should call those same services, then wait for a person at an approval gate.
+Each domain module exposes a service. Repositories are the only code that talks to Prisma. Pages and API routes call services. Agents call those same services, then wait for a person at an approval gate.
 
 See [docs/architecture.md](docs/architecture.md) for the module boundaries, [docs/product-discovery-agent.md](docs/product-discovery-agent.md) for discovery, and [docs/requirements-agent.md](docs/requirements-agent.md) for product definition. [docs/traceability.md](docs/traceability.md) describes how a story links back to an outcome.
 
@@ -46,7 +48,8 @@ docs/pull-request-lifecycle.md   Pull request readiness and human merge
 docs/release-governance.md       Release candidate, evidence, risk, and approval
 docs/deployment-governance.md    Human deployment records and rollback
 docs/learn-loop.md               Outcome observation and the next decision
-docs/factory-intelligence.md    Flow metrics, portfolio dashboard, and Factory Insights
+docs/product-experience.md  Navigation, next action, blockers, and evidence
+docs/factory-intelligence.md    Flow metrics, portfolio view, and Insights
 docs/metrics-catalogue.md       Definition, formula, source, and data-quality rule for every metric
 ```
 
@@ -178,7 +181,7 @@ Learn shows the product outcome, observations a person enters, and a learning de
 
 ## Intelligence
 
-The dashboard is the portfolio view. Open a product and choose Intelligence for that product's flow, quality, AI contribution, governance, release, outcomes, and timeline.
+Home leads with decisions waiting, blocked products, release, and outcomes. Open a product to land on Overview. Intelligence is a separate product tab for flow, quality, AI contribution, risk, release, and outcomes.
 
 The time window is the last 7 days, last 30 days, last 90 days, or all time. Leadership is the default reading. Engineering shows task samples, agent runs, revisions, and the rest of the catalogue. Export CSV or JSON from either page. **Explain these metrics** asks the model to describe the numbers already on the page. It cannot change them.
 
@@ -200,8 +203,8 @@ git -c user.email=demo@localhost -c user.name="Demo" commit -m "Initial claims h
 
 Add `PRODUCT_REPOSITORY_ROOT` to `.env`, then restart the server. Approve the upstream Build gates, approve one implementation task, and choose **Start Coding Task**. The seed does not invent Git evidence.
 
-## Later agents
+## What stays human
 
-The review agent is not registered. GitHub publication and pull requests are a human-triggered integration: the factory can publish an approved branch and open a pull request, and a person merges it on GitHub. Release approval and deployment recording are also human actions. Automatic merge, autonomous deployment, automatic rollback, browser automation, vulnerability scanning, and performance infrastructure are not implemented. Authentication will replace `getCurrentActor()` and the pass-through `src/proxy.ts` without rewriting the domain model.
+Planning and Review agents are not part of the delivery path. GitHub publication is a human-triggered integration: AI Product Builder can publish an approved branch and open a pull request, and a person merges it in GitHub. Release approval and deployment recording are also human actions. There is no automatic merge, no deployment from this application, no automatic stage movement, and no automatic outcome achievement. Authentication can later replace `getCurrentActor()` and the pass-through `src/proxy.ts` without rewriting the domain model.
 
 See [docs/github-integration.md](docs/github-integration.md) and [docs/pull-request-lifecycle.md](docs/pull-request-lifecycle.md).

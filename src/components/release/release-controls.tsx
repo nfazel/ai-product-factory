@@ -211,7 +211,7 @@ export function DeploymentForm({ productId, candidateId, version }: { productId:
         </select>
       </label>
       <TextField label="Deployed version" name="deployedVersion" defaultValue={version} />
-      <TextField label="Deployed commit SHA" name="deployedCommitSha" hint="Leave blank if you record another reference. The factory does not infer it." />
+      <TextField label="Deployed commit SHA" name="deployedCommitSha" hint="Leave blank if you record another reference. AI Product Builder does not infer it." />
       <TextField label="External reference" name="externalReference" />
       <TextAreaField label="Notes" name="notes" />
       <SubmitButton pendingLabel="Recording">Record Deployment</SubmitButton>
@@ -346,7 +346,7 @@ export function ObservationForm({ productId, outcomeId }: { productId: string; o
       <TextField label="Unit" name="unit" />
       <TextField label="Source" name="source" defaultValue="HUMAN" />
       <TextAreaField label="Notes" name="notes" />
-      <SubmitButton pendingLabel="Saving">Record observation</SubmitButton>
+      <SubmitButton pendingLabel="Saving">Record Outcome Evidence</SubmitButton>
       <FormMessage state={state} />
     </form>
   );

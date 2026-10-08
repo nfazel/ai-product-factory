@@ -43,7 +43,7 @@ export function ShipPanel({ productId, view }: { productId: string; view: View }
         {candidate?.approval ? (
           <p>
             Release approval: {candidate.approval.status}
-            {candidate.approval.stale ? ` · STALE. ${candidate.approval.staleReason}` : ""} by {candidate.approval.approvedBy || "a person"} {candidate.approval.resolvedAt}
+            {candidate.approval.stale ? ` · Needs review again. ${candidate.approval.staleReason}` : ""} by a person {candidate.approval.resolvedAt}
           </p>
         ) : (
           <p>Release approval: none</p>
@@ -60,7 +60,7 @@ export function ShipPanel({ productId, view }: { productId: string; view: View }
         ) : (
           <CreateReleaseForm productId={productId} suggestedVersion={view.suggestedVersion} />
         )}
-        <p className="text-muted-foreground">Stage: {view.stage}. A person moves the stage. The factory does not.</p>
+        <p className="text-muted-foreground">Stage: {view.stage}. A person moves the stage. AI Product Builder does not.</p>
         <p className="text-muted-foreground">{view.readyToLearn.label}. {view.readyToLearn.reasons.join(" ")}</p>
       </Section>
 
@@ -184,7 +184,7 @@ export function ShipPanel({ productId, view }: { productId: string; view: View }
                 {realCandidate && candidate.plan.status !== "APPROVED" ? <ApprovePlanButton productId={productId} candidateId={candidate.id} /> : null}
               </>
             ) : (
-              <p className="text-muted-foreground">A deployment plan is a governance record. The factory does not execute it.</p>
+              <p className="text-muted-foreground">A deployment plan is a record of intent. AI Product Builder does not execute it.</p>
             )}
             {realCandidate ? <DeploymentPlanForm productId={productId} candidateId={candidate.id} /> : null}
           </Section>
@@ -212,7 +212,7 @@ export function ShipPanel({ productId, view }: { productId: string; view: View }
           </Section>
 
           <Section kicker="DEPLOYMENT RECORD" title={candidate.deployments[0]?.status ?? "Not deployed"}>
-            {candidate.deployments.length === 0 ? <p>Not deployed. A person deploys outside the factory and records what happened.</p> : null}
+            {candidate.deployments.length === 0 ? <p>Not deployed. A person deploys outside AI Product Builder and records what happened.</p> : null}
             <ul className="space-y-2">
               {candidate.deployments.map((record) => (
                 <li key={record.id} className="rounded-xl border p-3">

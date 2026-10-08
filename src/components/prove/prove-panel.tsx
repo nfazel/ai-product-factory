@@ -97,7 +97,7 @@ function SessionCard({
         <div className="text-right text-xs text-muted-foreground">
           <p>{session.status}</p>
           <p>Commit {session.commitSha ? session.commitSha.slice(0, 12) : "none"}</p>
-          {session.stale ? <p>RE-VERIFICATION REQUIRED</p> : null}
+          {session.stale ? <p>Verification needs to be repeated</p> : null}
           <p>Approval {session.approvals.some((item) => !item.stale) ? "Approved" : "Not approved"}</p>
         </div>
       </div>

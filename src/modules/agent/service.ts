@@ -43,7 +43,7 @@ export class AgentNotConfiguredError extends DomainError {
                   ? codingConfigurationGap() === "repository"
                     ? "The Testing & Verification Agent is not configured. Set PRODUCT_REPOSITORY_ROOT to a Git repository that is not this application. No verification was started."
                     : "The Testing & Verification Agent is not configured. Add OPENAI_API_KEY on the server. No verification was started."
-                : `${agentType} is not configured. AI agents will be introduced progressively as the Product Factory capabilities are enabled.`,
+                : `${agentType} is not configured. No response was generated.`,
       "INVALID",
     );
     this.name = "AgentNotConfiguredError";

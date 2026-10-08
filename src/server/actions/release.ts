@@ -119,7 +119,7 @@ export async function savePlanAction(_prev: ActionState, formData: FormData): Pr
       ...parsed.data,
       rollbackUnavailable: values.rollbackUnavailable === "on",
     });
-    return done(parsed.data.productId, "Saved the deployment plan. The factory will not execute it.");
+    return done(parsed.data.productId, "Saved the deployment plan. AI Product Builder will not execute it.");
   } catch (error) {
     return actionFailure(error);
   }
@@ -188,7 +188,7 @@ export async function deploymentAction(_prev: ActionState, formData: FormData): 
   if (!parsed.success) return invalidState(parsed.error.issues);
   try {
     await recordDeployment(parsed.data.productId, parsed.data.candidateId, parsed.data);
-    return done(parsed.data.productId, "Recorded the deployment. The factory did not deploy it.");
+    return done(parsed.data.productId, "Recorded the deployment. AI Product Builder did not deploy it.");
   } catch (error) {
     return actionFailure(error);
   }

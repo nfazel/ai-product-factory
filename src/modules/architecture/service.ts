@@ -323,7 +323,7 @@ export async function approveImplementationPlan(
   await recordActivity({
     productId,
     type: "PLAN_APPROVED",
-    description: "Implementation plan approved by a person. Coding has not started.",
+    description: "Delivery plan approved by a person. Coding has not started.",
     actor: actorName,
   });
   return updated;

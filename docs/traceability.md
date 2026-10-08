@@ -1,6 +1,6 @@
 # Traceability
 
-A story should be explainable without reading a paragraph and guessing. AI Product Factory stores the chain as foreign keys.
+A story should be explainable without reading a paragraph and guessing. AI Product Builder stores the chain as foreign keys. The default view shows Outcome → First Slice → Story → Task. The full technical chain stays available on demand.
 
 ```
 Product Outcome

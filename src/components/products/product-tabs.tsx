@@ -3,21 +3,8 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
+import { productTabs } from "@/components/products/product-nav";
 import { cn } from "cn";
-
-const TABS = [
-  { slug: "", label: "Overview" },
-  { slug: "/discovery", label: "Discovery" },
-  { slug: "/definition", label: "Definition" },
-  { slug: "/backlog", label: "Backlog" },
-  { slug: "/architecture", label: "Architecture" },
-  { slug: "/build", label: "Build" },
-  { slug: "/testing", label: "Prove" },
-  { slug: "/releases", label: "Ship" },
-  { slug: "/metrics", label: "Learn" },
-  { slug: "/intelligence", label: "Intelligence" },
-  { slug: "/activity", label: "Activity" },
-];
 
 export function ProductTabs({ productId }: { productId: string }) {
   const pathname = usePathname();
@@ -25,7 +12,7 @@ export function ProductTabs({ productId }: { productId: string }) {
   return (
     <div className="overflow-x-auto">
       <nav aria-label="Product workspace" className="flex min-w-max gap-1 border-b">
-        {TABS.map((tab) => {
+        {productTabs.map((tab) => {
           const href = `/products/${productId}${tab.slug}`;
           const active = pathname === href;
           return (

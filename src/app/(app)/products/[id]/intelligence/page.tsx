@@ -47,7 +47,7 @@ async function Intelligence({
         title={mode === "leadership" ? "How this product is moving" : "Delivery evidence"}
         description={
           mode === "leadership"
-            ? "Delivery, flow, quality, risk, AI contribution, release, and outcome. Every number comes from a factory record. Missing evidence stays insufficient."
+            ? "Risk, release, and outcome come first. Every number comes from a recorded event. Missing evidence stays missing."
             : "Task cycle time, agent runs, checks, revisions, verification, pull requests, defects, and escalations. The same records as the leadership view, with the engineering detail."
         }
       />

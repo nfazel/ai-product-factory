@@ -4,7 +4,7 @@ Learn asks whether the released slice produced the product outcome. The page sho
 
 ## Stage gate
 
-**READY TO MOVE TO LEARN** appears when a non-demo release candidate is deployed, required post-deployment checks are complete, and no high or critical release issue is open. A person moves the product. The factory does not.
+**Move to Learn** appears when a non-demo release candidate is deployed, required post-deployment checks are complete, and no high or critical release issue is open. A person moves the product. AI Product Builder does not. Deployed does not mean the outcome is achieved. The button for a new observation is **Record Outcome Evidence**.
 
 ## Observations
 

@@ -1,6 +1,6 @@
 # Architecture
 
-AI Product Factory is a modular monolith. One Next.js application owns the product development domain. Modules are separated so a later service split can move a module's repository and service without rewriting the model the rest of the factory depends on.
+AI Product Builder is a modular monolith. One Next.js application owns the product development domain. Modules are separated so a later service split can move a module's repository and service without rewriting the model the rest of the product depends on. The visible experience is described in [product-experience.md](product-experience.md).
 
 ## Boundaries
 
@@ -72,7 +72,7 @@ These actions write an activity record:
 - Decision recorded
 - Dependency added
 
-The log stores the actor name. Until authentication exists, that name is **Local user**, unless a person types a decision maker or approver.
+The log stores the actor name supplied to the service. Until authentication exists, the interface does not present that placeholder as a business role. A person can still type a decision maker where a form asks for one.
 
 ## Authentication, later
 
@@ -92,7 +92,7 @@ The catalogue in `src/domain/constants.ts` names the agents:
 
 Product Discovery, the Requirements Agent, the Architecture Agent, and the Security & Engineering Governance Agent are **CONFIGURED** only when `OPENAI_API_KEY` is set on the server, or when a test supplies a provider. The Coding Agent and the Testing & Verification Agent also need a repository. The control centre reads run counts, completed runs, failed runs, and average duration from `AgentRun`. The Coding Agent also shows how many completed runs escalated. The Testing & Verification Agent also shows how many non-demo sessions are `BLOCKED`. Token counts are stored when the provider returns them. Cost is left empty rather than guessed.
 
-Build is where implementation and task-level verification happen. Prove is where the approved product slice is assessed as a whole. The factory does not move the product into Prove because one task was verified.
+Build is where implementation and task-level verification happen. Prove is where the approved product slice is assessed as a whole. AI Product Builder does not move the product into Prove because one task was verified.
 
 The governance agent is not a mode of the Architecture Agent. The Architecture Agent proposes how to build. The governance agent independently asks whether that proposal is safe, supportable, and ready to build. See [security-governance-agent.md](security-governance-agent.md).
 
@@ -131,7 +131,7 @@ The verification runner is a separate agent. It reads the approved acceptance cr
 
 GitHub is not an agent. `SourceControlProvider` publishes an approved branch and reads pull request state. No provider method can merge. See [github-integration.md](github-integration.md) and [pull-request-lifecycle.md](pull-request-lifecycle.md).
 
-Release and deployment are not an agent. A release candidate is created from an approved slice, merged pull requests, and current verification. A person approves the release and records the deployment. The factory does not deploy or mark a product outcome achieved. See [release-governance.md](release-governance.md), [deployment-governance.md](deployment-governance.md), and [learn-loop.md](learn-loop.md).
+Release and deployment are not an agent. A release candidate is created from an approved slice, merged pull requests, and current verification. A person approves the release and records the deployment. AI Product Builder does not deploy or mark a product outcome achieved. See [release-governance.md](release-governance.md), [deployment-governance.md](deployment-governance.md), and [learn-loop.md](learn-loop.md).
 
 Factory Intelligence is not an agent. `src/modules/analytics` reads operational rows into one snapshot and calculates metrics in pure functions. The dashboard and the product Intelligence tab render those results. Factory Insights calls the model with the calculated metrics only. See [factory-intelligence.md](factory-intelligence.md) and [metrics-catalogue.md](metrics-catalogue.md).
 

@@ -11,7 +11,7 @@ export default function NewProductPage() {
       <PageHeader
         eyebrow="Products"
         title="New product"
-        description="Capture the idea clearly enough that a team can decide whether to pursue it."
+        description="Start with the problem. Discovery will shape the Product Brief. You do not need a vision or a solution yet."
         actions={
           <Link href="/products" className="text-sm text-primary hover:underline">
             Cancel

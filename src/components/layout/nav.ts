@@ -1,10 +1,7 @@
 import {
-  Activity,
   BadgeCheck,
-  Bot,
   Boxes,
   LayoutDashboard,
-  ListTodo,
   Settings,
   type LucideIcon,
 } from "lucide-react";
@@ -17,12 +14,9 @@ export type NavItem = {
 };
 
 export const primaryNav: NavItem[] = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, exact: true },
+  { href: "/dashboard", label: "Home", icon: LayoutDashboard, exact: true },
   { href: "/products", label: "Products", icon: Boxes },
-  { href: "/work-items", label: "Work Items", icon: ListTodo },
-  { href: "/approvals", label: "Approvals", icon: BadgeCheck },
-  { href: "/activity", label: "Activity", icon: Activity },
-  { href: "/agents", label: "Agents", icon: Bot },
+  { href: "/decisions", label: "Decisions", icon: BadgeCheck },
 ];
 
 export const secondaryNav: NavItem[] = [

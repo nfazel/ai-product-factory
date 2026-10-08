@@ -32,7 +32,7 @@ const VERSION = /^[A-Za-z0-9][A-Za-z0-9._-]{0,40}$/;
 
 function assertHuman(actor: string) {
   const name = actor.trim().toLowerCase();
-  if (!name || name.includes("agent") || name === "ai product factory") {
+  if (!name || name.includes("agent") || name === "ai product factory" || name === "ai product builder") {
     throw new DomainError("A person records release decisions. An agent cannot approve a release or mark a deployment successful.");
   }
 }
@@ -649,7 +649,7 @@ export async function saveDeploymentPlan(productId: string, candidateId: string,
     ...lines(input.postChecks).map((name) => ({ deploymentPlanId: plan.id, phase: "POST_DEPLOYMENT" as const, name, required: true })),
   ];
   if (checks.length > 0) await db.deploymentCheck.createMany({ data: checks });
-  await recordActivity({ productId, type: "DEPLOYMENT_PLAN_CREATED", description: `${actor} saved deployment plan version ${version}. The factory will not execute it.`, actor });
+  await recordActivity({ productId, type: "DEPLOYMENT_PLAN_CREATED", description: `${actor} saved deployment plan version ${version}. AI Product Builder will not execute it.`, actor });
   return getShipView(productId);
 }
 
@@ -827,7 +827,7 @@ export async function recordDeployment(productId: string, candidateId: string, i
   await recordActivity({
     productId,
     type: activity,
-    description: `${actor} recorded deployment ${input.status.toLowerCase()} for ${candidate.version}. The factory did not deploy it.`,
+    description: `${actor} recorded deployment ${input.status.toLowerCase()} for ${candidate.version}. AI Product Builder did not deploy it.`,
     actor,
   });
   if (input.status === "FAILED") await db.releaseCandidate.update({ where: { id: candidate.id }, data: { status: "FAILED" } });
@@ -889,7 +889,7 @@ async function promote(productId: string, candidateId: string, actor: string) {
         releaseCandidateId: candidate.id,
         deploymentSuccessful: true,
         rollbackRequired: false,
-        summary: `Deployment recorded by ${actor}. The factory did not deploy this release.`,
+        summary: `Deployment recorded by ${actor}. AI Product Builder did not deploy this release.`,
       },
     });
   }

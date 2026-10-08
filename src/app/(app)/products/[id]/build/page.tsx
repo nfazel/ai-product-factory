@@ -30,6 +30,8 @@ import {
   type SignalLevel,
 } from "@/domain/constants";
 import { storedArchitectureSchema } from "@/modules/architecture/schema";
+import { NextActionPanel } from "@/components/guidance/guidance-ui";
+import { getProductGuidance } from "@/modules/guidance/service";
 import { getBuildWorkspace } from "@/modules/architecture/service";
 import { getProveView } from "@/modules/verification/service";
 import { markDynamic } from "@/server/dynamic";
@@ -67,8 +69,8 @@ async function Build({
   await markDynamic();
   const { id } = await params;
   const query = await searchParams;
-  const [workspace, prove] = await Promise.all([getBuildWorkspace(id), getProveView(id)]);
-  if (!workspace) notFound();
+  const [workspace, prove, guidance] = await Promise.all([getBuildWorkspace(id), getProveView(id), getProductGuidance(id)]);
+  if (!workspace || !guidance) notFound();
 
   const architecture = workspace.architecture;
   const selected =
@@ -101,25 +103,24 @@ async function Build({
             }
           />
           <Status
-            label="Implementation plan status"
+            label="Delivery plan"
             value={workspace.plan ? ARCHITECTURE_STATUS_LABEL[workspace.plan.status] : "Not started"}
           />
           <Status label="Coding readiness" value={workspace.coding.label} />
         </div>
         <p className="mt-4 text-sm leading-6 text-muted-foreground">
           {workspace.readiness.summary} Coding stays closed until a person has approved the brief,
-          the definition, the first slice, the architecture, the implementation plan, engineering
-          governance, and the coding policy, and no governance blocker remains. The Coding Agent is
-          not available yet.
+          the definition, the first slice, the design, the delivery plan, the engineering review,
+          and the coding rules, and no blocking finding remains.
         </p>
         {architecture?.reviewRequired ? (
           <p className="mt-3 rounded-xl bg-amber-50 p-3 text-sm leading-6 text-amber-950">
-            Architecture review required. {architecture.reviewReason}
+            Design needs attention. {architecture.reviewReason}
           </p>
         ) : null}
         {workspace.plan?.reviewRequired ? (
           <p className="mt-3 rounded-xl bg-amber-50 p-3 text-sm leading-6 text-amber-950">
-            Implementation Plan review required. {workspace.plan.reviewReason}
+            Delivery plan needs attention. {workspace.plan.reviewReason}
           </p>
         ) : null}
         {architecture?.seededDemo || workspace.plan?.seededDemo ? (
@@ -139,6 +140,11 @@ async function Build({
           <BuildControls productId={id} />
         </div>
       </header>
+      {guidance.stage === "BUILD" || guidance.action?.stage === "BUILD" ? <NextActionPanel guidance={guidance} /> : null}
+      <section id="design" className="scroll-mt-20">
+        <h2 className="text-lg font-semibold">Design</h2>
+        <p className="mt-1 text-sm text-muted-foreground">Is the proposed technical approach understood and approved?</p>
+      </section>
 
       <BuildReadiness coding={workspace.coding} />
 
@@ -166,7 +172,7 @@ async function Build({
         <p className="mt-2 text-sm leading-6 text-muted-foreground">
           {context
             ? `${SYSTEM_KIND_LABEL[context.systemKind]} · source ${context.source}`
-            : "No codebase context yet. Enter it manually, or read a configured project directory. GitHub and repository cloning are not connected."}
+            : "No codebase context yet. Enter it manually, or read a configured local repository. Publishing a branch and opening a pull request happen later, from Prove."}
         </p>
         <div className="mt-4 space-y-4">
           <LocalContextButton productId={id} />
@@ -423,8 +429,8 @@ async function Build({
       <section className="rounded-2xl border bg-card p-4 sm:p-5">
         <h2 className="text-base font-semibold">Initial Architecture Security Assessment</h2>
         <p className="mt-2 text-sm leading-6 text-muted-foreground">
-          This is an initial assessment recorded with the architecture. It is not a full security
-          review. A Security Agent will be introduced later.
+          This is an initial assessment recorded with the design. The engineering review is the
+          independent check of security and engineering risk. This is not a penetration test.
         </p>
         <ul className="mt-4 grid gap-3 sm:grid-cols-2">
           {(architecture?.findings ?? []).map((finding) => (
@@ -481,7 +487,7 @@ async function Build({
 
       {planProposal?.success && workspace.planProposal ? (
         <section className="rounded-2xl border bg-card p-4 sm:p-5">
-          <h2 className="text-base font-semibold">Implementation plan proposal</h2>
+          <h2 id="plan" className="scroll-mt-20 text-base font-semibold">Delivery plan proposal</h2>
           <p className="mt-2 text-sm leading-6">{planProposal.data.implementationPlanProposal.summary}</p>
           <div className="mt-4">
             <ProposalActions
@@ -494,9 +500,9 @@ async function Build({
       ) : null}
 
       <section className="rounded-2xl border bg-card p-4 sm:p-5">
-        <h2 className="text-base font-semibold">Implementation plan</h2>
+        <h2 className="text-base font-semibold">Delivery plan</h2>
         <p className="mt-2 text-sm leading-6 text-muted-foreground">
-          {workspace.plan?.summary || "No implementation plan has been committed."}
+          {workspace.plan?.summary || "No delivery plan has been committed."}
         </p>
         <div className="mt-4 space-y-6">
           {[...slices.entries()].map(([slice, sliceTasks]) => (
@@ -564,7 +570,11 @@ async function Build({
       </section>
 
       <GovernancePanel productId={id} governance={workspace.governance} />
-      <CodingPanel productId={id} coding={workspace.codingExecution} />
+      <section id="code" className="scroll-mt-20 space-y-3">
+        <h2 className="text-lg font-semibold">Code</h2>
+        <p className="text-sm text-muted-foreground">One approved task at a time. The coding assistant cannot approve its own change.</p>
+        <CodingPanel productId={id} coding={workspace.codingExecution} />
+      </section>
       <section className="rounded-2xl border bg-card p-5">
         <p className="text-xs font-medium tracking-wide text-indigo-700">VERIFICATION</p>
         <h2 className="text-lg font-semibold">Task verification</h2>

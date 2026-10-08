@@ -1,8 +1,8 @@
 # Release governance
 
-Ship is where an approved product slice becomes a versioned release candidate. The factory decides whether the evidence supports release readiness. A person approves the release. A person performs production deployment and records what happened.
+Ship is where an approved product slice becomes a versioned release candidate. Readiness is calculated from records. A person approves the release. A person performs production deployment and records what happened. AI Product Builder does not deploy.
 
-Build remains the stage where individual tasks are coded and independently verified. Prove is where the slice is considered as an integrated release candidate. Ship is the human-controlled release. Learn is where product and operational outcomes are observed afterwards. The factory does not move the stage.
+Build remains the stage where individual tasks are coded and independently verified. Prove is where the slice is considered as an integrated release candidate. Ship is the human-controlled release. Learn is where product and operational outcomes are observed afterwards. AI Product Builder does not move the stage.
 
 ## Release candidate
 

@@ -186,7 +186,7 @@ export async function approveArchitectureAction(
   if (!parsed.success) return invalidState(parsed.error.issues);
   try {
     await approveSolutionArchitecture(parsed.data.productId);
-    return done(parsed.data.productId, "Solution architecture approved. The implementation plan still needs its own approval.");
+    return done(parsed.data.productId, "Design approved. The delivery plan still needs its own approval.");
   } catch (error) {
     return actionFailure(error);
   }
@@ -200,7 +200,7 @@ export async function markPlanReadyAction(
   if (!parsed.success) return invalidState(parsed.error.issues);
   try {
     await markPlanReady(parsed.data.productId);
-    return done(parsed.data.productId, "Implementation plan is ready for review.");
+    return done(parsed.data.productId, "Delivery plan is ready for a person to approve.");
   } catch (error) {
     return actionFailure(error);
   }
@@ -214,7 +214,7 @@ export async function approvePlanAction(
   if (!parsed.success) return invalidState(parsed.error.issues);
   try {
     await approveImplementationPlan(parsed.data.productId);
-    return done(parsed.data.productId, "Implementation plan approved. Coding stays closed until a Coding Agent is introduced.");
+    return done(parsed.data.productId, "Delivery plan approved. Coding stays closed until the engineering review and the task are approved.");
   } catch (error) {
     return actionFailure(error);
   }

@@ -16,10 +16,11 @@ import {
   PRODUCT_BRIEF_STATUS_LABEL,
   SIGNAL_LEVEL_LABEL,
   STAGE_META,
-  type SignalLevel,
 } from "@/domain/constants";
 import { formatDateTime } from "@/lib/format";
+import { NextActionPanel } from "@/components/guidance/guidance-ui";
 import { readinessSummary } from "@/modules/discovery/merge";
+import { getProductGuidance } from "@/modules/guidance/service";
 import { getDiscoveryWorkspace } from "@/modules/discovery/service";
 import { markDynamic } from "@/server/dynamic";
 
@@ -31,12 +32,6 @@ const ROLE_LABEL = {
   ASSISTANT: "Discovery lead",
   SYSTEM: "Session",
 } as const;
-
-const LEVEL_TONE: Record<SignalLevel, string> = {
-  LOW: "bg-stone-100 text-stone-700",
-  MEDIUM: "bg-amber-50 text-amber-900",
-  HIGH: "bg-emerald-50 text-emerald-800",
-};
 
 export default function DiscoveryPage({
   params,
@@ -63,11 +58,11 @@ async function Discovery({
   const { id } = await params;
   const query = await searchParams;
   const version = Number(query.version);
-  const workspace = await getDiscoveryWorkspace(
-    id,
-    Number.isFinite(version) && version > 0 ? version : undefined,
-  );
-  if (!workspace) notFound();
+  const [workspace, guidance] = await Promise.all([
+    getDiscoveryWorkspace(id, Number.isFinite(version) && version > 0 ? version : undefined),
+    getProductGuidance(id),
+  ]);
+  if (!workspace || !guidance) notFound();
 
   const { product, session, brief, configured } = workspace;
 
@@ -81,7 +76,7 @@ async function Discovery({
             </p>
             <h2 className="mt-1 text-xl font-semibold">Product discovery</h2>
             <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
-              Work with a discovery lead to turn an incomplete idea into a product brief. The brief stays a proposal until you confirm it.
+              Do we understand the problem well enough to define the product? The brief stays a proposal until a person approves it.
             </p>
           </div>
           <span className="w-fit rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-800">
@@ -89,29 +84,25 @@ async function Discovery({
           </span>
         </div>
         {brief ? (
-          <div className="mt-5">
-            <p className="text-sm font-medium">
-              {readinessSummary(workspace.sufficientAreas)}
-            </p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Medium or high means that area is sufficiently understood. This is not a completion percentage.
-            </p>
+          <details className="mt-5">
+            <summary className="cursor-pointer text-sm font-medium">How the brief was judged</summary>
+            <p className="mt-2 text-sm">{readinessSummary(workspace.sufficientAreas)}</p>
+            <p className="mt-1 text-xs text-muted-foreground">These notes are not a completion percentage.</p>
             <dl className="mt-3 grid gap-2 sm:grid-cols-5">
               {CLARITY_AREAS.map((area) => {
                 const level = brief[area.key];
                 return (
                   <div key={area.key} className="rounded-xl border bg-background px-3 py-2">
                     <dt className="text-[11px] text-muted-foreground">{area.label}</dt>
-                    <dd className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${LEVEL_TONE[level]}`}>
-                      {SIGNAL_LEVEL_LABEL[level]}
-                    </dd>
+                    <dd className="mt-1 text-xs font-medium">{SIGNAL_LEVEL_LABEL[level]}</dd>
                   </div>
                 );
               })}
             </dl>
-          </div>
+          </details>
         ) : null}
       </header>
+      {guidance.stage === "EXPLORE" ? <NextActionPanel guidance={guidance} /> : null}
 
       {!configured ? (
         <p className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-950">

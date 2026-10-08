@@ -1,6 +1,6 @@
 # Product Discovery Agent
 
-Product Discovery is the first agent in AI Product Factory. It works in the Explore stage. A person starts with an incomplete idea. The agent helps turn that idea into a Product Brief. It does not write code, technical requirements, or an architecture.
+Product Discovery is the first agent in AI Product Builder. It works in the Explore stage. A person starts with an incomplete idea. The agent helps turn that idea into a Product Brief. It does not write code, technical requirements, or an architecture. The prompt below still identifies the agent by its original system text.
 
 The agent behaves as a product manager, discovery lead, business analyst, and strategist. It tries to understand the problem, users, outcomes, assumptions, and constraints before a solution is proposed.
 

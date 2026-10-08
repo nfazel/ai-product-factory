@@ -1,6 +1,5 @@
 import Link from "next/link";
 
-import { PipelineDots } from "@/components/pipeline/product-pipeline";
 import {
   ProductStatusBadge,
   StageBadge,
@@ -23,7 +22,6 @@ export function ProductCard({ product }: { product: Product }) {
       </p>
       <div className="mt-4 flex items-center justify-between gap-3">
         <StageBadge stage={product.currentStage} />
-        <PipelineDots currentStage={product.currentStage} />
       </div>
       <dl className="mt-4 flex items-center justify-between border-t pt-3 text-xs text-muted-foreground">
         <div>

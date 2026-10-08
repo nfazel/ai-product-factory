@@ -24,8 +24,8 @@ async function Agents() {
     <div className="space-y-6">
       <PageHeader
         eyebrow="Agents"
-        title="Agent control centre"
-        description="Product Discovery, the Requirements Agent, the Architecture Agent, and the Security & Engineering Governance Agent run when OPENAI_API_KEY is set. The Coding Agent and the Testing & Verification Agent also need PRODUCT_REPOSITORY_ROOT. Review stays unavailable."
+        title="System"
+        description="Agent runs are evidence. You do not move a product by visiting this page. Planning and review are not separate workflows."
       />
       <section className="rounded-2xl border bg-card p-5">
         <div className="flex items-start justify-between gap-3">
@@ -39,7 +39,7 @@ async function Agents() {
         </p>
       </section>
       <div className="grid gap-4 md:grid-cols-2">
-        {agents.map((agent) => (
+        {agents.filter((agent) => agent.agentType !== "PLANNING" && agent.agentType !== "REVIEW").map((agent) => (
           <article key={agent.agentType} className="rounded-2xl border bg-card p-5">
             <div className="flex items-start justify-between gap-3">
               <h2 className="text-base font-semibold">{agent.name}</h2>
@@ -98,6 +98,14 @@ async function Agents() {
           </article>
         ))}
       </div>
+      <details className="rounded-2xl border bg-card p-5">
+        <summary className="cursor-pointer text-sm font-medium">Agents without a product workflow</summary>
+        <ul className="mt-3 space-y-2 text-sm text-muted-foreground">
+          {agents.filter((agent) => agent.agentType === "PLANNING" || agent.agentType === "REVIEW").map((agent) => (
+            <li key={agent.agentType}>{agent.name} has no workflow in the product path.</li>
+          ))}
+        </ul>
+      </details>
     </div>
   );
 }
