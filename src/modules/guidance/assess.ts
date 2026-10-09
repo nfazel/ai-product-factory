@@ -1,4 +1,5 @@
 import { PRODUCT_STAGES, STAGE_META, type ProductStage } from "@/domain/constants";
+import { governanceNextActionLabel } from "@/modules/governance/finding-presentation";
 
 import {
   STAGE_PROGRESS_LABEL,
@@ -24,6 +25,8 @@ export function emptySnapshot(patch: Partial<GuidanceSnapshot> & Pick<GuidanceSn
     sample: patch.sample ?? false,
     startMode: patch.startMode ?? "IDEA",
     requirementsChanged: patch.requirementsChanged ?? false,
+    developmentContext: patch.developmentContext ?? "UNSET",
+    codebaseCaptured: patch.codebaseCaptured ?? false,
     intake: {
       activeSources: 0,
       extractionFailed: false,
@@ -66,6 +69,7 @@ export function emptySnapshot(patch: Partial<GuidanceSnapshot> & Pick<GuidanceSn
       planReviewReason: "",
       demo: false,
       updatedAt: null,
+      traceabilityIssue: "",
     },
     review: {
       exists: false,
@@ -74,6 +78,7 @@ export function emptySnapshot(patch: Partial<GuidanceSnapshot> & Pick<GuidanceSn
       reviewReason: "",
       openCritical: 0,
       openHighBeforeCoding: 0,
+      openFindings: 0,
       policyApproved: false,
       policyReapproval: false,
       policyReason: "",
@@ -477,7 +482,7 @@ function chooseAction(snapshot: GuidanceSnapshot): { action: NextAction | null; 
         blocker: null,
       };
     }
-    if (definition.slice === "PROPOSED" || definition.slice === "NONE") {
+    if (definition.slice === "PROPOSED") {
       return {
         action: action(snapshot, {
           key: "confirm-slice",
@@ -488,6 +493,53 @@ function chooseAction(snapshot: GuidanceSnapshot): { action: NextAction | null; 
           decision: true,
           path: "/definition",
           hash: "slice",
+          waitingSince: definition.updatedAt,
+        }),
+        blocker: null,
+      };
+    }
+    if (definition.slice === "NONE") {
+      return {
+        action: action(snapshot, {
+          key: "draft-definition",
+          label: "Draft the Product Definition",
+          why: "The definition has no First Slice yet. Draft one before a person can confirm it.",
+          role: PRODUCT,
+          stage: "DEFINE",
+          decision: false,
+          path: "/definition",
+        }),
+        blocker: null,
+      };
+    }
+    if (definition.openQuestions > 0) {
+      const count = definition.openQuestions;
+      return {
+        action: action(snapshot, {
+          key: "answer-definition-questions",
+          label: count === 1 ? "Answer 1 open question" : `Answer ${count} open questions`,
+          why: "Open questions stay on the definition until a person answers them. Answering them does not approve the definition.",
+          role: PRODUCT,
+          stage: "DEFINE",
+          decision: true,
+          path: "/definition",
+          hash: "questions",
+          waitingSince: definition.updatedAt,
+        }),
+        blocker: null,
+      };
+    }
+    if (definition.status !== "READY_FOR_REVIEW") {
+      return {
+        action: action(snapshot, {
+          key: "prepare-definition",
+          label: "Prepare the definition for approval",
+          why: "Marking the definition ready asks a person to approve it. It does not approve the definition or move the stage.",
+          role: PRODUCT,
+          stage: "DEFINE",
+          decision: true,
+          path: "/definition",
+          hash: "approve",
           waitingSince: definition.updatedAt,
         }),
         blocker: null,
@@ -525,8 +577,28 @@ function chooseAction(snapshot: GuidanceSnapshot): { action: NextAction | null; 
     };
   }
 
+  if (snapshot.stage === "BUILD") {
+    const development = developmentStep(snapshot);
+    if (development) return development;
+  }
+
   const designBlock = designStep(snapshot);
   if (designBlock) return designBlock;
+  if (snapshot.design.traceabilityIssue) {
+    return {
+      action: action(snapshot, {
+        key: "repair-traceability",
+        label: "Repair design references",
+        why: snapshot.design.traceabilityIssue,
+        role: ENGINEERING,
+        stage: "BUILD",
+        decision: true,
+        path: "/build",
+        hash: "design",
+      }),
+      blocker: null,
+    };
+  }
   const reviewBlock = reviewStep(snapshot);
   if (reviewBlock) return reviewBlock;
   const taskBlock = taskStep(snapshot);
@@ -551,6 +623,41 @@ function chooseAction(snapshot: GuidanceSnapshot): { action: NextAction | null; 
   return releaseStep(snapshot);
 }
 
+function developmentStep(snapshot: GuidanceSnapshot): { action: NextAction; blocker: BlockerView | null } | null {
+  if (snapshot.developmentContext === "GREENFIELD") return null;
+  if (snapshot.developmentContext === "UNSET") {
+    return {
+      action: action(snapshot, {
+        key: "choose-development-context",
+        label: "Choose what we are building",
+        why: "A new application does not need an existing repository. An existing application does.",
+        role: ENGINEERING,
+        stage: "BUILD",
+        decision: true,
+        path: "/build",
+        hash: "context",
+      }),
+      blocker: null,
+    };
+  }
+  if (!snapshot.codebaseCaptured) {
+    return {
+      action: action(snapshot, {
+        key: "add-codebase-context",
+        label: "Add codebase context",
+        why: "This product builds on an existing application. The architecture needs that codebase before it proposes changes.",
+        role: ENGINEERING,
+        stage: "BUILD",
+        decision: false,
+        path: "/build",
+        hash: "context",
+      }),
+      blocker: null,
+    };
+  }
+  return null;
+}
+
 function designStep(snapshot: GuidanceSnapshot): { action: NextAction | null; blocker: BlockerView | null } | null {
   const design = snapshot.design;
   if (design.architectureReview) {
@@ -571,7 +678,23 @@ function designStep(snapshot: GuidanceSnapshot): { action: NextAction | null; bl
         action: action(snapshot, {
           key: "review-design",
           label: "Review Design",
-          why: "Build starts by agreeing the technical approach for the First Slice.",
+          why: "The generated design is a draft. Review it here. Opening this review does not approve it.",
+          role: ENGINEERING,
+          stage: "BUILD",
+          decision: true,
+          path: "/build",
+          hash: "design",
+          waitingSince: design.updatedAt,
+        }),
+        blocker: null,
+      };
+    }
+    if (design.architecture === "DRAFT") {
+      return {
+        action: action(snapshot, {
+          key: "prepare-design",
+          label: "Prepare design for approval",
+          why: "The committed design is still a draft. Preparing it does not approve it.",
           role: ENGINEERING,
           stage: "BUILD",
           decision: true,
@@ -586,7 +709,7 @@ function designStep(snapshot: GuidanceSnapshot): { action: NextAction | null; bl
       action: action(snapshot, {
         key: "approve-design",
         label: "Approve Design",
-        why: "The design stays a proposal until a person approves it.",
+        why: "A person approves the design. Approval does not move the product to Prove.",
         role: ENGINEERING,
         stage: "BUILD",
         decision: true,
@@ -610,11 +733,14 @@ function designStep(snapshot: GuidanceSnapshot): { action: NextAction | null; bl
     };
   }
   if (design.plan !== "APPROVED") {
+    const preparing = design.plan === "DRAFT";
     return {
       action: action(snapshot, {
-        key: design.plan === "NONE" ? "review-plan" : "approve-plan",
-        label: design.plan === "NONE" ? "Review Delivery Plan" : "Approve Delivery Plan",
-        why: "The delivery plan is the ordered work for this slice.",
+        key: design.plan === "NONE" ? "review-plan" : preparing ? "prepare-plan" : "approve-plan",
+        label: design.plan === "NONE" ? "Review Delivery Plan" : preparing ? "Prepare delivery plan" : "Approve Delivery Plan",
+        why: preparing
+          ? "The delivery plan is still a draft. Preparing it does not approve it."
+          : "The delivery plan is the ordered work for this slice.",
         role: ENGINEERING,
         stage: "BUILD",
         decision: true,
@@ -630,7 +756,8 @@ function designStep(snapshot: GuidanceSnapshot): { action: NextAction | null; bl
 
 function reviewStep(snapshot: GuidanceSnapshot): { action: NextAction; blocker: BlockerView | null } | null {
   const review = snapshot.review;
-  if (review.reviewRequired || review.openCritical > 0 || review.openHighBeforeCoding > 0) {
+  const blocking = review.openCritical + review.openHighBeforeCoding;
+  if (review.reviewRequired || blocking > 0) {
     const why = review.reviewReason
       || (review.openCritical > 0
         ? "A critical engineering finding is still open."
@@ -638,7 +765,7 @@ function reviewStep(snapshot: GuidanceSnapshot): { action: NextAction; blocker: 
     return {
       action: action(snapshot, {
         key: "resolve-finding",
-        label: "Resolve Engineering Finding",
+        label: governanceNextActionLabel(review) ?? "Resolve Engineering Finding",
         why,
         role: ENGINEERING,
         stage: "BUILD",
@@ -654,6 +781,23 @@ function reviewStep(snapshot: GuidanceSnapshot): { action: NextAction; blocker: 
         who: ENGINEERING,
         next: "Coding stays closed while a blocking finding is open.",
       }),
+    };
+  }
+  if (!review.approved && review.openFindings > 0) {
+    const countLabel = governanceNextActionLabel(review) ?? "Review open governance findings";
+    return {
+      action: action(snapshot, {
+        key: "review-open-findings",
+        label: countLabel,
+        why: "Open findings still need a human decision. They do not all block coding.",
+        role: ENGINEERING,
+        stage: "BUILD",
+        decision: true,
+        path: "/build",
+        hash: "review",
+        waitingSince: review.updatedAt,
+      }),
+      blocker: null,
     };
   }
   if (!review.approved) {

@@ -6,6 +6,7 @@ export {
   approveImplementationPlan,
   approveSolutionArchitecture,
   captureLocalCodebaseContext,
+  chooseDevelopmentContext,
   commitArchitecture,
   commitImplementationPlan,
   editProposalSummary,

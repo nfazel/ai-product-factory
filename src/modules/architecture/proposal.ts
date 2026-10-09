@@ -97,6 +97,7 @@ const collections = [
   "integrations",
   "securityAssessment",
   "architectureQuestions",
+  "nfrCoverage",
 ] as const;
 
 export function setReviewStatus(

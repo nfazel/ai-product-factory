@@ -41,10 +41,12 @@ function GateButton({
 export function DefinitionControls({
   productId,
   showReview,
+  readyToApprove,
   approved,
 }: {
   productId: string;
   showReview: boolean;
+  readyToApprove: boolean;
   approved: boolean;
 }) {
   return (
@@ -63,13 +65,6 @@ export function DefinitionControls({
           pendingLabel="Reviewing…"
           variant="outline"
         />
-        <GateButton
-          productId={productId}
-          action={reviewDefinitionAction}
-          label="Prepare for Approval"
-          pendingLabel="Saving…"
-          variant="secondary"
-        />
         {!approved ? (
           <GateButton
             productId={productId}
@@ -80,24 +75,45 @@ export function DefinitionControls({
           />
         ) : null}
       </div>
-      {showReview && !approved ? (
-        <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-4">
-          <p className="text-sm font-medium text-indigo-950">Product Definition Ready for Review</p>
-          <p className="mt-1 text-sm leading-6 text-indigo-900">
-            A person can approve the definition. Approval does not move the product stage.
-          </p>
-          <div className="mt-3">
-            <GateButton
-              productId={productId}
-              action={approveDefinitionAction}
-              label="Approve Product Definition"
-              pendingLabel="Approving…"
-            />
-          </div>
+      {!approved ? (
+        <div id="approve" tabIndex={-1} className="scroll-mt-20 space-y-4 rounded-xl border border-indigo-200 bg-indigo-50 p-4 focus:outline-none target:ring-2 target:ring-indigo-500 target:ring-offset-2">
+          {!readyToApprove ? (
+            <div>
+              <p className="text-sm font-medium text-indigo-950">Prepare the definition for approval</p>
+              <p className="mt-1 text-sm leading-6 text-indigo-900">
+                Marking it ready asks a person to approve it. It does not approve the definition or move the stage.
+              </p>
+              <div className="mt-3">
+                <GateButton
+                  productId={productId}
+                  action={reviewDefinitionAction}
+                  label="Prepare for Approval"
+                  pendingLabel="Saving…"
+                  variant="secondary"
+                />
+              </div>
+            </div>
+          ) : null}
+          {showReview ? (
+            <div>
+              <p className="text-sm font-medium text-indigo-950">Approve Product Definition</p>
+              <p className="mt-1 text-sm leading-6 text-indigo-900">
+                A person approves the definition. Approval does not move the product stage, and generating the draft does not approve it.
+              </p>
+              <div className="mt-3">
+                <GateButton
+                  productId={productId}
+                  action={approveDefinitionAction}
+                  label="Approve Product Definition"
+                  pendingLabel="Approving…"
+                />
+              </div>
+            </div>
+          ) : null}
         </div>
       ) : null}
       {approved ? (
-        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+        <div id="move" tabIndex={-1} className="scroll-mt-20 rounded-xl border border-emerald-200 bg-emerald-50 p-4 focus:outline-none target:ring-2 target:ring-indigo-500 target:ring-offset-2">
           <p className="text-sm font-medium text-emerald-950">
             Product Definition approved. Product is ready for architecture and delivery planning.
           </p>

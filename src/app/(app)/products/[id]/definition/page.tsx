@@ -113,6 +113,7 @@ async function Definition({ params }: { params: Promise<{ id: string }> }) {
           <DefinitionControls
             productId={workspace.product.id}
             showReview={showReview}
+            readyToApprove={workspace.definition.status === "READY_FOR_REVIEW"}
             approved={approved}
           />
         </div>
@@ -158,7 +159,7 @@ async function Definition({ params }: { params: Promise<{ id: string }> }) {
         />
       ) : null}
 
-      <section id="outcomes" className="space-y-3">
+      <section id="outcomes" tabIndex={-1} className="scroll-mt-20 space-y-3 rounded-2xl focus:outline-none target:ring-2 target:ring-indigo-500 target:ring-offset-2">
         <div>
           <h2 className="text-lg font-semibold">Product outcomes</h2>
           <p className="text-sm text-muted-foreground">Why are we building this?</p>
@@ -221,7 +222,7 @@ async function Definition({ params }: { params: Promise<{ id: string }> }) {
         </ul>
       </section>
 
-      <section className="space-y-3">
+      <section id="slice" tabIndex={-1} className="scroll-mt-20 space-y-3 rounded-2xl focus:outline-none target:ring-2 target:ring-indigo-500 target:ring-offset-2">
         <div>
           <h2 className="text-lg font-semibold">First product slice</h2>
           <p className="text-sm text-muted-foreground">What should we prove first?</p>
@@ -323,8 +324,14 @@ async function Definition({ params }: { params: Promise<{ id: string }> }) {
       </section>
 
       <section className="grid gap-4 lg:grid-cols-2">
-        <div className="rounded-2xl border bg-card p-4">
+        <div id="questions" tabIndex={-1} className="scroll-mt-20 rounded-2xl border bg-card p-4 focus:outline-none target:ring-2 target:ring-indigo-500 target:ring-offset-2">
           <h2 className="text-lg font-semibold">Open questions</h2>
+          <p className="mt-1 text-sm leading-6 text-muted-foreground">
+            Answer each open question here. An answer is recorded. It does not approve the definition or move the stage.
+          </p>
+          {workspace.questions.length === 0 ? (
+            <p className="mt-3 text-sm text-muted-foreground">No open questions.</p>
+          ) : null}
           <ul className="mt-3 space-y-3">
             {workspace.questions.map((question) => (
               <li key={question.id} className="rounded-xl border p-3">

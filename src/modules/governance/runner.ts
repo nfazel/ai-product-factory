@@ -16,6 +16,9 @@ import {
 import { governanceResponseSchema, toStoredGovernance } from "@/modules/governance/schema";
 import { assertGovernanceGraph } from "@/modules/governance/validate";
 import { DomainError } from "@/modules/shared/errors";
+import { presentForModel, translateGovernanceReferences } from "@/modules/traceability/references";
+import { generateResolved } from "@/modules/traceability/repair";
+import { assignMissingReferenceCodes, citedFromContext, findStaleDesignReferences } from "@/modules/traceability/store";
 
 const refusal =
   "The Security & Engineering Governance Agent returned a response that did not match the required structure. Nothing was written. You can retry.";
@@ -56,35 +59,74 @@ export const governanceRunner: AgentRunner = {
       throw new DomainError("Choose a governance section to re-review.");
     }
 
+    await assignMissingReferenceCodes(request.productId);
+    const stale = await findStaleDesignReferences(request.productId);
+    if (stale) throw new DomainError(stale);
     const loaded = await loadGovernanceContext(request.productId);
-    const provider = await getAIProvider();
-    const result = await provider.generate({
-      systemPrompt: GOVERNANCE_SYSTEM_PROMPT,
-      messages: governanceMessages({
-        mode,
-        section,
-        taskId,
-        productName: gate.product.name,
-        context: loaded.context,
-      }),
-      responseSchema: governanceResponseSchema,
-      schemaName: "engineering_governance_review",
-      temperature: 0.2,
+    const records = citedFromContext({
+      nfrs: loaded.context.nonFunctionalRequirements.map((item) => ({
+        id: item.id,
+        referenceCode: item.referenceCode,
+        title: item.title,
+      })),
+      workItems: loaded.context.workItems.map((item) => ({
+        id: item.id,
+        referenceCode: item.referenceCode,
+        title: item.title,
+      })),
+      assumptions: loaded.context.assumptions.map((item) => ({
+        id: item.id,
+        referenceCode: item.referenceCode,
+        description: item.description,
+      })),
+      capabilities: [],
+      components: loaded.context.architecture?.components.map((item) => ({
+        id: item.id,
+        referenceCode: item.referenceCode,
+        name: item.name,
+      })) ?? [],
+      decisions: loaded.context.architecture?.decisions.map((item) => ({
+        id: item.id,
+        referenceCode: item.referenceCode,
+        title: item.title,
+      })) ?? [],
+      tasks: loaded.context.implementationPlan?.tasks.map((item) => ({
+        id: item.id,
+        referenceCode: item.referenceCode,
+        title: item.title,
+      })) ?? [],
     });
-
-    const parsed = governanceResponseSchema.safeParse(result.data);
-    if (!parsed.success) throw new DomainError(refusal);
-    assertGovernanceGraph(parsed.data, loaded.refs, {
+    const provider = await getAIProvider();
+    const result = await generateResolved(
+      provider,
+      {
+        systemPrompt: GOVERNANCE_SYSTEM_PROMPT,
+        messages: governanceMessages({
+          mode,
+          section,
+          taskId,
+          productName: gate.product.name,
+          context: presentForModel(loaded.context, records),
+        }),
+        responseSchema: governanceResponseSchema,
+        schemaName: "engineering_governance_review",
+        purpose: "Governance Review",
+        temperature: 0.2,
+      },
+      (data) => translateGovernanceReferences(data, records),
+      refusal,
+    );
+    assertGovernanceGraph(result.data, loaded.refs, {
       requireAllTasks: mode === "generate" || section === "plan",
     });
-    if (section === "task" && taskId && !parsed.data.codingRiskAssessments.some((item) => item.taskId === taskId)) {
+    if (section === "task" && taskId && !result.data.codingRiskAssessments.some((item) => item.taskId === taskId)) {
       throw new DomainError(`The re-review must include implementation task ${taskId}.`);
     }
 
     const stored =
       mode === "regenerate" && open && section
-        ? mergeGovernanceSection(open.payload, parsed.data, section, taskId)
-        : toStoredGovernance(parsed.data);
+        ? mergeGovernanceSection(open.payload, result.data, section, taskId)
+        : toStoredGovernance(result.data);
 
     if (mode === "regenerate" && open && section) {
       await saveGovernanceProposal(open.id, stored);

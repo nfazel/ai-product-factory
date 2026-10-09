@@ -4,6 +4,10 @@ function meta(output: unknown) {
     model: null as string | null,
     usage: null as string | null,
     errorCategory: null as string | null,
+    operation: null as string | null,
+    validationStage: null as string | null,
+    repair: null as string | null,
+    issues: [] as string[],
   };
   if (!output || typeof output !== "object") return empty;
   const record = output as Record<string, unknown>;
@@ -18,7 +22,14 @@ function meta(output: unknown) {
     usageText = input == null && outputTokens == null ? null : `Input ${input ?? "unavailable"}, output ${outputTokens ?? "unavailable"}`;
   }
   const errorCategory = publicLabel(record.errorCategory);
-  return { provider, model, usage: usageText, errorCategory };
+  const operation = publicLabel(record.operation);
+  const validationStage = publicLabel(record.validationStage);
+  const repair =
+    record.repairAttempted === true ? "Yes" : record.repairAttempted === false ? "No" : null;
+  const issues = Array.isArray(record.validationIssues)
+    ? record.validationIssues.filter((item): item is string => typeof item === "string").slice(0, 8)
+    : [];
+  return { provider, model, usage: usageText, errorCategory, operation, validationStage, repair, issues };
 }
 
 function publicLabel(value: unknown) {
@@ -57,6 +68,10 @@ export function AgentRunEvidenceList({
               <div>Duration {durationLabel(run.duration)}</div>
               <div>{detail.usage ?? "Usage unavailable"}</div>
               {detail.errorCategory ? <div>Error {detail.errorCategory}</div> : null}
+              {detail.operation ? <div>Operation {detail.operation}</div> : null}
+              {detail.validationStage ? <div>Validation stage {detail.validationStage}</div> : null}
+              {detail.repair ? <div>Repair attempted {detail.repair}</div> : null}
+              {detail.issues.length > 0 ? <div>Validation issue summary {detail.issues.join("; ")}</div> : null}
             </dl>
           </li>
         );

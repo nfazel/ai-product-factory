@@ -33,7 +33,7 @@ export async function RequirementsPanel({
   );
 
   return (
-    <section id="requirements" className="space-y-3">
+    <section id="requirements" tabIndex={-1} className="scroll-mt-20 space-y-3 rounded-2xl focus:outline-none target:ring-2 target:ring-indigo-500 target:ring-offset-2">
       <div>
         <h2 className="text-lg font-semibold">Requirements source</h2>
         <p className="text-sm text-muted-foreground">Supplied requirements stay linked to the definition. This is a summary, not the whole source.</p>

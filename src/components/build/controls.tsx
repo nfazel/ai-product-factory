@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, type ReactNode } from "react";
 
 import { FormMessage, SubmitButton, TextAreaField, TextField } from "@/components/forms/fields";
 import { idleState } from "@/lib/action-state";
@@ -10,6 +10,7 @@ import {
   approveArchitectureAction,
   approvePlanAction,
   captureLocalContextAction,
+  chooseDevelopmentContextAction,
   saveContextAction,
   commitArchitectureAction,
   commitPlanAction,
@@ -96,34 +97,46 @@ export function BuildControls({ productId }: { productId: string }) {
         </SubmitButton>
       </form>
       <FormMessage state={regenState} />
-      <div className="flex flex-wrap gap-2">
-        <ProductForm
-          productId={productId}
-          action={markArchitectureReadyAction}
-          label="Prepare design for approval"
-          pendingLabel="Saving…"
-          variant="outline"
-        />
-        <ProductForm
-          productId={productId}
-          action={approveArchitectureAction}
-          label="Approve Design"
-          pendingLabel="Approving…"
-        />
-        <ProductForm
-          productId={productId}
-          action={markPlanReadyAction}
-          label="Prepare delivery plan"
-          pendingLabel="Saving…"
-          variant="outline"
-        />
-        <ProductForm
-          productId={productId}
-          action={approvePlanAction}
-          label="Approve Delivery Plan"
-          pendingLabel="Approving…"
-        />
-      </div>
+    </div>
+  );
+}
+
+export function DesignApprovalControls({ productId }: { productId: string }) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      <ProductForm
+        productId={productId}
+        action={markArchitectureReadyAction}
+        label="Prepare design for approval"
+        pendingLabel="Saving…"
+        variant="outline"
+      />
+      <ProductForm
+        productId={productId}
+        action={approveArchitectureAction}
+        label="Approve Design"
+        pendingLabel="Approving…"
+      />
+    </div>
+  );
+}
+
+export function PlanApprovalControls({ productId }: { productId: string }) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      <ProductForm
+        productId={productId}
+        action={markPlanReadyAction}
+        label="Prepare delivery plan"
+        pendingLabel="Saving…"
+        variant="outline"
+      />
+      <ProductForm
+        productId={productId}
+        action={approvePlanAction}
+        label="Approve Delivery Plan"
+        pendingLabel="Approving…"
+      />
     </div>
   );
 }
@@ -340,7 +353,6 @@ export function CodebaseForm({
   repositoryName,
   repositoryUrl,
   defaultBranch,
-  systemKind,
   languages,
   frameworks,
   databaseTechnologies,
@@ -357,7 +369,6 @@ export function CodebaseForm({
   repositoryName: string;
   repositoryUrl: string;
   defaultBranch: string;
-  systemKind: string;
   languages: string;
   frameworks: string;
   databaseTechnologies: string;
@@ -377,13 +388,7 @@ export function CodebaseForm({
       <TextField label="Repository name" name="repositoryName" defaultValue={repositoryName} />
       <TextField label="Repository URL" name="repositoryUrl" defaultValue={repositoryUrl} />
       <TextField label="Default branch" name="defaultBranch" defaultValue={defaultBranch} />
-      <label className="block text-sm">
-        <span className="mb-1 block text-muted-foreground">System kind</span>
-        <select name="systemKind" defaultValue={systemKind} className="h-10 w-full rounded-md border bg-background px-3">
-          <option value="GREENFIELD">Greenfield</option>
-          <option value="EXISTING_SYSTEM">Existing system</option>
-        </select>
-      </label>
+      <input type="hidden" name="systemKind" value="EXISTING_SYSTEM" />
       <TextField label="Languages" name="languages" defaultValue={languages} />
       <TextField label="Frameworks" name="frameworks" defaultValue={frameworks} />
       <TextField label="Databases" name="databaseTechnologies" defaultValue={databaseTechnologies} />
@@ -402,6 +407,104 @@ export function CodebaseForm({
         <FormMessage state={state} />
       </div>
     </form>
+  );
+}
+
+function ContextChoice({
+  productId,
+  value,
+  label,
+  detail,
+  pendingLabel,
+}: {
+  productId: string;
+  value: "GREENFIELD" | "EXISTING_SYSTEM";
+  label: string;
+  detail: string;
+  pendingLabel: string;
+}) {
+  const [state, action] = useActionState(chooseDevelopmentContextAction, idleState);
+  return (
+    <form action={action} className="rounded-xl border p-4">
+      <input type="hidden" name="productId" value={productId} />
+      <input type="hidden" name="developmentContext" value={value} />
+      <p className="text-sm font-medium">{label}</p>
+      <p className="mt-1 text-sm leading-6 text-muted-foreground">{detail}</p>
+      <div className="mt-3">
+        <SubmitButton pendingLabel={pendingLabel}>{label}</SubmitButton>
+      </div>
+      <FormMessage state={state} />
+    </form>
+  );
+}
+
+export function DevelopmentContextPanel({
+  productId,
+  developmentContext,
+  children,
+}: {
+  productId: string;
+  developmentContext: "GREENFIELD" | "EXISTING_SYSTEM" | null;
+  children: ReactNode;
+}) {
+  return (
+    <section id="context" tabIndex={-1} className="scroll-mt-20 space-y-4 rounded-2xl border bg-card p-4 focus:outline-none target:ring-2 target:ring-indigo-500 sm:p-5">
+      <div>
+        <h2 className="text-base font-semibold">What are we building?</h2>
+        {developmentContext === "GREENFIELD" ? (
+          <p className="mt-2 text-sm leading-6">
+            New application. No existing codebase required. The initial technical foundation will be created from the approved product definition and architecture.
+          </p>
+        ) : developmentContext === "EXISTING_SYSTEM" ? (
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">
+            Existing application. Add the repository that already exists. Reading it does not publish a branch or open a pull request.
+          </p>
+        ) : (
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">
+            Choose whether this product starts from a new codebase or builds on one that already exists.
+          </p>
+        )}
+      </div>
+      {developmentContext === null ? (
+        <div className="grid gap-3 md:grid-cols-2">
+          <ContextChoice
+            productId={productId}
+            value="GREENFIELD"
+            label="New application"
+            detail="Start from a new codebase."
+            pendingLabel="Saving…"
+          />
+          <ContextChoice
+            productId={productId}
+            value="EXISTING_SYSTEM"
+            label="Existing application"
+            detail="Build on an existing codebase."
+            pendingLabel="Saving…"
+          />
+        </div>
+      ) : null}
+      {developmentContext === "GREENFIELD" ? (
+        <ContextChoice
+          productId={productId}
+          value="EXISTING_SYSTEM"
+          label="Switch to an existing application"
+          detail="Saved repository details stay available if you switch back."
+          pendingLabel="Saving…"
+        />
+      ) : null}
+      {developmentContext === "EXISTING_SYSTEM" ? (
+        <>
+          <ContextChoice
+            productId={productId}
+            value="GREENFIELD"
+            label="Switch to a new application"
+            detail="Saved repository details are kept, and a codebase is no longer required."
+            pendingLabel="Saving…"
+          />
+          {children}
+        </>
+      ) : null}
+    </section>
   );
 }
 

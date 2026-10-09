@@ -261,6 +261,54 @@ describe("governance entry", () => {
     expect(await db.engineeringGovernanceReview.count({ where: { productId: setup.product.id } })).toBe(0);
   });
 
+  it("repairs a component id copied into an NFR link and stores only the resolved requirement", async () => {
+    const setup = await readyProduct();
+    const wrong = governanceFixture({
+      componentId: setup.component.id,
+      adrId: setup.adr.id,
+      taskIds: [setup.task.id],
+      nfrId: setup.component.id,
+      workItemId: setup.story.id,
+    });
+    const corrected = governanceFixture({
+      componentId: "CMP-001",
+      adrId: "ADR-001",
+      taskIds: ["TSK-001"],
+      nfrId: "NFR-001",
+      workItemId: "STORY-001",
+    });
+    let calls = 0;
+    setAIProviderForTests({
+      async generate<T>(request: { messages: { content: string }[] }) {
+        calls += 1;
+        if (calls === 1) {
+          const prompt = JSON.stringify(request.messages);
+          expect(prompt).not.toContain(setup.component.id);
+          expect(prompt).toContain("NFR-001");
+          expect(prompt).toContain("CMP-001");
+        }
+        return {
+          data: (calls === 1 ? wrong : corrected) as T,
+          usage: { inputTokens: 10, outputTokens: 12 },
+          model: "mock",
+        };
+      },
+    });
+    await generateGovernanceReview(setup.product.id);
+    expect(calls).toBe(2);
+    const proposal = await db.governanceProposal.findFirst({ where: { productId: setup.product.id, status: "OPEN" } });
+    const payload = proposal?.payload as { findings?: { nfrId?: string }[] };
+    expect(payload.findings?.[0]?.nfrId).toBe(setup.nfr.id);
+    expect(payload.findings?.[0]?.nfrId).not.toBe(setup.component.id);
+    await db.nonFunctionalRequirement.update({
+      where: { id: setup.nfr.id },
+      data: { title: "A customer must not see another customer's notice, including attachments." },
+    });
+    const revised = await db.nonFunctionalRequirement.findUnique({ where: { id: setup.nfr.id } });
+    expect(revised?.referenceCode).toBe("NFR-001");
+    expect(revised?.id).toBe(setup.nfr.id);
+  });
+
   it("rejects unknown references and does not store a proposal", async () => {
     const setup = await readyProduct();
     const fixture = governanceFixture({
@@ -271,7 +319,7 @@ describe("governance entry", () => {
       workItemId: setup.story.id,
     });
     setAIProviderForTests(mockProvider(fixture));
-    await expect(generateGovernanceReview(setup.product.id)).rejects.toThrow(/Unknown architecture component/i);
+    await expect(generateGovernanceReview(setup.product.id)).rejects.toThrow(/not part of the current approved definition/i);
     expect(await db.governanceProposal.count({ where: { productId: setup.product.id } })).toBe(0);
   });
 });
@@ -540,7 +588,88 @@ describe("coding readiness blockers", () => {
       where: { productId: setup.product.id, type: "FINDING_UPDATED" },
     });
     expect(activity?.description).toMatch(/slice will not store evidence/);
+    expect(activity?.actor).toBe("Local user");
+    expect(activity?.description).toMatch(/accepted the residual risk/);
+    expect(activity?.description).toMatch(/not resolved/);
+    const evidence = await db.governanceEvidence.findFirst({ where: { findingId: finding.id } });
+    expect(evidence?.type).toBe("HUMAN_CONFIRMATION");
+    expect(evidence?.source).toBe("Local user");
+    expect(evidence?.result).toMatch(/slice will not store evidence/);
+    expect(saved?.owner).toBe("Local user");
+    expect(saved?.status).not.toBe("MITIGATED");
+    const reread = await db.governanceFinding.findUnique({ where: { id: finding.id } });
+    expect(reread?.status).toBe("RISK_ACCEPTED");
+    expect(reread?.rationale).toMatch(/slice will not store evidence/);
     expect((await assessCodingReadiness(setup.product.id)).blockers.join(" ")).not.toMatch(/CRITICAL/);
+  });
+
+  it("refuses to waive a blocking finding by accepting or closing it", async () => {
+    const { setup, review } = await approvedReview({
+      finding: { severity: "CRITICAL" },
+    });
+    const finding = await db.governanceFinding.findFirst({ where: { reviewId: review.id } });
+    if (!finding) throw new Error("expected a finding");
+    await expect(
+      updateGovernanceFinding({
+        productId: setup.product.id,
+        findingId: finding.id,
+        status: "ACCEPTED",
+        rationale: "Accepted for the pilot because the store is private.",
+      }),
+    ).rejects.toThrow(/not a risk decision/i);
+    await expect(
+      updateGovernanceFinding({
+        productId: setup.product.id,
+        findingId: finding.id,
+        status: "CLOSED",
+        rationale: "Closing the critical finding without a control.",
+      }),
+    ).rejects.toThrow(/blocks progression/i);
+    const saved = await db.governanceFinding.findUnique({ where: { id: finding.id } });
+    expect(saved?.status).toBe("OPEN");
+    expect((await assessCodingReadiness(setup.product.id)).blockers.join(" ")).toMatch(/CRITICAL/);
+  });
+
+  it("keeps a resolved finding distinct from an accepted risk and clears the gate", async () => {
+    const { setup, review } = await approvedReview({
+      finding: { severity: "HIGH", dueBeforeCoding: true },
+    });
+    const finding = await db.governanceFinding.findFirst({ where: { reviewId: review.id } });
+    if (!finding) throw new Error("expected a finding");
+    await expect(
+      updateGovernanceFinding({
+        productId: setup.product.id,
+        findingId: finding.id,
+        status: "MITIGATED",
+        rationale: "short",
+      }),
+    ).rejects.toThrow(/addressed/i);
+    await updateGovernanceFinding({
+      productId: setup.product.id,
+      findingId: finding.id,
+      status: "MITIGATED",
+      rationale: "Request throttling is now required on the authentication endpoint.",
+    });
+    const saved = await db.governanceFinding.findUnique({ where: { id: finding.id } });
+    expect(saved?.status).toBe("MITIGATED");
+    expect(saved?.status).not.toBe("RISK_ACCEPTED");
+    expect((await assessCodingReadiness(setup.product.id)).blockers.join(" ")).not.toMatch(/due before coding/);
+  });
+
+  it("requires a rationale before a non-blocking risk is accepted", async () => {
+    const { setup, review } = await approvedReview({
+      finding: { severity: "MEDIUM" },
+    });
+    const finding = await db.governanceFinding.findFirst({ where: { reviewId: review.id } });
+    if (!finding) throw new Error("expected a finding");
+    await expect(
+      updateGovernanceFinding({
+        productId: setup.product.id,
+        findingId: finding.id,
+        status: "RISK_ACCEPTED",
+        rationale: "later",
+      }),
+    ).rejects.toThrow(/rationale is required/i);
   });
 
   it("requires coding policy approval and governance approval", async () => {

@@ -421,6 +421,8 @@ const reviewInclude = {
   questions: { orderBy: { createdAt: "asc" as const } },
   evidence: { orderBy: { createdAt: "asc" as const } },
   policy: true,
+  architecture: { select: { version: true } },
+  plan: { select: { version: true } },
 } satisfies Prisma.EngineeringGovernanceReviewInclude;
 
 export async function latestGovernanceReview(productId: string) {

@@ -1,13 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState } from "react";
+import { useActionState, useEffect, useState } from "react";
 
 import { FormMessage, SubmitButton } from "@/components/forms/fields";
 import { STAGE_META, type ProductStage } from "@/domain/constants";
 import { idleState } from "@/lib/action-state";
 import { formatRelative } from "@/lib/format";
 import type { BlockerView, EvidenceItem, ProductGuidance, StageMark } from "@/modules/guidance/types";
+import { generateDefinitionAction } from "@/server/actions/requirements";
 import { moveStageAction } from "@/server/actions/products";
 
 const MOVE_TARGET: Record<string, ProductStage> = {
@@ -54,7 +55,69 @@ export function BlockerCard({ blocker }: { blocker: BlockerView }) {
   );
 }
 
+function hashId(hash: string) {
+  const id = decodeURIComponent(hash.replace(/^#/, ""));
+  return id || null;
+}
+
+function revealHashTarget(id: string, behavior: ScrollBehavior = "smooth") {
+  const target = document.getElementById(id);
+  if (!target) return false;
+  if (!target.hasAttribute("tabindex")) target.setAttribute("tabindex", "-1");
+  target.scrollIntoView({ behavior, block: "start" });
+  target.focus({ preventScroll: true });
+  return true;
+}
+
+function NextActionLink({ href, label }: { href: string; label: string }) {
+  const [missing, setMissing] = useState(false);
+
+  function onClick(event: React.MouseEvent<HTMLAnchorElement>) {
+    const url = new URL(href, window.location.origin);
+    const id = hashId(url.hash);
+    if (!id || url.pathname !== window.location.pathname) return;
+    event.preventDefault();
+    if (!revealHashTarget(id)) {
+      setMissing(true);
+      return;
+    }
+    setMissing(false);
+    const next = `${url.pathname}${window.location.search}#${id}`;
+    if (`${window.location.pathname}${window.location.search}${window.location.hash}` !== next) {
+      window.history.pushState(null, "", next);
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      <Link href={href} onClick={onClick} className="inline-flex h-9 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground">
+        {label}
+      </Link>
+      {missing ? (
+        <p role="status" className="text-sm leading-6 text-amber-900">
+          This page has no section for that action.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 export function NextActionPanel({ guidance }: { guidance: ProductGuidance }) {
+  useEffect(() => {
+    const id = hashId(window.location.hash);
+    if (!id) return;
+    let attempts = 0;
+    const timer = window.setInterval(() => {
+      attempts += 1;
+      const target = document.getElementById(id);
+      const rect = target?.getBoundingClientRect();
+      const placed = Boolean(rect && rect.height > 40 && rect.top >= 48 && rect.top <= 140);
+      if (!placed) revealHashTarget(id, "auto");
+      if (placed || attempts >= 40) window.clearInterval(timer);
+    }, 100);
+    return () => window.clearInterval(timer);
+  }, []);
+
   if (guidance.blocker) return <BlockerCard blocker={guidance.blocker} />;
   if (!guidance.action) {
     return (
@@ -73,13 +136,24 @@ export function NextActionPanel({ guidance }: { guidance: ProductGuidance }) {
       <p className="mt-2 text-sm leading-6">{action.why}</p>
       <p className="mt-2 text-xs">{action.role}{action.waitingSince ? ` · waiting since ${formatRelative(action.waitingSince)}` : ""}</p>
       <div className="mt-3">
-        {moveTo ? <MoveButton productId={guidance.productId} stage={moveTo} label={action.label} /> : (
-          <Link href={action.href} className="inline-flex h-9 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground">
-            {action.label}
-          </Link>
+        {moveTo ? <MoveButton productId={guidance.productId} stage={moveTo} label={action.label} /> : action.key === "draft-definition" ? (
+          <DraftDefinitionButton productId={guidance.productId} />
+        ) : (
+          <NextActionLink href={action.href} label={action.label} />
         )}
       </div>
     </section>
+  );
+}
+
+function DraftDefinitionButton({ productId }: { productId: string }) {
+  const [state, formAction] = useActionState(generateDefinitionAction, idleState);
+  return (
+    <form action={formAction} className="space-y-2">
+      <input type="hidden" name="productId" value={productId} />
+      <SubmitButton pendingLabel="Drafting the Product Definition…">Draft the Product Definition</SubmitButton>
+      <FormMessage state={state} />
+    </form>
   );
 }
 

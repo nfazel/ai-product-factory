@@ -3,8 +3,6 @@ import {
   CODING_RISK_LABEL,
   EVIDENCE_TYPE_LABEL,
   FINDING_CATEGORY_LABEL,
-  FINDING_SEVERITY_LABEL,
-  FINDING_STATUS_LABEL,
   GOVERNANCE_ASSESSMENT_LABEL,
   SIGNAL_LEVEL_LABEL,
   THREAT_STATUS_LABEL,
@@ -20,6 +18,15 @@ import {
   QuestionAnswerForm,
 } from "@/components/build/governance-controls";
 import type { CodingReadiness } from "@/modules/governance/coding-readiness";
+import {
+  findingBlocksProgression,
+  findingStatusMeaning,
+  findingTraceLines,
+  progressionCopy,
+  severityLabel,
+  summarizeGovernanceChecks,
+  whyItMatters,
+} from "@/modules/governance/finding-presentation";
 import type { getGovernanceWorkspace } from "@/modules/governance/service";
 
 const LEVEL_TONE: Record<SignalLevel, string> = {
@@ -35,27 +42,48 @@ function textList(value: unknown) {
   return value.filter((item): item is string => typeof item === "string");
 }
 
-function affected(
-  links: Array<{
-    component: { name: string } | null;
-    adr: { title: string } | null;
-    task: { title: string } | null;
-    nfr: { title: string } | null;
-    workItem: { title: string } | null;
-    assumption: { description: string } | null;
-  }>,
-) {
-  const names = links.flatMap((link) =>
-    [
-      link.component?.name,
-      link.adr?.title,
-      link.task?.title,
-      link.nfr?.title,
-      link.workItem?.title,
-      link.assumption?.description,
-    ].filter((item): item is string => Boolean(item)),
+function GovernanceSummary({ review }: { review: NonNullable<Workspace["review"]> }) {
+  const summary = summarizeGovernanceChecks(review);
+  const settled = summary.complete && review.status === "APPROVED" && !review.reviewRequired;
+  return (
+    <div className="rounded-xl border p-3">
+      <h3 className="text-sm font-semibold">Governance review</h3>
+      <p className="mt-1 text-sm">
+        {summary.total} {summary.total === 1 ? "check" : "checks"} performed
+      </p>
+      <dl className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <Count label="Passed" value={summary.passed} />
+        <Count label="Risks accepted" value={summary.riskAccepted} />
+        <Count label="Open" value={summary.open} />
+        <Count label="Blocking" value={summary.blocking} />
+      </dl>
+      <p className="mt-3 text-sm leading-6">
+        {settled
+          ? "Governance review complete. No open or blocking checks remain."
+          : summary.blocking > 0
+            ? "Blocking checks must be resolved, or the residual risk accepted where the rules allow it, before Build can progress."
+            : summary.complete
+              ? "No open or blocking checks remain. Approving the engineering review is still a separate decision."
+              : "Open checks still need a decision. They do not block progression."}
+      </p>
+      <p className="mt-1 text-xs text-muted-foreground">
+        Review v{review.version}. Design v{review.architecture.version}. Delivery plan v{review.plan.version}.
+      </p>
+    </div>
   );
-  return names.length > 0 ? names.join(", ") : "Not linked";
+}
+
+function Count({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-lg border p-2">
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd className="text-lg font-semibold">{value}</dd>
+    </div>
+  );
+}
+
+function when(value: Date) {
+  return value.toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" });
 }
 
 export function BuildReadiness({ coding }: { coding: CodingReadiness }) {
@@ -133,9 +161,9 @@ export function GovernancePanel({
   const review = governance.review;
   const policy = review?.policy ?? null;
   return (
-    <section className="space-y-4 rounded-2xl border bg-card p-4 sm:p-5">
+    <section id="review" tabIndex={-1} className="scroll-mt-20 space-y-4 rounded-2xl border bg-card p-4 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 sm:p-5">
       <div>
-        <h2 id="review" className="scroll-mt-20 text-base font-semibold">Engineering review</h2>
+        <h2 className="text-base font-semibold">Engineering review</h2>
         <p className="mt-2 text-sm leading-6 text-muted-foreground">
           Independent review of the approved definition, design, and delivery plan.
           This is not a penetration test. Dependency comments are an AI review until a scanner is connected.
@@ -149,6 +177,7 @@ export function GovernancePanel({
           ))}
         </div>
       ) : null}
+      {review ? <GovernanceSummary review={review} /> : null}
       <GovernanceRunControls productId={productId} />
       {governance.proposal ? (
         <div className="rounded-xl border p-3">
@@ -198,23 +227,84 @@ export function GovernancePanel({
       <div>
         <h3 className="text-sm font-semibold">Findings</h3>
         <ul className="mt-3 space-y-3">
-          {(review?.findings ?? []).map((finding) => (
-            <li key={finding.id} className="rounded-xl border p-3 text-sm leading-6">
-              <p className="font-medium">
-                {FINDING_SEVERITY_LABEL[finding.severity]} · {FINDING_CATEGORY_LABEL[finding.category]} · {finding.title}
-              </p>
-              <p>{finding.description}</p>
-              <p className="text-muted-foreground">Affected item: {affected(finding.links)}</p>
-              <p className="text-muted-foreground">Evidence: {finding.evidence}</p>
-              <p>Recommendation: {finding.recommendation}</p>
-              <p className="text-muted-foreground">
-                Status {FINDING_STATUS_LABEL[finding.status]}. Due before coding: {finding.dueBeforeCoding ? "Yes" : "No"}.
-                {finding.owner ? ` Owner: ${finding.owner}.` : ""}
-              </p>
-              {finding.rationale ? <p>Rationale: {finding.rationale}</p> : null}
-              <FindingActions productId={productId} findingId={finding.id} severity={finding.severity} />
-            </li>
-          ))}
+          {(review?.findings ?? []).map((finding) => {
+            const progression = progressionCopy(finding);
+            const history = (review?.evidence ?? []).filter((item) => item.findingId === finding.id);
+            const trace = findingTraceLines(finding.links, finding.title);
+            return (
+              <li key={finding.id} className="rounded-xl border p-3 text-sm leading-6">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h4 className="font-medium">{finding.title}</h4>
+                  <span className="rounded-full bg-stone-100 px-2 py-0.5 text-xs font-medium">{severityLabel(finding.severity)}</span>
+                  <span className="rounded-full bg-stone-100 px-2 py-0.5 text-xs font-medium">{FINDING_CATEGORY_LABEL[finding.category]}</span>
+                  <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${progression.blocks ? "bg-red-50 text-red-900" : "bg-emerald-50 text-emerald-800"}`}>
+                    {progression.label}
+                  </span>
+                </div>
+                <p className="mt-2">
+                  <span className="font-medium">Status. </span>
+                  {findingStatusMeaning(finding.status)}
+                </p>
+                <p className="mt-2">
+                  <span className="font-medium">Issue. </span>
+                  {finding.description}
+                </p>
+                <p className="mt-2">
+                  <span className="font-medium">Why it matters. </span>
+                  {whyItMatters(finding)}
+                </p>
+                <div className="mt-2">
+                  <p className="font-medium">Source</p>
+                  <ol className="mt-1 space-y-1 text-muted-foreground">
+                    {trace.map((line, index) => (
+                      <li key={`${finding.id}-${line}`}>
+                        {index > 0 ? "↓ " : ""}
+                        {line}
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+                <p className="mt-2">
+                  <span className="font-medium">Recommended action. </span>
+                  {finding.recommendation}
+                </p>
+                <p className="mt-2 text-muted-foreground">{progression.text}</p>
+                {finding.rationale ? (
+                  <p className="mt-2">
+                    <span className="font-medium">Recorded rationale. </span>
+                    {finding.rationale}
+                    {finding.owner ? ` Recorded by ${finding.owner}.` : ""}
+                    {` Updated ${when(finding.updatedAt)}.`}
+                  </p>
+                ) : null}
+                <details className="mt-3">
+                  <summary className="cursor-pointer text-sm font-medium">Decision history</summary>
+                  <ol className="mt-2 space-y-2 text-muted-foreground">
+                    <li>Raised {when(finding.createdAt)} on governance review v{review?.version}. Design v{review?.architecture.version}.</li>
+                    {history.map((item) => (
+                      <li key={item.id}>
+                        {when(item.createdAt)}. {item.source}. {item.description}
+                        {item.result && item.result !== "Human confirmation" ? ` Rationale: ${item.result}` : ""}
+                      </li>
+                    ))}
+                    {history.length === 0 ? <li>No human decision has been recorded yet.</li> : null}
+                  </ol>
+                </details>
+                <FindingActions
+                  productId={productId}
+                  findingId={finding.id}
+                  open={finding.status === "OPEN" || finding.status === "ACCEPTED"}
+                  blocks={findingBlocksProgression(finding)}
+                  acceptRisk={{
+                    title: finding.title,
+                    severity: severityLabel(finding.severity),
+                    impact: whyItMatters(finding),
+                    recommendation: finding.recommendation,
+                  }}
+                />
+              </li>
+            );
+          })}
           {review && review.findings.length === 0 ? (
             <li className="text-sm text-muted-foreground">No findings recorded.</li>
           ) : null}

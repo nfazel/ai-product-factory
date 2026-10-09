@@ -19,6 +19,9 @@ import {
 import { assertArchitectureGraph } from "@/modules/architecture/validate";
 import type { AgentRunner } from "@/modules/agent/types";
 import { DomainError } from "@/modules/shared/errors";
+import { presentForModel, translateArchitectureReferences } from "@/modules/traceability/references";
+import { generateResolved } from "@/modules/traceability/repair";
+import { assignMissingReferenceCodes, citedFromContext } from "@/modules/traceability/store";
 
 const refusal =
   "The Architecture Agent returned a response that did not match the required structure. Nothing was written. You can retry.";
@@ -57,39 +60,61 @@ export const architectureRunner: AgentRunner = {
       throw new DomainError("Choose a section to regenerate.");
     }
 
+    await assignMissingReferenceCodes(request.productId);
     const context = await loadArchitectureContext(request.productId);
-    const provider = await getAIProvider();
-    const result = await provider.generate({
-      systemPrompt: ARCHITECTURE_SYSTEM_PROMPT,
-      messages: architectureMessages({
-        mode,
-        section,
-        featureTitle:
-          typeof request.input.featureTitle === "string" ? request.input.featureTitle : "",
-        productName: gate.product.name,
-        stage: gate.product.currentStage,
-        context,
-      }),
-      responseSchema: architectureResponseSchema,
-      schemaName: "solution_architecture",
-      temperature: 0.2,
+    const records = citedFromContext({
+      nfrs: context.nonFunctionalRequirements,
+      workItems: context.workItems,
+      assumptions: context.assumptions,
+      capabilities: context.capabilities,
+      components: context.approvedArchitecture?.components ?? [],
+      decisions: context.approvedArchitecture?.decisions ?? [],
+      tasks: [],
     });
-
-    const parsed = architectureResponseSchema.safeParse(result.data);
-    if (!parsed.success) throw new DomainError(refusal);
+    const provider = await getAIProvider();
+    const messages = architectureMessages({
+      mode,
+      section,
+      featureTitle:
+        typeof request.input.featureTitle === "string" ? request.input.featureTitle : "",
+      productName: gate.product.name,
+      stage: gate.product.currentStage,
+      context: presentForModel(context, records),
+    });
+    const purpose =
+      mode === "plan"
+        ? "Generate Delivery Plan"
+        : mode === "regenerate"
+          ? "Regenerate Design"
+          : mode === "review"
+            ? "Review Design"
+            : "Generate Design";
+    const result = await generateResolved(
+      provider,
+      {
+        systemPrompt: ARCHITECTURE_SYSTEM_PROMPT,
+        messages,
+        responseSchema: architectureResponseSchema,
+        schemaName: "solution_architecture",
+        purpose,
+        temperature: 0.2,
+      },
+      (data) => translateArchitectureReferences(data, records),
+      refusal,
+    );
 
     const refs = {
       nfrIds: new Set(context.nonFunctionalRequirements.map((item) => item.id)),
       capabilityIds: new Set(context.capabilities.map((item) => item.id)),
       workItemIds: new Set(context.workItems.map((item) => item.id)),
     };
-    assertArchitectureGraph(parsed.data, refs);
+    assertArchitectureGraph(result.data, refs);
 
     if (mode === "review") {
       return {
         output: {
           mode,
-          summary: parsed.data.assistantSummary,
+          summary: result.data.assistantSummary,
           ...aiRunEvidence(result),
           approved: false,
         },
@@ -101,11 +126,11 @@ export const architectureRunner: AgentRunner = {
       mode === "regenerate" && open
         ? mergeRegeneratedSection(
             open.payload,
-            parsed.data,
+            result.data,
             section ?? "summary",
             typeof request.input.featureTitle === "string" ? request.input.featureTitle : "",
           )
-        : toStoredArchitecture(parsed.data);
+        : toStoredArchitecture(result.data);
     if (mode === "regenerate" && open) {
       await saveProposalPayload(open.id, stored);
     } else {

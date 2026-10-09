@@ -3,8 +3,10 @@ import "server-only";
 import { db } from "@/lib/db";
 import type { ProductStage } from "@/domain/constants";
 import { BLOCKING_FINDING_TYPES } from "@/modules/intake/readiness";
+import { codebaseCaptured } from "@/modules/architecture/development-context";
 import { entryBlockers, learnBlockers, type ReleaseFacts, type ReleaseTaskFact } from "@/modules/release/readiness";
 import type { GuidanceSnapshot, TaskSnapshot } from "@/modules/guidance/types";
+import { staleDesignReferenceMessage } from "@/modules/traceability/references";
 
 const STAGES = new Set(["EXPLORE", "DEFINE", "BUILD", "PROVE", "SHIP", "LEARN"]);
 
@@ -18,6 +20,12 @@ function countJson(value: unknown) {
 
 function iso(value: Date | null | undefined) {
   return value ? value.toISOString() : null;
+}
+
+function traceabilityIssue(coverages: { mechanism: string; nfr: { status: string; title: string; referenceCode: string } | null }[]) {
+  const stale = coverages.find((coverage) => !coverage.nfr || coverage.nfr.status === "REJECTED");
+  if (!stale) return "";
+  return staleDesignReferenceMessage(stale.nfr?.referenceCode || stale.nfr?.title || stale.mechanism || "the design");
 }
 
 export async function loadSnapshots(productId?: string): Promise<GuidanceSnapshot[]> {
@@ -67,12 +75,21 @@ export async function loadSnapshots(productId?: string): Promise<GuidanceSnapsho
       db.integratedVerificationSession.findMany({ where: { productId: { in: ids } }, orderBy: { createdAt: "desc" } }),
     ]);
 
-  const [requirementSources, analyses, intakeRequirements, intakeFindings, intakeQuestions] = await Promise.all([
+  const [requirementSources, analyses, intakeRequirements, intakeFindings, intakeQuestions, codebaseRows, coverages] = await Promise.all([
     db.requirementSource.findMany({ where: { productId: { in: ids } } }),
     db.requirementsAnalysis.findMany({ where: { productId: { in: ids } }, include: { sources: true }, orderBy: { version: "desc" } }),
     db.sourceRequirement.findMany({ where: { productId: { in: ids } }, include: { traces: true } }),
     db.requirementFinding.findMany({ where: { productId: { in: ids }, status: "OPEN" } }),
     db.intakeQuestion.findMany({ where: { productId: { in: ids }, status: "OPEN" } }),
+    db.codebaseContext.findMany({ where: { productId: { in: ids } } }),
+    db.nfrCoverage.findMany({
+      where: { architecture: { productId: { in: ids }, status: { not: "SUPERSEDED" } } },
+      select: {
+        mechanism: true,
+        architecture: { select: { productId: true } },
+        nfr: { select: { status: true, title: true, referenceCode: true } },
+      },
+    }),
   ]);
 
   return products.map((product) => {
@@ -217,6 +234,11 @@ export async function loadSnapshots(productId?: string): Promise<GuidanceSnapsho
       sample: Boolean(definition?.seededDemo || architecture?.seededDemo || plan?.seededDemo || review?.seededDemo || releaseRows.some((item) => item.demo)),
       startMode: product.startMode === "EXISTING_REQUIREMENTS" ? "EXISTING_REQUIREMENTS" : "IDEA",
       requirementsChanged: product.requirementsReviewRequired,
+      developmentContext:
+        product.developmentContext === "GREENFIELD" || product.developmentContext === "EXISTING_SYSTEM"
+          ? product.developmentContext
+          : "UNSET",
+      codebaseCaptured: codebaseCaptured(codebaseRows.find((item) => item.productId === product.id) ?? null),
       intake: {
         activeSources: activeSources.length,
         extractionFailed: requirementSources.some((item) => item.productId === product.id && item.status === "EXTRACTION_FAILED"),
@@ -268,6 +290,7 @@ export async function loadSnapshots(productId?: string): Promise<GuidanceSnapsho
         planReviewReason: plan?.reviewReason ?? "",
         demo: Boolean(architecture?.seededDemo || plan?.seededDemo),
         updatedAt: iso(architecture?.updatedAt ?? plan?.updatedAt),
+        traceabilityIssue: traceabilityIssue(coverages.filter((item) => item.architecture.productId === product.id)),
       },
       review: {
         exists: Boolean(review),
@@ -276,6 +299,7 @@ export async function loadSnapshots(productId?: string): Promise<GuidanceSnapsho
         reviewReason: review?.reviewReason ?? "",
         openCritical: review?.findings.filter((item) => item.severity === "CRITICAL" && item.status === "OPEN").length ?? 0,
         openHighBeforeCoding: review?.findings.filter((item) => item.severity === "HIGH" && item.dueBeforeCoding && item.status === "OPEN").length ?? 0,
+        openFindings: review?.findings.filter((item) => item.status === "OPEN" || item.status === "ACCEPTED").length ?? 0,
         policyApproved,
         policyReapproval: Boolean(review?.policy?.reapprovalRequired),
         policyReason: review?.policy?.reapprovalReason ?? "",

@@ -4,6 +4,7 @@ import { existsSync, realpathSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 
 import { db } from "@/lib/db";
+import { developmentContextInstruction } from "@/modules/architecture/development-context";
 import { findCurrentBrief } from "@/modules/discovery/repository";
 import { DomainError } from "@/modules/shared/errors";
 
@@ -61,8 +62,9 @@ export function analyseConfiguredRoot() {
 }
 
 export async function loadArchitectureContext(productId: string) {
-  const [brief, definition, outcomes, capabilities, slice, workItems, nfrs, questions, assumptions, decisions, context, architectures, runs] =
+  const [product, brief, definition, outcomes, capabilities, slice, workItems, nfrs, questions, assumptions, decisions, context, architectures, runs] =
     await Promise.all([
+      db.product.findUnique({ where: { id: productId }, select: { developmentContext: true } }),
       findCurrentBrief(productId),
       db.productDefinition.findUnique({ where: { productId } }),
       db.productOutcome.findMany({ where: { productId } }),
@@ -110,6 +112,7 @@ export async function loadArchitectureContext(productId: string) {
     approvedSlice: slice,
     workItems: workItems.map((item) => ({
       id: item.id,
+      referenceCode: item.referenceCode,
       type: item.type,
       title: item.title,
       description: item.description,
@@ -122,8 +125,10 @@ export async function loadArchitectureContext(productId: string) {
     questions,
     assumptions,
     decisions,
-    codebaseContext: context,
-    localProject: safeLocalSummary(),
+    developmentContext: product?.developmentContext ?? null,
+    developmentInstruction: developmentContextInstruction(product?.developmentContext ?? null),
+    codebaseContext: product?.developmentContext === "GREENFIELD" ? null : context,
+    localProject: product?.developmentContext === "EXISTING_SYSTEM" ? safeLocalSummary() : null,
     approvedArchitecture: architectures.find((item) => item.status === "APPROVED") ?? null,
     previousArchitectures: architectures.map((item) => ({
       version: item.version,

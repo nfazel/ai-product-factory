@@ -551,6 +551,27 @@ export async function addImplementationDependency(input: {
   );
 }
 
+export async function chooseDevelopmentContext(
+  productId: string,
+  developmentContext: "GREENFIELD" | "EXISTING_SYSTEM",
+) {
+  const product = await db.product.findUnique({ where: { id: productId } });
+  if (!product) throw new DomainError("Product not found.", "NOT_FOUND");
+  const saved = await db.product.update({
+    where: { id: productId },
+    data: { developmentContext },
+  });
+  await recordActivity({
+    productId,
+    type: "DEVELOPMENT_CONTEXT_CHOSEN",
+    description:
+      developmentContext === "GREENFIELD"
+        ? "Recorded that this is a new application. No existing codebase is required."
+        : "Recorded that this builds on an existing application.",
+  });
+  return saved;
+}
+
 export async function saveManualCodebaseContext(input: {
   productId: string;
   repositoryName: string;
@@ -572,14 +593,18 @@ export async function saveManualCodebaseContext(input: {
   const saved = await db.codebaseContext.upsert({
     where: { productId: input.productId },
     update: {
-      ...mappedContext(input),
+      ...mappedContext({ ...input, systemKind: "EXISTING_SYSTEM" }),
       source: "MANUAL",
     },
     create: {
       productId: input.productId,
-      ...mappedContext(input),
+      ...mappedContext({ ...input, systemKind: "EXISTING_SYSTEM" }),
       source: "MANUAL",
     },
+  });
+  await db.product.update({
+    where: { id: input.productId },
+    data: { developmentContext: "EXISTING_SYSTEM" },
   });
   await recordActivity({
     productId: input.productId,
@@ -618,6 +643,10 @@ export async function captureLocalCodebaseContext(productId: string) {
       systemKind: "EXISTING_SYSTEM",
     },
   });
+  await db.product.update({
+    where: { id: productId },
+    data: { developmentContext: "EXISTING_SYSTEM" },
+  });
   await recordActivity({
     productId,
     type: "CODEBASE_CONTEXT_UPDATED",
@@ -631,13 +660,14 @@ export async function getCodingReadiness(productId: string) {
 }
 
 export async function getBuildWorkspace(productId: string) {
-  const [gate, context, architecture, plan, proposal, planProposal, coding, nfrs, governance, codingExecution] =
+  const [gate, context, development, architecture, plan, proposal, planProposal, coding, nfrs, governance, codingExecution] =
     await Promise.all([
     architectureEntryBlockers(productId).catch((error: unknown) => {
       if (error instanceof DomainError && error.code === "NOT_FOUND") return null;
       throw error;
     }),
     db.codebaseContext.findUnique({ where: { productId } }),
+    db.product.findUnique({ where: { id: productId }, select: { developmentContext: true } }),
     architectureGraph(productId),
     planGraph(productId),
     db.architectureProposal.findFirst({
@@ -665,6 +695,7 @@ export async function getBuildWorkspace(productId: string) {
   return {
     product: gate.product,
     entryReasons: gate.reasons,
+    developmentContext: development?.developmentContext ?? null,
     context,
     architecture,
     plan,

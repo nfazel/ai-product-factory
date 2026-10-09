@@ -151,6 +151,13 @@ describe("AI provider registry", () => {
       /No other model was substituted/,
     );
     expect(() => mapProviderFailure(new DomainError("kept"))).toThrow(/kept/);
+    expect(() =>
+      mapProviderFailure(
+        Object.assign(new Error('{"error":{"code":400,"message":"Request contains an invalid argument.","status":"INVALID_ARGUMENT"}}'), {
+          status: 400,
+        }),
+      ),
+    ).toThrow(/request format was not accepted/);
   });
 
   it("keeps credentials out of configuration, child processes, and the settings page", () => {

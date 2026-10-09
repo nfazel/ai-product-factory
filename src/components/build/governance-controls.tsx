@@ -130,30 +130,32 @@ export function GovernanceApprovalControls({ productId }: { productId: string })
 export function FindingActions({
   productId,
   findingId,
-  severity,
+  open,
+  blocks,
+  acceptRisk,
 }: {
   productId: string;
   findingId: string;
-  severity: string;
+  open: boolean;
+  blocks: boolean;
+  acceptRisk: {
+    title: string;
+    severity: string;
+    impact: string;
+    recommendation: string;
+  };
 }) {
-  return (
-    <div className="mt-3 space-y-2">
-      <div className="flex flex-wrap gap-2">
-        <StatusButton productId={productId} findingId={findingId} status="ACCEPTED" label="Accept finding" />
-        <StatusButton productId={productId} findingId={findingId} status="MITIGATED" label="Mark mitigated" />
-        <StatusButton productId={productId} findingId={findingId} status="CLOSED" label="Close" />
+  if (!open) {
+    return (
+      <div className="mt-3">
+        <StatusButton productId={productId} findingId={findingId} status="OPEN" label="Reopen finding" />
       </div>
-      <RationaleForm
-        productId={productId}
-        findingId={findingId}
-        status="RISK_ACCEPTED"
-        label="Accept risk"
-        hint={
-          severity === "HIGH" || severity === "CRITICAL"
-            ? "A rationale is required for a high or critical risk."
-            : "Record why this risk is accepted."
-        }
-      />
+    );
+  }
+  return (
+    <div className="mt-3 space-y-3">
+      <ResolveForm productId={productId} findingId={findingId} />
+      <AcceptRiskForm productId={productId} findingId={findingId} blocks={blocks} {...acceptRisk} />
       <CommentForm productId={productId} findingId={findingId} />
     </div>
   );
@@ -182,29 +184,96 @@ function StatusButton({
   );
 }
 
-function RationaleForm({
+function ResolveForm({ productId, findingId }: { productId: string; findingId: string }) {
+  const [state, formAction] = useActionState(updateFindingAction, idleState);
+  return (
+    <details className="rounded-xl border p-3">
+      <summary className="cursor-pointer text-sm font-medium">Mark resolved</summary>
+      <form action={formAction} className="mt-3 space-y-2">
+        <input type="hidden" name="productId" value={productId} />
+        <input type="hidden" name="findingId" value={findingId} />
+        <input type="hidden" name="status" value="MITIGATED" />
+        <p className="text-sm leading-6 text-muted-foreground">
+          Use this when the underlying issue has been addressed. Resolved is different from accepting the residual risk.
+        </p>
+        <TextAreaField
+          label="What was addressed"
+          name="rationale"
+          hint="A short note is required, for example the control that was added."
+          required
+          minLength={12}
+        />
+        <SubmitButton pendingLabel="Saving">Record resolution</SubmitButton>
+        <FormMessage state={state} />
+      </form>
+    </details>
+  );
+}
+
+function AcceptRiskForm({
   productId,
   findingId,
-  status,
-  label,
-  hint,
+  blocks,
+  title,
+  severity,
+  impact,
+  recommendation,
 }: {
   productId: string;
   findingId: string;
-  status: string;
-  label: string;
-  hint: string;
+  blocks: boolean;
+  title: string;
+  severity: string;
+  impact: string;
+  recommendation: string;
 }) {
   const [state, formAction] = useActionState(updateFindingAction, idleState);
   return (
-    <form action={formAction} className="space-y-2">
-      <input type="hidden" name="productId" value={productId} />
-      <input type="hidden" name="findingId" value={findingId} />
-      <input type="hidden" name="status" value={status} />
-      <TextAreaField label="Rationale" name="rationale" hint={hint} />
-      <SubmitButton pendingLabel="Saving">{label}</SubmitButton>
-      <FormMessage state={state} />
-    </form>
+    <details className="rounded-xl border border-amber-200 bg-amber-50/60 p-3">
+      <summary className="cursor-pointer text-sm font-medium">Accept risk</summary>
+      <form action={formAction} className="mt-3 space-y-3">
+        <input type="hidden" name="productId" value={productId} />
+        <input type="hidden" name="findingId" value={findingId} />
+        <input type="hidden" name="status" value="RISK_ACCEPTED" />
+        <p className="text-sm leading-6">
+          You are accepting the residual risk. This does not mark the issue as fixed.
+          {blocks
+            ? " Under the current rules, a recorded acceptance means this finding no longer blocks coding."
+            : " This finding does not block coding."}
+        </p>
+        <dl className="space-y-2 text-sm leading-6">
+          <div>
+            <dt className="text-xs font-medium text-muted-foreground">Finding</dt>
+            <dd>{title}</dd>
+          </div>
+          <div>
+            <dt className="text-xs font-medium text-muted-foreground">Severity</dt>
+            <dd>{severity}</dd>
+          </div>
+          <div>
+            <dt className="text-xs font-medium text-muted-foreground">Potential impact</dt>
+            <dd>{impact}</dd>
+          </div>
+          <div>
+            <dt className="text-xs font-medium text-muted-foreground">Recommended mitigation</dt>
+            <dd>{recommendation}</dd>
+          </div>
+          <div>
+            <dt className="text-xs font-medium text-muted-foreground">Residual risk being accepted</dt>
+            <dd>The issue remains: {title}. Acceptance leaves it distinguishable from a resolved finding.</dd>
+          </div>
+        </dl>
+        <TextAreaField
+          label="Why this risk is accepted"
+          name="rationale"
+          hint="Required. For example: accepted for the pilot because this capability is not exposed outside the pilot and will be addressed before public launch."
+          required
+          minLength={12}
+        />
+        <SubmitButton pendingLabel="Saving" variant="outline">Record risk acceptance</SubmitButton>
+        <FormMessage state={state} />
+      </form>
+    </details>
   );
 }
 

@@ -42,6 +42,8 @@ export type GuidanceSnapshot = {
   sample: boolean;
   startMode: "IDEA" | "EXISTING_REQUIREMENTS";
   requirementsChanged: boolean;
+  developmentContext: "UNSET" | "GREENFIELD" | "EXISTING_SYSTEM";
+  codebaseCaptured: boolean;
   intake: {
     activeSources: number;
     extractionFailed: boolean;
@@ -91,6 +93,7 @@ export type GuidanceSnapshot = {
     planReviewReason: string;
     demo: boolean;
     updatedAt: string | null;
+    traceabilityIssue: string;
   };
   review: {
     exists: boolean;
@@ -99,6 +102,7 @@ export type GuidanceSnapshot = {
     reviewReason: string;
     openCritical: number;
     openHighBeforeCoding: number;
+    openFindings: number;
     policyApproved: boolean;
     policyReapproval: boolean;
     policyReason: string;

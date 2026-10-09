@@ -1,12 +1,16 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import { db } from "@/lib/db";
+import { AIFailure } from "@/modules/ai/failures";
 import { setAIProviderForTests, type AIProvider } from "@/modules/ai/provider";
 import { persistCommittedArchitecture, persistCommittedPlan } from "@/modules/architecture/repository";
+import { loadArchitectureContext } from "@/modules/architecture/context";
 import {
   acceptEntireArchitectureProposal,
   approveImplementationPlan,
   approveSolutionArchitecture,
+  captureLocalCodebaseContext,
+  chooseDevelopmentContext,
   commitArchitecture,
   commitImplementationPlan,
   generateArchitecture,
@@ -14,6 +18,7 @@ import {
   getCodingReadiness,
   markArchitectureReady,
   markPlanReady,
+  saveManualCodebaseContext,
   updateArchitectureSummary,
 } from "@/modules/architecture/service";
 import { toStoredArchitecture } from "@/modules/architecture/schema";
@@ -228,6 +233,50 @@ describe("architecture agent entry", () => {
     const runs = await db.agentRun.findMany({ where: { productId: product.id } });
     expect(runs.every((run) => run.status === "FAILED")).toBe(true);
   });
+
+  it("records safe validation diagnostics and does not persist an invalid design", async () => {
+    const previousProvider = process.env.AI_PROVIDER;
+    const previousModel = process.env.AI_MODEL;
+    const previousGemini = process.env.GOOGLE_GEMINI_API_KEY;
+    process.env.AI_PROVIDER = "GOOGLE_GEMINI";
+    process.env.AI_MODEL = "gemini-3.5-flash-lite";
+    process.env.GOOGLE_GEMINI_API_KEY = "test-gemini-key";
+    const { product } = await readyProduct();
+    setAIProviderForTests({
+      async generate() {
+        throw new AIFailure(
+          "The model returned a response that did not match the required structure. Nothing was saved from this response.",
+          "SCHEMA_VALIDATION_FAILED",
+          {
+            operation: "Generate Design",
+            validationStage: "response schema",
+            repairAttempted: true,
+            issues: ["technologyDecisions.0.tempId: Use a stable id such as technology-1."],
+          },
+        );
+      },
+    });
+    await expect(generateArchitecture(product.id)).rejects.toThrow(/required structure/i);
+    expect(await db.architectureProposal.count({ where: { productId: product.id } })).toBe(0);
+    const run = await db.agentRun.findFirst({ where: { productId: product.id } });
+    expect(run?.status).toBe("FAILED");
+    expect(run?.output).toMatchObject({
+      operation: "Generate Design",
+      validationStage: "response schema",
+      repairAttempted: true,
+      validationIssues: ["technologyDecisions.0.tempId: Use a stable id such as technology-1."],
+    });
+    const activity = await db.activity.findFirst({
+      where: { productId: product.id, type: "AGENT_RUN_FAILED" },
+      orderBy: { createdAt: "desc" },
+    });
+    expect(activity?.description).toMatch(/Provider: Gemini/);
+    expect(activity?.description).toMatch(/Repair attempted: Yes/);
+    expect(activity?.description).toMatch(/technology-1/);
+    process.env.AI_PROVIDER = previousProvider;
+    process.env.AI_MODEL = previousModel;
+    process.env.GOOGLE_GEMINI_API_KEY = previousGemini;
+  });
 });
 
 describe("architecture commit, approval, and planning", () => {
@@ -318,6 +367,13 @@ describe("architecture commit, approval, and planning", () => {
     });
     expect(approval?.status).toBe("APPROVED");
     expect(approval?.approvedBy).not.toBe("Architecture Agent");
+    const product = await db.product.findUnique({ where: { id: setup.product.id } });
+    expect(product?.currentStage).toBe("BUILD");
+    const activity = await db.activity.findFirst({
+      where: { productId: setup.product.id, type: "ARCHITECTURE_APPROVED" },
+    });
+    expect(activity?.description).toMatch(/approved by a person/);
+    expect(activity?.description).toMatch(/stage was not changed/);
   });
 
   it("refuses an implementation plan until the architecture is approved", async () => {
@@ -485,5 +541,76 @@ describe("architecture commit, approval, and planning", () => {
       where: { productId: setup.product.id, approvalType: "IMPLEMENTATION_PLAN" },
     });
     expect(planApproval?.status).toBe("APPROVED");
+  });
+});
+
+describe("development context", () => {
+  it("records a greenfield product without a codebase and still proposes architecture", async () => {
+    const { product, capability, story, nfr } = await readyProduct("BUILD");
+    await chooseDevelopmentContext(product.id, "GREENFIELD");
+    const stored = await db.product.findUnique({ where: { id: product.id } });
+    expect(stored?.developmentContext).toBe("GREENFIELD");
+    expect(await db.codebaseContext.findUnique({ where: { productId: product.id } })).toBeNull();
+
+    const previousRoot = process.env.CODEBASE_CONTEXT_ROOT;
+    process.env.CODEBASE_CONTEXT_ROOT = process.cwd();
+    const context = await loadArchitectureContext(product.id);
+    process.env.CODEBASE_CONTEXT_ROOT = previousRoot;
+    expect(context.developmentContext).toBe("GREENFIELD");
+    expect(context.developmentInstruction).toMatch(/new application/);
+    expect(context.developmentInstruction).toMatch(/no legacy codebase/i);
+    expect(context.codebaseContext).toBeNull();
+    expect(context.localProject).toBeNull();
+
+    setAIProviderForTests(mockProvider(architectureFixture({ nfrId: nfr.id, capabilityId: capability.id, storyId: story.id })));
+    await generateArchitecture(product.id);
+    expect(await db.architectureProposal.count({ where: { productId: product.id, kind: "ARCHITECTURE" } })).toBe(1);
+  });
+
+  it("keeps saved repository details when the product switches to a new application", async () => {
+    const product = await tempProduct("BUILD");
+    await saveManualCodebaseContext({
+      productId: product.id,
+      repositoryName: "find-a-friend",
+      repositoryUrl: "https://example.test/find-a-friend",
+      defaultBranch: "main",
+      systemKind: "EXISTING_SYSTEM",
+      languages: "TypeScript",
+      frameworks: "Next.js",
+      databaseTechnologies: "PostgreSQL",
+      infrastructure: "",
+      deploymentPlatform: "",
+      architectureSummary: "Existing web application.",
+      keyDirectories: "src",
+      keyComponents: "matching",
+      knownIntegrations: "",
+      constraints: "Keep the current login.",
+      observations: "",
+    });
+    await chooseDevelopmentContext(product.id, "GREENFIELD");
+    const context = await db.codebaseContext.findUnique({ where: { productId: product.id } });
+    const choice = await db.product.findUnique({ where: { id: product.id } });
+    expect(choice?.developmentContext).toBe("GREENFIELD");
+    expect(context?.repositoryName).toBe("find-a-friend");
+    expect(context?.constraints).toBe("Keep the current login.");
+    await chooseDevelopmentContext(product.id, "EXISTING_SYSTEM");
+    const restored = await db.codebaseContext.findUnique({ where: { productId: product.id } });
+    expect(restored?.repositoryName).toBe("find-a-friend");
+    expect((await db.product.findUnique({ where: { id: product.id } }))?.developmentContext).toBe("EXISTING_SYSTEM");
+  });
+
+  it("reads a configured local repository for an existing application", async () => {
+    const product = await tempProduct("BUILD");
+    const previousRoot = process.env.CODEBASE_CONTEXT_ROOT;
+    process.env.CODEBASE_CONTEXT_ROOT = process.cwd();
+    try {
+      const saved = await captureLocalCodebaseContext(product.id);
+      expect(saved.systemKind).toBe("EXISTING_SYSTEM");
+      expect(saved.source).toBe("LOCAL_ANALYSIS");
+      expect(saved.repositoryName.length).toBeGreaterThan(0);
+      expect((await db.product.findUnique({ where: { id: product.id } }))?.developmentContext).toBe("EXISTING_SYSTEM");
+    } finally {
+      process.env.CODEBASE_CONTEXT_ROOT = previousRoot;
+    }
   });
 });

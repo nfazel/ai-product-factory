@@ -8,6 +8,7 @@ import {
   approveImplementationPlan,
   approveSolutionArchitecture,
   captureLocalCodebaseContext,
+  chooseDevelopmentContext,
   commitArchitecture,
   commitImplementationPlan,
   editProposalSummary,
@@ -29,6 +30,7 @@ import {
   architectureProductSchema,
   architectureSectionSchema,
   codebaseContextSchema,
+  developmentContextSchema,
   editRecordSchema,
   editSummarySchema,
   proposalItemSchema,
@@ -340,6 +342,25 @@ export async function addDependencyAction(
   try {
     await addImplementationDependency(parsed.data);
     return done(parsed.data.productId, "The task dependency was added.");
+  } catch (error) {
+    return actionFailure(error);
+  }
+}
+
+export async function chooseDevelopmentContextAction(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const parsed = developmentContextSchema.safeParse(formValues(formData));
+  if (!parsed.success) return invalidState(parsed.error.issues);
+  try {
+    await chooseDevelopmentContext(parsed.data.productId, parsed.data.developmentContext);
+    return done(
+      parsed.data.productId,
+      parsed.data.developmentContext === "GREENFIELD"
+        ? "Recorded as a new application. No existing codebase is required."
+        : "Recorded as an existing application.",
+    );
   } catch (error) {
     return actionFailure(error);
   }

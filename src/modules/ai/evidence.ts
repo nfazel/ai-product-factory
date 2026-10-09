@@ -7,14 +7,15 @@ export type AIRunEvidence = {
 };
 
 export function aiRunEvidence(
-  result: Pick<AIGenerateResult<unknown>, "provider" | "model" | "usage" | "finishStatus" | "durationMs">,
-): AIRunEvidence & { finishStatus?: string; durationMs?: number } {
+  result: Pick<AIGenerateResult<unknown>, "provider" | "model" | "usage" | "finishStatus" | "durationMs" | "repairAttempted">,
+): AIRunEvidence & { finishStatus?: string; durationMs?: number; repairAttempted?: boolean } {
   return {
     provider: result.provider?.trim() || "unspecified",
     model: result.model,
     usage: result.usage,
     ...(result.finishStatus ? { finishStatus: result.finishStatus } : {}),
     ...(typeof result.durationMs === "number" ? { durationMs: result.durationMs } : {}),
+    ...(result.repairAttempted ? { repairAttempted: true } : {}),
   };
 }
 

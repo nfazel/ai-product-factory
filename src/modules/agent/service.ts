@@ -4,7 +4,7 @@ import { AGENT_CATALOG, AGENT_TYPES } from "@/domain/constants";
 import { codingConfigurationGap } from "@/modules/coding/config";
 import { describeAIConfiguration } from "@/modules/ai/config";
 import { aiNotConfiguredMessage, safeErrorMessage } from "@/modules/ai/errors";
-import { AIFailure } from "@/modules/ai/failures";
+import { AIFailure, validationActivity } from "@/modules/ai/failures";
 import { prepareAI } from "@/modules/ai/provider";
 import { assertAIReady } from "@/modules/ai/surface";
 import { recordActivity } from "@/modules/activity/service";
@@ -161,6 +161,7 @@ export async function executeAgent(request: AgentExecutionRequest) {
     const completedAt = new Date();
     const message = safeErrorMessage(error);
     const configuration = describeAIConfiguration();
+    const diagnostics = error instanceof AIFailure ? error.diagnostics : undefined;
     await failAgentRun(run.id, {
       output: {
         error: message,
@@ -168,6 +169,14 @@ export async function executeAgent(request: AgentExecutionRequest) {
         ...(error instanceof AIFailure ? { errorCategory: error.category } : {}),
         ...(configuration.providerId ? { provider: configuration.providerId } : {}),
         ...(configuration.model ? { model: configuration.model } : {}),
+        ...(diagnostics
+          ? {
+              operation: diagnostics.operation,
+              validationStage: diagnostics.validationStage,
+              repairAttempted: diagnostics.repairAttempted,
+              validationIssues: diagnostics.issues,
+            }
+          : {}),
       },
       completedAt,
       duration: completedAt.getTime() - startedAt.getTime(),
@@ -176,7 +185,14 @@ export async function executeAgent(request: AgentExecutionRequest) {
       productId: request.productId,
       workItemId: request.workItemId,
       type: "AGENT_RUN_FAILED",
-      description: `${AGENT_CATALOG[request.agentType].name} failed. ${message}`,
+      description: diagnostics
+        ? validationActivity({
+            agent: AGENT_CATALOG[request.agentType].name,
+            provider: configuration.providerId,
+            model: configuration.model,
+            diagnostics,
+          })
+        : `${AGENT_CATALOG[request.agentType].name} failed. ${message}`,
       actor: AGENT_CATALOG[request.agentType].name,
     });
     if (error instanceof DomainError) throw error;

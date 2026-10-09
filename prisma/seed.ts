@@ -1078,6 +1078,10 @@ async function seedArchitectureDemo(input: {
   securityId: string;
   createdAt: Date;
 }) {
+  await prisma.product.update({
+    where: { id: input.productId },
+    data: { developmentContext: "GREENFIELD" },
+  });
   await prisma.codebaseContext.create({
     data: {
       productId: input.productId,

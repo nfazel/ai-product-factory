@@ -66,6 +66,7 @@ const designed: GuidanceSnapshot["design"] = {
   planReviewReason: "",
   demo: false,
   updatedAt: null,
+  traceabilityIssue: "",
 };
 
 const reviewed: GuidanceSnapshot["review"] = {
@@ -75,6 +76,7 @@ const reviewed: GuidanceSnapshot["review"] = {
   reviewReason: "",
   openCritical: 0,
   openHighBeforeCoding: 0,
+  openFindings: 0,
   policyApproved: true,
   policyReapproval: false,
   policyReason: "",
@@ -87,6 +89,7 @@ function pastDefine(patch: Partial<GuidanceSnapshot> = {}) {
     stage: "BUILD",
     discovery: briefApproved,
     definition: defined,
+    developmentContext: "GREENFIELD",
     ...patch,
   });
 }
@@ -138,7 +141,74 @@ describe("next action", () => {
       discovery: briefApproved,
       definition: { ...defined, status: "IN_PROGRESS", approved: false, slice: "PROPOSED" },
     }));
-    expect(guidance.action?.label).toBe("Confirm First Slice");
+    expect(guidance.action?.key).toBe("confirm-slice");
+    expect(guidance.action?.href).toBe("/products/p1/definition#slice");
+  });
+
+  it("sends an open definition proposal to the draft review", () => {
+    const guidance = assessGuidance(snap({
+      stage: "DEFINE",
+      discovery: briefApproved,
+      definition: {
+        ...defined,
+        exists: true,
+        status: "IN_PROGRESS",
+        approved: false,
+        proposalOpen: true,
+        slice: "NONE",
+      },
+    }));
+    expect(guidance.action?.key).toBe("review-definition");
+    expect(guidance.action?.label).toBe("Review the draft definition");
+    expect(guidance.action?.href).toBe("/products/p1/definition#proposal");
+    expect(guidance.action?.decision).toBe(true);
+  });
+
+  it("asks to draft again when the definition has no First Slice to confirm", () => {
+    const guidance = assessGuidance(snap({
+      stage: "DEFINE",
+      discovery: briefApproved,
+      definition: { ...defined, exists: true, status: "IN_PROGRESS", approved: false, slice: "NONE" },
+    }));
+    expect(guidance.action?.key).toBe("draft-definition");
+    expect(guidance.action?.href).toBe("/products/p1/definition");
+  });
+
+  it("asks to answer definition questions before approval", () => {
+    const guidance = assessGuidance(snap({
+      stage: "DEFINE",
+      discovery: briefApproved,
+      definition: {
+        ...defined,
+        exists: true,
+        status: "READY_FOR_REVIEW",
+        approved: false,
+        slice: "APPROVED",
+        openQuestions: 2,
+      },
+    }));
+    expect(guidance.action?.key).toBe("answer-definition-questions");
+    expect(guidance.action?.href).toBe("/products/p1/definition#questions");
+    expect(guidance.action?.why).toMatch(/does not approve/);
+  });
+
+  it("prepares the definition before offering approval", () => {
+    const preparing = assessGuidance(snap({
+      stage: "DEFINE",
+      discovery: briefApproved,
+      definition: { ...defined, exists: true, status: "IN_PROGRESS", approved: false, slice: "APPROVED" },
+    }));
+    expect(preparing.action?.key).toBe("prepare-definition");
+    expect(preparing.action?.href).toBe("/products/p1/definition#approve");
+    const approving = assessGuidance(snap({
+      stage: "DEFINE",
+      discovery: briefApproved,
+      definition: { ...defined, exists: true, status: "READY_FOR_REVIEW", approved: false, slice: "APPROVED" },
+    }));
+    expect(approving.action?.key).toBe("approve-definition");
+    expect(approving.action?.href).toBe("/products/p1/definition#approve");
+    expect(approving.action?.why).toMatch(/does not move the stage/);
+    expect(approving.action?.key).not.toBe("move-build");
   });
 
   it("offers Move to Build when the definition and slice are approved", () => {
@@ -150,11 +220,118 @@ describe("next action", () => {
     expect(guidance.action?.key).toBe("move-build");
   });
 
-  it("asks to approve design while architecture is waiting", () => {
-    const guidance = assessGuidance(pastDefine({
+  it("asks what is being built before design when that choice is missing", () => {
+    const guidance = assessGuidance(pastDefine({ developmentContext: "UNSET" }));
+    expect(guidance.action?.key).toBe("choose-development-context");
+    expect(guidance.action?.href).toBe("/products/p1/build#context");
+  });
+
+  it("lets a greenfield product continue without codebase context", () => {
+    const guidance = assessGuidance(pastDefine({ developmentContext: "GREENFIELD", codebaseCaptured: false }));
+    expect(guidance.action?.key).toBe("review-design");
+    expect(guidance.action?.href).toBe("/products/p1/build#design");
+    expect(guidance.action?.why).toMatch(/does not approve/);
+    expect(guidance.action?.key).not.toBe("add-codebase-context");
+    expect(guidance.action?.key).not.toBe("approve-design");
+  });
+
+  it("asks an existing application for codebase context", () => {
+    const missing = assessGuidance(pastDefine({ developmentContext: "EXISTING_SYSTEM", codebaseCaptured: false }));
+    expect(missing.action?.key).toBe("add-codebase-context");
+    expect(missing.action?.href).toBe("/products/p1/build#context");
+    const ready = assessGuidance(pastDefine({ developmentContext: "EXISTING_SYSTEM", codebaseCaptured: true }));
+    expect(ready.action?.key).toBe("review-design");
+  });
+
+  it("prepares a committed draft before offering design approval", () => {
+    const draft = assessGuidance(pastDefine({
       design: { ...designed, architecture: "DRAFT", plan: "NONE" },
     }));
-    expect(guidance.action?.label).toBe("Approve Design");
+    expect(draft.action?.key).toBe("prepare-design");
+    expect(draft.action?.href).toBe("/products/p1/build#design");
+    expect(draft.action?.why).toMatch(/does not approve/);
+    const ready = assessGuidance(pastDefine({
+      design: { ...designed, architecture: "READY", plan: "NONE" },
+    }));
+    expect(ready.action?.key).toBe("approve-design");
+    expect(ready.action?.label).toBe("Approve Design");
+    expect(ready.action?.href).toBe("/products/p1/build#design");
+    expect(ready.action?.why).toMatch(/does not move the product to Prove/);
+  });
+
+  it("moves from an approved design to the delivery plan without leaving Build", () => {
+    const guidance = assessGuidance(pastDefine({
+      design: { ...designed, architecture: "APPROVED", plan: "NONE" },
+    }));
+    expect(guidance.action?.key).toBe("review-plan");
+    expect(guidance.action?.href).toBe("/products/p1/build#plan");
+    expect(guidance.stage).toBe("BUILD");
+  });
+
+  it("offers Move to Prove only as a human action after the slice is verified", () => {
+    const waiting = assessGuidance(pastDefine({
+      design: designed,
+      review: reviewed,
+      tasks: [task({ status: "COMPLETED", codeApproval: "CURRENT", verification: "APPROVED", published: true, pullRequest: "MERGED" })],
+      prove: { sliceVerified: false, integrated: false, entryOpen: true, entryReason: "" },
+    }));
+    expect(waiting.action?.key).not.toBe("move-prove");
+    const ready = assessGuidance(pastDefine({
+      design: designed,
+      review: reviewed,
+      tasks: [task({ status: "COMPLETED", codeApproval: "CURRENT", verification: "APPROVED", published: true, pullRequest: "MERGED" })],
+      prove: { sliceVerified: true, integrated: true, entryOpen: true, entryReason: "" },
+    }));
+    expect(ready.action?.key).toBe("move-prove");
+    expect(ready.action?.label).toBe("Move to Prove");
+    expect(ready.stage).toBe("BUILD");
+  });
+
+  it("maps every Build next action to a control that exists on the page", () => {
+    const buildPage = readFileSync(resolve("src/app/(app)/products/[id]/build/page.tsx"), "utf8");
+    const controls = readFileSync(resolve("src/components/build/controls.tsx"), "utf8");
+    const governance = readFileSync(resolve("src/components/build/governance-panel.tsx"), "utf8");
+    const testing = readFileSync(resolve("src/app/(app)/products/[id]/testing/page.tsx"), "utf8");
+    const guidanceUi = readFileSync(resolve("src/components/guidance/guidance-ui.tsx"), "utf8");
+    const surfaces = `${buildPage}\n${controls}\n${governance}\n${testing}`;
+    const cases: Array<[Partial<GuidanceSnapshot>, string, string]> = [
+      [{ developmentContext: "UNSET" }, "choose-development-context", "#context"],
+      [{ developmentContext: "EXISTING_SYSTEM", codebaseCaptured: false }, "add-codebase-context", "#context"],
+      [{ developmentContext: "GREENFIELD", codebaseCaptured: false }, "review-design", "#design"],
+      [{ design: { ...designed, architecture: "DRAFT", plan: "NONE" } }, "prepare-design", "#design"],
+      [{ design: { ...designed, architecture: "READY", plan: "NONE" } }, "approve-design", "#design"],
+      [{ design: { ...designed, architecture: "APPROVED", plan: "NONE" } }, "review-plan", "#plan"],
+      [{ design: { ...designed, architecture: "APPROVED", plan: "DRAFT" } }, "prepare-plan", "#plan"],
+      [{ design: { ...designed, architecture: "APPROVED", plan: "READY" } }, "approve-plan", "#plan"],
+      [{ design: designed, review: { ...reviewed, approved: false, reviewRequired: true } }, "resolve-finding", "#review"],
+      [{ design: designed, review: { ...reviewed, approved: false } }, "approve-review", "#review"],
+      [{ design: designed, review: { ...reviewed, policyApproved: false } }, "approve-rules", "#review"],
+      [{ design: designed, review: reviewed, tasks: [task()] }, "approve-task", "#code"],
+      [{ design: designed, review: reviewed, tasks: [task({ status: "APPROVED" })] }, "start-coding", "#code"],
+      [{ design: designed, review: reviewed, tasks: [task({ status: "IN_PROGRESS", workspace: "OPEN" })] }, "review-change", "#code"],
+      [{ design: designed, review: reviewed, tasks: [task({ status: "IN_PROGRESS", workspace: "OPEN", codeApproval: "CURRENT" })] }, "approve-change", "#code"],
+      [{ design: designed, review: reviewed, tasks: [task({ status: "COMPLETED", codeApproval: "CURRENT" })] }, "start-check", "#check"],
+      [{ design: designed, review: reviewed, tasks: [task({ status: "COMPLETED", codeApproval: "CURRENT", verification: "AWAITING" })] }, "approve-verification", "#check"],
+      [{ design: designed, review: reviewed, tasks: [task({ status: "COMPLETED", codeApproval: "CURRENT", verification: "APPROVED" })] }, "publish-branch", "#publish"],
+      [{ design: designed, review: reviewed, tasks: [task({ status: "COMPLETED", codeApproval: "CURRENT", verification: "APPROVED", published: true })] }, "create-pr", "#publish"],
+      [{ design: designed, review: reviewed, tasks: [task({ status: "COMPLETED", codeApproval: "CURRENT", verification: "APPROVED", published: true, pullRequest: "OPEN" })] }, "refresh-pr", "#publish"],
+    ];
+    for (const [patch, key, hash] of cases) {
+      const guidance = assessGuidance(pastDefine(patch));
+      expect(guidance.action?.key, key).toBe(key);
+      expect(guidance.action?.href, key).toContain(hash);
+      expect(surfaces, `${key} ${hash}`).toContain(`id="${hash.slice(1)}"`);
+    }
+    expect(guidanceUi).toContain('"move-prove": "PROVE"');
+    const stale = assessGuidance(pastDefine({
+      design: { ...designed, traceabilityIssue: "Governance review cannot complete because Design item NFR-001 references an NFR that is no longer part of the current approved definition." },
+    }));
+    expect(stale.action?.key).toBe("repair-traceability");
+    expect(stale.action?.href).toBe("/products/p1/build#design");
+    expect(stale.action?.why).toMatch(/NFR-001/);
+    expect(buildPage).toContain("Design has not been generated yet.");
+    expect(buildPage).toContain("Approve Design");
+    expect(buildPage).toContain("A delivery plan has not been generated yet.");
   });
 
   it("blocks on an engineering finding instead of offering coding", () => {
@@ -164,6 +341,19 @@ describe("next action", () => {
     }));
     expect(guidance.action?.label).toBe("Resolve Engineering Finding");
     expect(guidance.blocker?.what).toBe("Engineering review needs attention");
+    const blocking = assessGuidance(pastDefine({
+      design: designed,
+      review: { ...reviewed, approved: false, openCritical: 1, openFindings: 2 },
+    }));
+    expect(blocking.action?.label).toBe("Resolve 1 blocking governance issue");
+    expect(blocking.action?.href).toBe("/products/p1/build#review");
+    expect(blocking.action?.label).not.toMatch(/complete/i);
+    const open = assessGuidance(pastDefine({
+      design: designed,
+      review: { ...reviewed, approved: false, openFindings: 2 },
+    }));
+    expect(open.action?.label).toBe("Review 2 open governance findings");
+    expect(open.blocker).toBeNull();
   });
 
   it("asks to approve a proposed coding task", () => {

@@ -182,12 +182,29 @@ export function ProposalPanel({
     })),
   ];
 
+  const pending = blocks.filter((item) => item.reviewStatus === "PENDING").length;
+  const accepted = blocks.filter((item) => item.reviewStatus === "ACCEPTED").length;
+  const questions = payload.questions.length;
+
   return (
-    <section className="space-y-4 rounded-2xl border bg-card p-5">
+    <section id="proposal" tabIndex={-1} className="scroll-mt-20 space-y-4 rounded-2xl border bg-card p-5 focus:outline-none target:ring-2 target:ring-indigo-500 target:ring-offset-2">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h2 className="text-lg font-semibold">AI proposal</h2>
-          <p className="mt-1 text-sm leading-6 text-muted-foreground">{payload.assistantSummary}</p>
+          <h2 className="text-lg font-semibold">Review the draft definition</h2>
+          <p className="mt-1 text-sm leading-6 text-muted-foreground">
+            This is the latest draft. It is a proposal, not an approved Product Definition, and accepted items stay off the backlog until you commit them.
+          </p>
+          <p className="mt-2 text-sm leading-6">{payload.assistantSummary}</p>
+          <ul className="mt-3 flex flex-wrap gap-2 text-xs">
+            <li className="rounded-full bg-amber-50 px-2 py-1 text-amber-950">{pending} waiting for a decision</li>
+            <li className="rounded-full bg-emerald-50 px-2 py-1 text-emerald-900">{accepted} accepted</li>
+            <li className="rounded-full bg-stone-100 px-2 py-1 text-stone-700">
+              {questions === 1 ? "1 question" : `${questions} questions`}
+            </li>
+          </ul>
+          <p className="mt-3 text-sm leading-6 text-muted-foreground">
+            Accept, reject, or edit each item. Commit accepted items to add them to the definition. Approval is a later decision and does not move the stage.
+          </p>
           {seededDemo ? (
             <p className="mt-2 text-sm text-amber-900">Demo proposal. It was not produced by a Requirements Agent run.</p>
           ) : null}

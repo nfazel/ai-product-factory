@@ -3,14 +3,42 @@ import { safeErrorMessage } from "@/modules/ai/errors";
 import { STRUCTURED_OUTPUT_ERROR } from "@/modules/ai/structured";
 import { DomainError } from "@/modules/shared/errors";
 
+export type SchemaDiagnostics = {
+  operation: string;
+  validationStage: "response schema";
+  repairAttempted: boolean;
+  issues: string[];
+};
+
 export class AIFailure extends DomainError {
   readonly category: AIFailureCategory;
+  readonly diagnostics?: SchemaDiagnostics;
 
-  constructor(message: string, category: AIFailureCategory) {
+  constructor(message: string, category: AIFailureCategory, diagnostics?: SchemaDiagnostics) {
     super(message, "INVALID");
     this.name = "AIFailure";
     this.category = category;
+    this.diagnostics = diagnostics;
   }
+}
+
+export function validationActivity(input: {
+  agent: string;
+  provider: string | null;
+  model: string | null;
+  diagnostics: SchemaDiagnostics;
+}) {
+  const provider = input.provider === "GOOGLE_GEMINI" ? "Gemini" : input.provider?.trim() || "Unavailable";
+  const summary = input.diagnostics.issues.slice(0, 8).join("; ") || "The response did not match the schema.";
+  return [
+    `${input.agent} failed validation.`,
+    `Provider: ${provider}.`,
+    `Model: ${input.model?.trim() || "Unavailable"}.`,
+    `Operation: ${input.diagnostics.operation}.`,
+    `Validation stage: ${input.diagnostics.validationStage}.`,
+    `Repair attempted: ${input.diagnostics.repairAttempted ? "Yes" : "No"}.`,
+    `Validation issue summary: ${summary}`,
+  ].join(" ");
 }
 
 const EMPTY_RESPONSE =
@@ -55,6 +83,7 @@ export function providerFailureCategory(error: unknown): AIFailureCategory | "do
   if (/Failed to parse structured output|did not match the required structure/i.test(message)) {
     return "SCHEMA_VALIDATION_FAILED";
   }
+  if (isRejectedRequest(status, message)) return "INVALID_RESPONSE";
   if (name === "APIConnectionError" || (status !== undefined && status >= 500)) return "PROVIDER_UNAVAILABLE";
   return "PROVIDER_UNAVAILABLE";
 }
@@ -107,6 +136,18 @@ export function mapProviderFailure(error: unknown): never {
   if (/Failed to parse structured output|did not match the required structure/i.test(message)) {
     throw new AIFailure(STRUCTURED_OUTPUT_ERROR, "SCHEMA_VALIDATION_FAILED");
   }
+  if (isRejectedRequest(status, message)) {
+    console.error("[ai] provider rejected the request format", {
+      httpStatus: status ?? 400,
+      providerStatus: providerStatus(message),
+      stage: "request",
+      message: safeErrorMessage(error).slice(0, 240),
+    });
+    throw new AIFailure(
+      "The AI provider could not complete this request because the request format was not accepted. Nothing was generated.",
+      "INVALID_RESPONSE",
+    );
+  }
   if (name === "APIConnectionError" || (status !== undefined && status >= 500)) {
     throw new AIFailure(
       "The AI provider is unavailable. Nothing was generated. You can retry.",
@@ -123,4 +164,34 @@ function statusOf(error: unknown) {
   if (typeof error !== "object" || error === null || !("status" in error)) return undefined;
   const status = error.status;
   return typeof status === "number" ? status : undefined;
+}
+
+function isRejectedRequest(status: number | undefined, message: string) {
+  return status === 400 || /INVALID_ARGUMENT/.test(message);
+}
+
+function providerStatus(message: string) {
+  const match = message.match(/"status"\s*:\s*"([A-Z_]+)"/);
+  return match?.[1] ?? "INVALID_ARGUMENT";
+}
+
+/** Gemini-specific request rejection. Does not include credentials, headers, or prompt text. */
+export function geminiRejectedRequest(error: unknown, context: { model: string; operation: string }) {
+  const status = statusOf(error);
+  const message = error instanceof Error ? error.message : "";
+  if (!isRejectedRequest(status, message)) return null;
+  const operation = context.operation.trim() || "this result";
+  console.error("[ai] provider rejected the request format", {
+    provider: "GOOGLE_GEMINI",
+    model: context.model,
+    operation,
+    httpStatus: status ?? 400,
+    providerStatus: providerStatus(message),
+    stage: "generate",
+    message: safeErrorMessage(error).slice(0, 240),
+  });
+  return new AIFailure(
+    `Gemini could not generate ${operation} because the request format was not accepted. Nothing was generated.`,
+    "INVALID_RESPONSE",
+  );
 }

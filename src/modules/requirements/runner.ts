@@ -137,6 +137,7 @@ export const requirementsRunner: AgentRunner = {
       }),
       responseSchema: requirementsResponseSchema,
       schemaName: "product_definition",
+      purpose: "the Product Definition",
       temperature: 0.2,
     });
 

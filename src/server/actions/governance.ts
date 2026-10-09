@@ -25,6 +25,7 @@ import {
   lines,
   questionAnswerSchema,
 } from "@/modules/governance/schema";
+import { findingDecisionConfirmation } from "@/modules/governance/finding-presentation";
 import { actionFailure, formValues, refreshWorkspace } from "@/server/action-helpers";
 
 function done(productId: string, message: string): ActionState {
@@ -131,8 +132,8 @@ export async function updateFindingAction(
   const parsed = findingUpdateSchema.safeParse(formValues(formData));
   if (!parsed.success) return invalidState(parsed.error.issues);
   try {
-    await updateGovernanceFinding(parsed.data);
-    return done(parsed.data.productId, "The finding was updated.");
+    const updated = await updateGovernanceFinding(parsed.data);
+    return done(parsed.data.productId, findingDecisionConfirmation(updated));
   } catch (error) {
     return actionFailure(error);
   }

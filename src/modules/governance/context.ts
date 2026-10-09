@@ -1,6 +1,7 @@
 import "server-only";
 
 import { db } from "@/lib/db";
+import { developmentContextInstruction } from "@/modules/architecture/development-context";
 import { findCurrentBrief } from "@/modules/discovery/repository";
 import type { GovernanceRefs } from "@/modules/governance/validate";
 
@@ -43,14 +44,15 @@ export async function loadGovernanceContext(productId: string) {
   const codebase = await db.codebaseContext.findUnique({ where: { productId } });
   const workItems = await db.workItem.findMany({
     where: { productId },
-    select: { id: true, type: true, title: true, description: true },
+    select: { id: true, type: true, title: true, description: true, referenceCode: true },
   });
 
+  const applicableNfrs = nfrs.filter((item) => item.status !== "REJECTED");
   const refs: GovernanceRefs = {
     componentIds: new Set(architecture?.components.map((item) => item.id) ?? []),
     adrIds: new Set(architecture?.decisions.map((item) => item.id) ?? []),
     taskIds: new Set(plan?.tasks.map((item) => item.id) ?? []),
-    nfrIds: new Set(nfrs.map((item) => item.id)),
+    nfrIds: new Set(applicableNfrs.map((item) => item.id)),
     workItemIds: new Set(workItems.map((item) => item.id)),
     assumptionIds: new Set(assumptions.map((item) => item.id)),
   };
@@ -82,14 +84,16 @@ export async function loadGovernanceContext(productId: string) {
       outcomes: outcomes.map((item) => ({ id: item.id, title: item.title })),
       capabilities: capabilities.map((item) => ({ id: item.id, name: item.name })),
       slice: slice ? { id: slice.id, name: slice.name, description: slice.description } : null,
-      nonFunctionalRequirements: nfrs.map((item) => ({
+      nonFunctionalRequirements: applicableNfrs.map((item) => ({
         id: item.id,
+        referenceCode: item.referenceCode,
         category: item.category,
         title: item.title,
         description: item.description,
       })),
       assumptions: assumptions.map((item) => ({
         id: item.id,
+        referenceCode: item.referenceCode,
         description: item.description,
         impact: item.impact,
         status: item.status,
@@ -106,12 +110,14 @@ export async function loadGovernanceContext(productId: string) {
             observabilityApproach: architecture.observabilityApproach,
             components: architecture.components.map((item) => ({
               id: item.id,
+              referenceCode: item.referenceCode,
               name: item.name,
               type: item.type,
               responsibilities: item.responsibilities,
             })),
             decisions: architecture.decisions.map((item) => ({
               id: item.id,
+              referenceCode: item.referenceCode,
               title: item.title,
               decision: item.decision,
               status: item.status,
@@ -144,6 +150,7 @@ export async function loadGovernanceContext(productId: string) {
             summary: plan.summary,
             tasks: plan.tasks.map((task) => ({
               id: task.id,
+              referenceCode: task.referenceCode,
               title: task.title,
               objective: task.objective,
               verticalSlice: task.verticalSlice,
@@ -155,17 +162,22 @@ export async function loadGovernanceContext(productId: string) {
           }
         : null,
       openArchitectureQuestions: questions.map((item) => item.question),
-      codebase: codebase
-        ? {
-            source: codebase.source,
-            systemKind: codebase.systemKind,
-            repositoryName: codebase.repositoryName,
-            languages: codebase.languages,
-            frameworks: codebase.frameworks,
-            summary: codebase.architectureSummary,
-            constraints: codebase.constraints,
-          }
-        : null,
+      developmentContext: product?.developmentContext ?? null,
+      developmentInstruction: developmentContextInstruction(product?.developmentContext ?? null),
+      codebase:
+        product?.developmentContext === "GREENFIELD"
+          ? null
+          : codebase
+            ? {
+                source: codebase.source,
+                systemKind: codebase.systemKind,
+                repositoryName: codebase.repositoryName,
+                languages: codebase.languages,
+                frameworks: codebase.frameworks,
+                summary: codebase.architectureSummary,
+                constraints: codebase.constraints,
+              }
+            : null,
     },
   };
 }

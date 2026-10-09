@@ -16,6 +16,7 @@ import {
   persistCommittedGovernance,
   saveGovernanceProposal,
 } from "@/modules/governance/repository";
+import { findingDecisionError } from "@/modules/governance/finding-presentation";
 import { assessGovernanceReadiness } from "@/modules/governance/readiness";
 import { lines, type StoredGovernance } from "@/modules/governance/schema";
 import { getCurrentActor } from "@/modules/identity/actor";
@@ -203,21 +204,32 @@ export async function updateGovernanceFinding(input: {
 }) {
   const finding = await db.governanceFinding.findFirst({
     where: { id: input.findingId, review: { productId: input.productId } },
+    include: { review: { select: { id: true, version: true, solutionArchitectureId: true } } },
   });
   if (!finding) throw new DomainError("Governance finding not found.", "NOT_FOUND");
   const rationale = input.rationale?.trim() ?? "";
-  if (
-    input.status === "RISK_ACCEPTED" &&
-    (finding.severity === "HIGH" || finding.severity === "CRITICAL") &&
-    rationale.length === 0
-  ) {
-    throw new DomainError("A rationale is required to accept a high or critical governance risk.");
-  }
+  const rejected = findingDecisionError(finding, input.status, rationale);
+  if (rejected) throw new DomainError(rejected);
+  const actor = getCurrentActor().name;
+  const architecture = await db.solutionArchitecture.findUnique({
+    where: { id: finding.review.solutionArchitectureId },
+    select: { version: true },
+  });
+  const versions = `Governance review v${finding.review.version}. Design v${architecture?.version ?? "unknown"}.`;
+  const decision =
+    input.status === "RISK_ACCEPTED"
+      ? `${actor} accepted the residual risk for "${finding.title}". ${versions} The issue is not resolved.`
+      : input.status === "MITIGATED"
+        ? `${actor} marked "${finding.title}" resolved. ${versions}`
+        : input.status === "OPEN"
+          ? `${actor} reopened "${finding.title}". ${versions}`
+          : `${actor} set "${finding.title}" to ${input.status}. ${versions}`;
   const updated = await db.governanceFinding.update({
     where: { id: finding.id },
     data: {
       status: input.status,
       rationale: rationale || finding.rationale,
+      owner: actor,
       humanLocked: true,
     },
   });
@@ -226,15 +238,16 @@ export async function updateGovernanceFinding(input: {
       reviewId: finding.reviewId,
       findingId: finding.id,
       type: "HUMAN_CONFIRMATION",
-      source: "HUMAN",
-      description: `A person set "${finding.title}" to ${input.status}.`,
+      source: actor,
+      description: decision,
       result: rationale || "Human confirmation",
     },
   });
   await recordActivity({
     productId: input.productId,
     type: "FINDING_UPDATED",
-    description: `Updated governance finding "${finding.title}" to ${input.status}.${rationale ? ` ${rationale}` : ""}`,
+    description: `${decision}${rationale ? ` ${rationale}` : ""}`,
+    actor,
   });
   return updated;
 }

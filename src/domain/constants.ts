@@ -113,6 +113,7 @@ export const ACTIVITY_TYPES = [
   "PLAN_REVIEW_REQUIRED",
   "ADR_UPDATED",
   "CODEBASE_CONTEXT_UPDATED",
+  "DEVELOPMENT_CONTEXT_CHOSEN",
   "ARCHITECTURE_QUESTION_ANSWERED",
   "GOVERNANCE_GENERATED",
   "GOVERNANCE_COMMITTED",
@@ -401,6 +402,7 @@ export const ACTIVITY_TYPE_LABEL: Record<ActivityType, string> = {
   PLAN_REVIEW_REQUIRED: "Delivery plan needs review again",
   ADR_UPDATED: "Architecture decision updated",
   CODEBASE_CONTEXT_UPDATED: "Codebase context updated",
+  DEVELOPMENT_CONTEXT_CHOSEN: "Development context chosen",
   ARCHITECTURE_QUESTION_ANSWERED: "Architecture question answered",
   GOVERNANCE_GENERATED: "Governance review generated",
   GOVERNANCE_COMMITTED: "Governance review committed",
@@ -1003,8 +1005,8 @@ export type FindingStatusName = (typeof FINDING_STATUSES)[number];
 
 export const FINDING_STATUS_LABEL: Record<FindingStatusName, string> = {
   OPEN: "Open",
-  ACCEPTED: "Accepted",
-  MITIGATED: "Mitigated",
+  ACCEPTED: "Acknowledged",
+  MITIGATED: "Resolved",
   RISK_ACCEPTED: "Risk accepted",
   CLOSED: "Closed",
 };

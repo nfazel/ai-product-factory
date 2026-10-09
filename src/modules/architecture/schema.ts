@@ -249,6 +249,10 @@ export const architectureProductSchema = z.object({
   productId: z.string().trim().min(1),
 });
 
+export const developmentContextSchema = architectureProductSchema.extend({
+  developmentContext: z.enum(SYSTEM_KINDS),
+});
+
 export const architectureSectionSchema = z.object({
   productId: z.string().trim().min(1),
   section: z.enum(ARCHITECTURE_SECTIONS),

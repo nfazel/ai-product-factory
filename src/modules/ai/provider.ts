@@ -35,6 +35,8 @@ export type AIGenerateResult<T> = {
   provider?: string;
   finishStatus?: string;
   durationMs?: number;
+  /** True when the first structured response failed validation and one repair succeeded. */
+  repairAttempted?: boolean;
 };
 
 export interface AIProvider {

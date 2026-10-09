@@ -49,6 +49,39 @@ describe("navigation", () => {
     expect(read("src/app/(app)/products/[id]/metrics/page.tsx")).toContain("Learn");
   });
 
+  it("gives every Define next action a section or button the Define page can run", () => {
+    const definition = read("src/app/(app)/products/[id]/definition/page.tsx");
+    const proposal = read("src/components/definition/proposal-panel.tsx");
+    const controls = read("src/components/definition/controls.tsx");
+    const requirements = read("src/components/intake/requirements-panel.tsx");
+    const guidance = read("src/components/guidance/guidance-ui.tsx");
+    const surface = [definition, proposal, controls, requirements].join("\n");
+    for (const id of ["proposal", "outcomes", "slice", "questions", "approve", "move", "requirements"]) {
+      expect(surface, id).toContain(`id="${id}"`);
+    }
+    expect(proposal).toContain("Review the draft definition");
+    expect(proposal).toContain("proposalId");
+    expect(controls).toContain("approveDefinitionAction");
+    expect(controls).toContain("reviewDefinitionAction");
+    expect(controls).toContain("moveToBuildAction");
+    expect(guidance).toContain('action.key === "draft-definition"');
+    expect(guidance).toContain("moveStageAction");
+    expect(guidance).toContain("scrollIntoView");
+    expect(read("src/modules/requirements/service.ts")).toContain("The stage was not changed.");
+  });
+
+  it("asks what is being built before requiring a repository", () => {
+    const page = read("src/app/(app)/products/[id]/build/page.tsx");
+    const controls = read("src/components/build/controls.tsx");
+    expect(page).toContain("DevelopmentContextPanel");
+    expect(page).not.toContain("No codebase context yet");
+    expect(controls).toContain("What are we building?");
+    expect(controls).toContain("New application");
+    expect(controls).toContain("Existing application");
+    expect(controls).toContain("No existing codebase required");
+    expect(controls).toContain("id=\"context\"");
+  });
+
   it("opens recent products on Overview", () => {
     const dashboard = read("src/app/(app)/dashboard/page.tsx");
     expect(dashboard).toContain("href={`/products/${product.id}`}");
