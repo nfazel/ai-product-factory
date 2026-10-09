@@ -9,7 +9,7 @@ import { safeErrorMessage } from "@/modules/ai/errors";
 import { setConnectionProbeForTests, testProviderConnection } from "@/modules/ai/connection";
 import { readProviderCredential, rememberAISelection } from "@/modules/ai/config";
 import { readResolvedCredential, replaceCredentialCache } from "@/modules/ai/credential-cache";
-import { decryptSecret, encryptSecret, parseEncryptionKey } from "@/modules/ai/credential-crypto";
+import { decryptSecret, encryptSecret, encryptionKeyConfigurationStatus, parseEncryptionKey } from "@/modules/ai/credential-crypto";
 import {
   ensureProviderCredentials,
   listPublicCredentials,
@@ -17,9 +17,15 @@ import {
   saveProviderCredential,
 } from "@/modules/ai/credentials";
 
-const GEMINI_KEY = "AIzaSyTestGeminiCredentialValue1234567890";
-const OPENAI_KEY = "sk-test-openai-credential-value-1234567890";
-const ENV_GEMINI = "AIzaSyEnvironmentGeminiCredential999999";
+/**
+ * SECURITY NOTE: All credential values in this file are intentionally fake test keys.
+ * They are not real API keys and cannot access any services.
+ * These are hardcoded for testing purposes only.
+ */
+
+const GEMINI_KEY = "test-gemini-key-do-not-use-AIzaSyTestGeminiCredentialValue1234567890";
+const OPENAI_KEY = "test-gemini-key-do-not-use-sk-test-openai-credential-value-1234567890";
+const ENV_GEMINI = "test-gemini-key-do-not-use-AIzaSyEnvironmentGeminiCredential999999";
 const ENCRYPTION_KEY = randomBytes(32).toString("base64");
 
 describe("provider credentials", () => {
@@ -308,6 +314,42 @@ describe("provider credentials", () => {
       expect(source, file).not.toMatch(/credential-crypto|decryptSecret|createDecipheriv|encryptSecret/);
       expect(source, file).not.toMatch(/OPENAI_API_KEY|GOOGLE_GEMINI_API_KEY|AI_CREDENTIAL_ENCRYPTION_KEY/);
     }
+  });
+
+  it("saves an API key when the encryption key is padded base64 or 64-character hex", async () => {
+    await enableStore();
+    const padded = randomBytes(32).toString("base64");
+    expect(padded.endsWith("=")).toBe(true);
+    expect(padded).not.toHaveLength(32);
+    process.env.AI_CREDENTIAL_ENCRYPTION_KEY = padded;
+    const saved = await saveProviderCredential({ provider: "GOOGLE_GEMINI", credential: GEMINI_KEY, actor: "Local user" });
+    expect(saved).toEqual({ provider: "GOOGLE_GEMINI", replaced: false });
+    const row = await db.aiProviderCredential.findUnique({ where: { provider: "GOOGLE_GEMINI" } });
+    expect(row).not.toBeNull();
+    expect(JSON.stringify(row)).not.toContain(GEMINI_KEY);
+    expect(JSON.stringify(row)).not.toContain(padded);
+    expect(decryptSecret(row!, parseEncryptionKey(padded)!)).toBe(GEMINI_KEY);
+    const status = encryptionKeyConfigurationStatus();
+    expect(status).toEqual({ configured: "Yes", valid: "Yes" });
+    expect(JSON.stringify(status)).not.toContain(padded);
+    expect(JSON.stringify(status)).not.toContain(GEMINI_KEY);
+
+    const hex = randomBytes(32).toString("hex");
+    expect(hex).toHaveLength(64);
+    process.env.AI_CREDENTIAL_ENCRYPTION_KEY = hex;
+    const replaced = await saveProviderCredential({
+      provider: "GOOGLE_GEMINI",
+      credential: `${GEMINI_KEY}-hex`,
+      actor: "Local user",
+    });
+    expect(replaced.replaced).toBe(true);
+    const hexRow = await db.aiProviderCredential.findUnique({ where: { provider: "GOOGLE_GEMINI" } });
+    expect(JSON.stringify(hexRow)).not.toContain(hex);
+    expect(JSON.stringify(hexRow)).not.toContain(GEMINI_KEY);
+    expect(decryptSecret(hexRow!, parseEncryptionKey(hex)!)).toBe(`${GEMINI_KEY}-hex`);
+    await assertSecretAbsent(GEMINI_KEY);
+    await assertSecretAbsent(padded);
+    await assertSecretAbsent(hex);
   });
 });
 

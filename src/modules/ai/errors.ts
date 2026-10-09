@@ -35,7 +35,7 @@ function liveSecrets() {
   const values = [
     process.env.OPENAI_API_KEY,
     process.env.GOOGLE_GEMINI_API_KEY,
-    process.env.AI_CREDENTIAL_ENCRYPTION_KEY,
+    process.env["AI_CREDENTIAL_ENCRYPTION_KEY"],
     ...knownCredentialSecrets(),
   ];
   return [...new Set(values.filter((value): value is string => Boolean(value && value.length > 8)))];
