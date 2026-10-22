@@ -6,7 +6,7 @@ import { z } from "zod";
 
 import { describeAIConfiguration } from "@/modules/ai/config";
 import { combineAIEvidence, aiRunEvidence } from "@/modules/ai/evidence";
-import { AIFailure, mapProviderFailure } from "@/modules/ai/failures";
+import { AIFailure, describedProviderFailure, mapProviderFailure, planStatusAfterProviderFailure } from "@/modules/ai/failures";
 import { GeminiProvider } from "@/modules/ai/gemini";
 import { OllamaProvider } from "@/modules/ai/ollama";
 import { OpenAIProvider } from "@/modules/ai/openai";
@@ -144,6 +144,17 @@ describe("AI provider registry", () => {
     );
     expect(() => mapProviderFailure(Object.assign(new Error("slow"), { status: 429 }))).toThrow(/rate limit/);
     expect(() => mapProviderFailure(Object.assign(new Error("down"), { status: 503 }))).toThrow(/unavailable/);
+    expect(() =>
+      mapProviderFailure(
+        Object.assign(
+          new Error('{"error":{"code":503,"message":"This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.","status":"UNAVAILABLE"}}'),
+          { status: 503 },
+        ),
+      ),
+    ).toThrow(/high demand/);
+    expect(() => mapProviderFailure(Object.assign(new Error("invalid model was not found"), { status: 404 }))).toThrow(
+      /not available/,
+    );
     expect(() => mapProviderFailure(Object.assign(new Error("timed out"), { name: "APIConnectionTimeoutError" }))).toThrow(
       /did not respond in time/,
     );
@@ -158,6 +169,59 @@ describe("AI provider registry", () => {
         }),
       ),
     ).toThrow(/request format was not accepted/);
+    expect(describedProviderFailure({
+      provider: "GOOGLE_GEMINI",
+      category: "PROVIDER_UNAVAILABLE",
+      error: "The AI provider is unavailable. Nothing was generated. You can retry.",
+    })).toBe("Gemini is temporarily unavailable. You can retry this Coding run.");
+    expect(describedProviderFailure({
+      provider: "GOOGLE_GEMINI",
+      category: "AUTHENTICATION_FAILED",
+      error: "",
+    })).toMatch(/authentication failed/i);
+    expect(describedProviderFailure({
+      provider: "GOOGLE_GEMINI",
+      category: "RATE_LIMITED",
+      error: "",
+    })).toMatch(/usage limit/);
+    expect(describedProviderFailure({
+      provider: "GOOGLE_GEMINI",
+      category: "MODEL_NOT_AVAILABLE",
+      error: "",
+    })).toMatch(/Gemini model is unavailable/);
+    expect(planStatusAfterProviderFailure({
+      planStatus: "EXECUTING",
+      errorCategory: "PROVIDER_UNAVAILABLE",
+    })).toBe("APPROVED");
+    expect(planStatusAfterProviderFailure({
+      planStatus: "EXECUTING",
+      errorCategory: "RATE_LIMITED",
+    })).toBe("APPROVED");
+    expect(planStatusAfterProviderFailure({
+      planStatus: "EXECUTING",
+      errorCategory: "TIMEOUT",
+    })).toBe("APPROVED");
+    expect(planStatusAfterProviderFailure({
+      planStatus: "PROPOSED",
+      errorCategory: "PROVIDER_UNAVAILABLE",
+    })).toBe("PROPOSED");
+    expect(planStatusAfterProviderFailure({
+      planStatus: "EXECUTING",
+      errorCategory: null,
+    })).toBe("EXECUTING");
+  });
+
+  it("uses the same Gemini credential path for connection checks and coding", () => {
+    const runner = readFileSync(path.join(process.cwd(), "src/modules/coding/runner.ts"), "utf8");
+    const connection = readFileSync(path.join(process.cwd(), "src/modules/ai/connection.ts"), "utf8");
+    const gemini = readFileSync(path.join(process.cwd(), "src/modules/ai/gemini.ts"), "utf8");
+    expect(runner).toContain("getAIProvider()");
+    expect(runner).not.toContain("GOOGLE_GEMINI_API_KEY");
+    expect(gemini).toContain('readProviderCredential("GOOGLE_GEMINI")');
+    expect(connection).toContain("readResolvedCredential(provider)");
+    expect(connection).toContain("probeGeminiCredential");
+    expect(gemini).toContain("generateContent");
+    expect(connection).not.toContain("generateContent");
   });
 
   it("keeps credentials out of configuration, child processes, and the settings page", () => {

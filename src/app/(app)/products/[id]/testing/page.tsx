@@ -6,6 +6,7 @@ import { NextActionPanel } from "@/components/guidance/guidance-ui";
 import { ProvePanel } from "@/components/prove/prove-panel";
 import { SourceControlPanel } from "@/components/source-control/source-control-panel";
 import { getProductGuidance } from "@/modules/guidance/service";
+import { revalidateProductRepositoryAccess } from "@/modules/source-control/github-account";
 import { getSourceControlView } from "@/modules/source-control/service";
 import { getProveView } from "@/modules/verification/service";
 import { markDynamic } from "@/server/dynamic";
@@ -24,8 +25,30 @@ export default function TestingPage({ params }: { params: Promise<{ id: string }
 async function Prove({ params }: { params: Promise<{ id: string }> }) {
   await markDynamic();
   const { id } = await params;
-  const [prove, sourceControl, guidance] = await Promise.all([getProveView(id), getSourceControlView(id), getProductGuidance(id)]);
-  if (!prove || !sourceControl || !guidance) notFound();
+  await revalidateProductRepositoryAccess(id);
+  const [prove, sourceControl, loadedGuidance] = await Promise.all([getProveView(id), getSourceControlView(id), getProductGuidance(id)]);
+  if (!prove || !sourceControl || !loadedGuidance) notFound();
+  const guidance = sourceControl.bootstrap.status === "offer" && loadedGuidance.action?.key === "create-pr" && loadedGuidance.action
+    ? {
+        ...loadedGuidance,
+        action: {
+          ...loadedGuidance.action,
+          key: "initialize-remote-main",
+          label: "Initialize Remote Main Branch",
+          why: sourceControl.bootstrap.message,
+          execution: "confirm" as const,
+        },
+      }
+    : sourceControl.bootstrap.status === "other-default" && loadedGuidance.action?.key === "create-pr" && loadedGuidance.action
+      ? {
+          ...loadedGuidance,
+          action: {
+            ...loadedGuidance.action,
+            why: sourceControl.bootstrap.message,
+            execution: "confirm" as const,
+          },
+        }
+      : loadedGuidance;
   return (
     <div className="space-y-6">
       <header className="space-y-2">
@@ -38,11 +61,17 @@ async function Prove({ params }: { params: Promise<{ id: string }> }) {
       {guidance.action?.stage === "PROVE" || guidance.stage === "PROVE" ? <NextActionPanel guidance={guidance} /> : null}
       <section id="check" tabIndex={-1} className="scroll-mt-20 space-y-3 rounded-2xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
         <h2 className="text-lg font-semibold">Check</h2>
-        <ProvePanel productId={id} prove={prove} />
+        <ProvePanel
+          productId={id}
+          prove={prove}
+          commandTaskId={guidance.action?.execution === "command" ? guidance.action.subjectId : null}
+        />
       </section>
       <section id="publish" tabIndex={-1} className="scroll-mt-20 space-y-3 rounded-2xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
         <h2 className="text-lg font-semibold">Publish</h2>
-        <p className="text-sm text-muted-foreground">Publishing opens a pull request. Merging stays in GitHub. Refresh reads the result back.</p>
+        <p className="text-sm text-muted-foreground">
+          Publish Branch pushes the approved task branch. Create Pull Request is the next step. A person reviews and merges in GitHub. Nothing is deployed from here.
+        </p>
         <SourceControlPanel productId={id} view={sourceControl} />
       </section>
     </div>

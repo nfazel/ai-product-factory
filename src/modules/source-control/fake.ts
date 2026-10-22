@@ -25,8 +25,14 @@ export type FakeState = {
   statuses: Record<string, { context: string; state: string }[]>;
   protection: BranchProtection | null;
   protectionKnown: boolean;
+  protectionAccess: "readable" | "forbidden" | "unavailable";
+  workflowCount: number;
+  workflowKnown: boolean;
   failure: FakeFailure;
   pushes: { branch: string; sha: string; args: readonly string[] }[];
+  /** When set, the next main initialization finds this commit already created and does not replace it. */
+  raceWinner: string;
+  failCommitAuth: boolean;
   nextNumber: number;
 };
 
@@ -46,8 +52,13 @@ export function createFakeSourceControl(partial?: Partial<FakeState>): SourceCon
     statuses: {},
     protection: { requiredApprovals: 1, requiredChecks: ["build"], conversationResolution: false, restrictions: "" },
     protectionKnown: true,
+    protectionAccess: "readable",
+    workflowCount: 0,
+    workflowKnown: true,
     failure: null,
     pushes: [],
+    raceWinner: "",
+    failCommitAuth: false,
     nextNumber: 1,
     ...partial,
   };
@@ -94,6 +105,19 @@ export function createFakeSourceControl(partial?: Partial<FakeState>): SourceCon
       state.pushes.push({ branch: input.branch, sha: input.sha, args: input.args });
       return { remoteSha: input.sha };
     },
+    async publishCommit(input) {
+      guard();
+      if (state.failCommitAuth) throw new SourceControlFailure("GitHub authentication failed.", "AUTH");
+      if (input.remoteBranch !== "main") throw new SourceControlFailure("Only the main branch can be initialized.", "REJECTED");
+      if (state.branches.main) throw new SourceControlFailure("updates were rejected", "REJECTED");
+      if (state.raceWinner) {
+        state.branches.main = state.raceWinner;
+        throw new SourceControlFailure("updates were rejected", "REJECTED");
+      }
+      state.branches.main = input.sha;
+      state.pushes.push({ branch: "main", sha: input.sha, args: ["push", "https://github.com/acme/claims.git", `${input.sha}:refs/heads/main`] });
+      return { remoteSha: input.sha };
+    },
     async createPullRequest(input) {
       guard();
       const number = state.nextNumber++;
@@ -108,6 +132,9 @@ export function createFakeSourceControl(partial?: Partial<FakeState>): SourceCon
         headBranch: input.head,
         headSha: input.sha,
         author: "local-user",
+        merged: false,
+        mergeable: true,
+        mergeableState: "clean",
         mergeCommitSha: "",
         mergedAt: null,
         mergedBy: "",
@@ -143,8 +170,14 @@ export function createFakeSourceControl(partial?: Partial<FakeState>): SourceCon
     },
     async getBranchProtection() {
       guard();
-      if (!state.protectionKnown) return null;
-      return state.protection;
+      if (state.protectionAccess === "forbidden") return { access: "forbidden" };
+      if (state.protectionAccess === "unavailable" || !state.protectionKnown) return { access: "unavailable" };
+      return { access: "readable", protection: state.protection };
+    },
+    async getWorkflowCount() {
+      guard();
+      if (!state.workflowKnown) return { access: "unavailable" };
+      return { access: "readable", count: state.workflowCount };
     },
   };
   return provider;

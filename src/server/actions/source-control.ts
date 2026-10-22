@@ -6,7 +6,9 @@ import { invalidState, type ActionState } from "@/lib/action-state";
 import {
   analyseReviewFeedback,
   createTaskPullRequest,
+  initializeRemoteMain,
   publishTaskBranch,
+  recordCiException,
   refreshPullRequest,
   sendCommentToCoding,
   updatePublishedBranch,
@@ -37,10 +39,29 @@ const taskIds = z.object({
 export async function publishBranchAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
   const parsed = taskIds.safeParse(formValues(formData));
   if (!parsed.success) return invalidState(parsed.error.issues);
+  if (formValues(formData).confirmPublication !== "yes") {
+    return { status: "error", message: "Publication requires explicit confirmation." };
+  }
   try {
-    await publishTaskBranch(parsed.data.productId, parsed.data.taskId);
-    return done(parsed.data.productId, "Published the branch. The commit was not force pushed.");
+    await publishTaskBranch(parsed.data.productId, parsed.data.taskId, undefined, { confirmed: true });
+    return done(parsed.data.productId, "Published the approved branch. No pull request was created, and nothing was merged or deployed.");
   } catch (error) {
+    refreshWorkspace(parsed.data.productId);
+    return actionFailure(error);
+  }
+}
+
+export async function initializeRemoteMainAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const parsed = z.object({ productId: z.string().trim().min(1) }).safeParse(formValues(formData));
+  if (!parsed.success) return invalidState(parsed.error.issues);
+  if (formValues(formData).confirmRemoteMain !== "yes") {
+    return { status: "error", message: "Initializing the remote main branch requires explicit confirmation." };
+  }
+  try {
+    await initializeRemoteMain(parsed.data.productId, undefined, { confirmed: true });
+    return done(parsed.data.productId, "Initialized the remote main branch from the baseline commit. The published task branch was not changed, and no pull request was created.");
+  } catch (error) {
+    refreshWorkspace(parsed.data.productId);
     return actionFailure(error);
   }
 }
@@ -61,7 +82,22 @@ export async function refreshPullRequestAction(_prev: ActionState, formData: For
   if (!parsed.success) return invalidState(parsed.error.issues);
   try {
     await refreshPullRequest(parsed.data.productId, parsed.data.pullRequestId);
-    return done(parsed.data.productId, "Refreshed the pull request from GitHub.");
+    return done(parsed.data.productId, "Refreshed the pull request from GitHub. This did not approve or merge it.");
+  } catch (error) {
+    return actionFailure(error);
+  }
+}
+
+export async function recordCiExceptionAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const parsed = z.object({
+    productId: z.string().min(1),
+    rationale: z.string().trim().min(10, "Record why CI is not required."),
+    confirmCiException: z.literal("yes"),
+  }).safeParse(formValues(formData));
+  if (!parsed.success) return invalidState(parsed.error.issues);
+  try {
+    await recordCiException(parsed.data.productId, parsed.data.rationale, true);
+    return done(parsed.data.productId, "Recorded the CI exception. The absence of CI is still shown and is not a pass.");
   } catch (error) {
     return actionFailure(error);
   }

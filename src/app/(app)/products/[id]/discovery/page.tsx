@@ -9,6 +9,7 @@ import {
 } from "@/components/discovery/composer";
 import { AINotConfiguredNotice } from "@/components/ai/not-configured";
 import { IntakeExplore } from "@/components/intake/intake-explore";
+import { ClarificationHold } from "@/components/clarification/keep-version";
 import { BriefPanel } from "@/components/discovery/brief-panel";
 import { StartDiscoveryForm } from "@/components/discovery/start-form";
 import { PageSkeleton } from "@/components/feedback/states";
@@ -117,6 +118,9 @@ async function Discovery({
         ) : null}
       </header>
       {guidance.stage === "EXPLORE" ? <NextActionPanel guidance={guidance} /> : null}
+      {brief?.reviewRequired && brief.reviewReason ? (
+        <ClarificationHold productId={product.id} target="BRIEF" reason={brief.reviewReason} />
+      ) : null}
 
       {!configured ? (
         <AINotConfiguredNotice

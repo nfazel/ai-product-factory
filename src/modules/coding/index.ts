@@ -11,6 +11,7 @@ export {
   rejectCodeChanges,
   requestCodingChanges,
   resumeCodingTask,
+  repairCodingTask,
   retryCodingTask,
   startCodingTask,
 } from "@/modules/coding/service";

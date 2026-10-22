@@ -1,5 +1,6 @@
 import "server-only";
 
+import { codingRiskStillBlocks } from "@/modules/governance/coding-risk-decision";
 import { db } from "@/lib/db";
 import { findCurrentBrief } from "@/modules/discovery/repository";
 import { DomainError } from "@/modules/shared/errors";
@@ -113,13 +114,8 @@ export async function assessCodingReadiness(productId: string): Promise<CodingRe
     ) {
       blockers.push("A HIGH governance finding is due before coding and is still open.");
     }
-    if (
-      review.codingRisks.some((risk) => {
-        const level = risk.overrideRiskLevel ?? risk.riskLevel;
-        return level === "PROHIBITED" && risk.overriddenBy.trim().length === 0;
-      })
-    ) {
-      blockers.push("A PROHIBITED coding task has no human resolution.");
+    if (review.codingRisks.some((risk) => codingRiskStillBlocks(risk))) {
+      blockers.push("A PROHIBITED coding task is still open. Overriding the recommendation does not clear it.");
     }
     if (review.questions.some((question) => question.blocking && question.status === "OPEN")) {
       blockers.push("A blocking governance question is open.");

@@ -17,6 +17,9 @@ export type RemotePullRequest = {
   headBranch: string;
   headSha: string;
   author: string;
+  merged: boolean;
+  mergeable: boolean | null;
+  mergeableState: string;
   mergeCommitSha: string;
   mergedAt: string | null;
   mergedBy: string;
@@ -40,6 +43,9 @@ export type RemoteCheck = {
   startedAt: string | null;
   completedAt: string | null;
   detailsUrl: string;
+  headSha?: string;
+  app?: string;
+  workflow?: string;
 };
 
 export type RemoteReview = {
@@ -48,6 +54,7 @@ export type RemoteReview = {
   state: "APPROVED" | "CHANGES_REQUESTED" | "COMMENTED" | "DISMISSED" | "UNKNOWN";
   body: string;
   submittedAt: string | null;
+  commitSha?: string;
 };
 
 export type RemoteComment = {
@@ -67,6 +74,16 @@ export type BranchProtection = {
   restrictions: string;
 };
 
+export type ProtectionLookup =
+  | { access: "readable"; protection: BranchProtection | null }
+  | { access: "forbidden" }
+  | { access: "unavailable" };
+
+export type WorkflowLookup =
+  | { access: "readable"; count: number }
+  | { access: "forbidden" }
+  | { access: "unavailable" };
+
 /**
  * Source control operations the factory may perform.
  * Merge is intentionally absent. A person merges in GitHub.
@@ -77,12 +94,17 @@ export type SourceControlProvider = {
   getDefaultBranch(): Promise<string>;
   getBranchTip(branch: string): Promise<string | null>;
   publishBranch(input: { branch: string; sha: string; args: readonly string[]; cwd: string }): Promise<{ remoteSha: string }>;
+  publishCommit(input: { sha: string; remoteBranch: string; cwd: string }): Promise<{ remoteSha: string }>;
   createPullRequest(input: { title: string; body: string; head: string; base: string; sha: string }): Promise<RemotePullRequest>;
   getPullRequest(number: number): Promise<RemotePullRequest>;
   getPullRequestFiles(number: number): Promise<{ path: string }[]>;
   getPullRequestReviews(number: number): Promise<RemoteReview[]>;
   getPullRequestComments(number: number): Promise<RemoteComment[]>;
   getCheckRuns(sha: string): Promise<RemoteCheck[]>;
-  getCommitStatus(sha: string): Promise<{ state: string; statuses: { context: string; state: string }[] }>;
-  getBranchProtection(branch: string): Promise<BranchProtection | null>;
+  getCommitStatus(sha: string): Promise<{
+    state: string;
+    statuses: { context: string; state: string; createdAt?: string | null; updatedAt?: string | null; headSha?: string }[];
+  }>;
+  getBranchProtection(branch: string): Promise<ProtectionLookup>;
+  getWorkflowCount(): Promise<WorkflowLookup>;
 };

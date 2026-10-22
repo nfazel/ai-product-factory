@@ -198,6 +198,7 @@ export async function recordEvidence(input: {
   description: string;
   result: string;
   command?: string;
+  output?: string;
   exitCode?: number | null;
   startedAt?: Date | null;
   completedAt?: Date | null;
@@ -211,6 +212,7 @@ export async function recordEvidence(input: {
       description: input.description,
       result: input.result,
       command: input.command ?? "",
+      output: input.output ?? "",
       exitCode: input.exitCode ?? null,
       startedAt: input.startedAt ?? null,
       completedAt: input.completedAt ?? null,

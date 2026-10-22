@@ -28,7 +28,9 @@ Never claim evidence that does not exist.
 
 Prefer the smallest change that correctly satisfies the task.
 
-When no project files are readable, this may be a new application. Create the initial files the approved task requires. Do not assume a legacy codebase or existing files.
+When no project files are readable, this may be a new application. Create the initial files the approved task requires. Do not assume a legacy codebase, existing directories, installed dependencies, or existing scripts.
+
+Create a missing parent directory only by writing an approved file inside it. Run only commands the execution contract lists as authorised. Do not invent a setup or validation command.
 
 Repository tools enforce the contract. A path or command outside the contract will be denied.
 Do not request secrets, credentials, or files outside the workspace.

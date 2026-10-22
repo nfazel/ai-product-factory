@@ -1,4 +1,6 @@
 import { PRODUCT_STAGES, STAGE_META, type ProductStage } from "@/domain/constants";
+import { nextActionDestination } from "@/modules/guidance/next-action-registry";
+import { verificationAction } from "@/modules/verification/disposition";
 import { governanceNextActionLabel } from "@/modules/governance/finding-presentation";
 
 import {
@@ -27,6 +29,11 @@ export function emptySnapshot(patch: Partial<GuidanceSnapshot> & Pick<GuidanceSn
     requirementsChanged: patch.requirementsChanged ?? false,
     developmentContext: patch.developmentContext ?? "UNSET",
     codebaseCaptured: patch.codebaseCaptured ?? false,
+    repositoryReady: patch.repositoryReady ?? false,
+    githubAccountConnected: patch.githubAccountConnected ?? false,
+    productRepositoryMapped: patch.productRepositoryMapped ?? false,
+    githubConnected: patch.githubConnected ?? false,
+    clarificationReview: patch.clarificationReview ?? null,
     intake: {
       activeSources: 0,
       extractionFailed: false,
@@ -45,6 +52,7 @@ export function emptySnapshot(patch: Partial<GuidanceSnapshot> & Pick<GuidanceSn
       readyForReview: false,
       openQuestions: 0,
       demo: false,
+      needsReview: false,
       updatedAt: null,
     },
     definition: {
@@ -57,6 +65,7 @@ export function emptySnapshot(patch: Partial<GuidanceSnapshot> & Pick<GuidanceSn
       slice: "NONE",
       openQuestions: 0,
       demo: false,
+      needsReview: false,
       updatedAt: null,
       outcome: null,
     },
@@ -111,8 +120,22 @@ function link(productId: string, path: string, hash?: string) {
 
 function action(
   snapshot: GuidanceSnapshot,
-  input: Omit<NextAction, "href" | "waitingSince"> & { path: string; hash?: string; waitingSince?: string | null },
+  input: Omit<NextAction, "href" | "waitingSince" | "subjectId" | "execution"> & {
+    path: string;
+    hash?: string;
+    waitingSince?: string | null;
+    subjectId?: string | null;
+  },
 ): NextAction {
+  const destination = nextActionDestination(input.key);
+  const hash = input.hash ?? "";
+  if (input.path !== destination.path || destination.hash !== hash) {
+    throw new Error(`Next action ${input.key} must open ${destination.path}${destination.hash ? `#${destination.hash}` : ""}.`);
+  }
+  const execution = destination.execution ?? "navigate";
+  if (execution === "command" && !input.subjectId) {
+    throw new Error(`Next action ${input.key} needs the task it will run.`);
+  }
   return {
     key: input.key,
     label: input.label,
@@ -120,8 +143,13 @@ function action(
     role: input.role,
     stage: input.stage,
     decision: input.decision,
-    href: link(snapshot.productId, input.path, input.hash),
+    href:
+      destination.kind === "settings"
+        ? `/settings${destination.hash ? `#${destination.hash}` : ""}`
+        : link(snapshot.productId, destination.path, destination.hash || undefined),
     waitingSince: input.waitingSince ?? null,
+    subjectId: input.subjectId ?? null,
+    execution,
   };
 }
 
@@ -319,6 +347,25 @@ function existingRequirementsExplore(snapshot: GuidanceSnapshot): { action: Next
 }
 
 function chooseAction(snapshot: GuidanceSnapshot): { action: NextAction | null; blocker: BlockerView | null } {
+  if (snapshot.clarificationReview) {
+    const review = snapshot.clarificationReview;
+    const destination = nextActionDestination(review.key);
+    const role = review.target === "RELEASE" ? RELEASE : review.target === "BRIEF" || review.target === "DEFINITION" ? PRODUCT : ENGINEERING;
+    const stage = review.target === "BRIEF" ? "EXPLORE" : review.target === "DEFINITION" ? "DEFINE" : review.target === "RELEASE" ? "SHIP" : "BUILD";
+    return {
+      action: action(snapshot, {
+        key: review.key,
+        label: review.label,
+        why: review.why,
+        role,
+        stage,
+        decision: true,
+        path: destination.path,
+        hash: destination.hash,
+      }),
+      blocker: null,
+    };
+  }
   if (snapshot.requirementsChanged) {
     return {
       action: action(snapshot, {
@@ -880,10 +927,10 @@ function taskStep(snapshot: GuidanceSnapshot): { action: NextAction | null; bloc
       action: null,
       blocker: blocker({
         what: `Coding is blocked for ${task.title}`,
-        why: "The engineering review marked this task prohibited.",
-        required: "A person has to change the risk decision before any coding starts.",
+        why: "The engineering review marked this task prohibited, and the risk is still open.",
+        required: "Resolve the risk with evidence, or accept the residual risk with a rationale. Overriding the recommendation does not clear this gate.",
         who: ENGINEERING,
-        next: "The task stays closed.",
+        next: "The task stays closed while the risk is open.",
       }),
     };
   }
@@ -962,16 +1009,283 @@ function taskStep(snapshot: GuidanceSnapshot): { action: NextAction | null; bloc
     };
   }
   if ((task.status === "APPROVED" || task.status === "IN_PROGRESS") && task.workspace === "NONE") {
+    if (!snapshot.repositoryReady) {
+      return {
+        action: action(snapshot, {
+          key: "setup-repository",
+          label: "Set Up Product Repository",
+          why: "This product does not have a repository yet. Coding works in that repository and cannot start until it exists.",
+          role: ENGINEERING,
+          stage: "BUILD",
+          decision: false,
+          path: "/build",
+          hash: "repository",
+        }),
+        blocker: blocker({
+          what: "Product repository is not set up",
+          why: "Coding needs a product repository that is separate from AI Product Builder.",
+          required: "Set up the product repository.",
+          who: ENGINEERING,
+          next: "Coding stays closed.",
+        }),
+      };
+    }
     return {
       action: action(snapshot, {
-        key: "start-coding",
-        label: "Start coding this task",
-        why: `${task.title} is approved. The coding assistant works in an isolated workspace and cannot approve the result.`,
+        key: "generate-execution-plan",
+        label: "Generate Execution Plan",
+        why: `${task.title} is approved. Generating the plan does not approve it and does not change application code.`,
         role: ENGINEERING,
         stage: "BUILD",
         decision: false,
         path: "/build",
+        hash: "execution-plan",
+      }),
+      blocker: null,
+    };
+  }
+  if (task.workspace === "OPEN" && (task.executionPlan === "PROPOSED" || task.executionPlan === "ESCALATED")) {
+    return {
+      action: action(snapshot, {
+        key: "review-execution-plan",
+        label: "Review Execution Plan",
+        why: "Coding stays closed until you review this plan and approve it. Opening the plan does not approve it.",
+        role: ENGINEERING,
+        stage: "BUILD",
+        decision: true,
+        path: "/build",
+        hash: "execution-plan",
+        waitingSince: task.updatedAt,
+      }),
+      blocker: blocker({
+        what: "Execution plan approval is required before Coding can start",
+        why: `${task.title} has an execution plan that is not approved.`,
+        required: "Review the execution plan, then approve it or request changes.",
+        who: ENGINEERING,
+        next: "Coding stays closed.",
+      }),
+    };
+  }
+  if (task.workspace === "OPEN" && task.executionPlan === "CHANGES_REQUESTED") {
+    return {
+      action: action(snapshot, {
+        key: "revise-execution-plan",
+        label: "Revise Execution Plan",
+        why: "The requested change is recorded. The next version still needs approval.",
+        role: ENGINEERING,
+        stage: "BUILD",
+        decision: false,
+        path: "/build",
+        hash: "execution-plan",
+      }),
+      blocker: null,
+    };
+  }
+  if (task.workspace === "OPEN" && task.contractBlocked && task.executionPlan === "APPROVED") {
+    return {
+      action: action(snapshot, {
+        key: "revise-execution-plan",
+        label: "Revise Execution Plan",
+        why: "The approved execution plan conflicts with coding policy. Review the coding failure, then revise the plan. This does not start coding or approve the next version.",
+        role: ENGINEERING,
+        stage: "BUILD",
+        decision: true,
+        path: "/build",
+        hash: "execution-plan",
+        waitingSince: task.updatedAt,
+      }),
+      blocker: blocker({
+        what: "Execution plan and coding policy conflict",
+        why: `${task.title} cannot run until the plan authorises the commands and paths it requires.`,
+        required: "Revise the execution plan and approve the next version.",
+        who: ENGINEERING,
+        next: "Coding stays closed. The failed run is kept.",
+      }),
+    };
+  }
+  if (task.workspace === "OPEN" && task.codingRun === "RUNNING") {
+    return {
+      action: action(snapshot, {
+        key: "view-coding-progress",
+        label: "View Coding Progress",
+        why: "Coding is in progress for the approved execution plan. Another coding action waits until this run finishes.",
+        role: ENGINEERING,
+        stage: "BUILD",
+        decision: false,
+        path: "/build",
+        hash: "coding-progress",
+      }),
+      blocker: null,
+    };
+  }
+  if (task.workspace === "OPEN" && task.codingRun === "WAITING") {
+    return {
+      action: action(snapshot, {
+        key: "resolve-coding-blocker",
+        label: "Resolve Coding Blocker",
+        why: "Coding stopped and needs a decision before it can continue. Opening this page does not approve the code.",
+        role: ENGINEERING,
+        stage: "BUILD",
+        decision: true,
+        path: "/build",
+        hash: "coding-progress",
+        waitingSince: task.updatedAt,
+      }),
+      blocker: blocker({
+        what: "Coding is waiting for a decision",
+        why: `${task.title} has an open coding blocker.`,
+        required: "Review the failure, then request changes, abandon the workspace, or resume only after the blocker is understood.",
+        who: ENGINEERING,
+        next: "Coding does not approve its own change.",
+      }),
+    };
+  }
+  if (task.workspace === "OPEN" && task.planIncomplete && task.executionPlan === "APPROVED") {
+    return {
+      action: action(snapshot, {
+        key: "revise-execution-plan",
+        label: "Revise Execution Plan",
+        why: `${task.title} cannot satisfy a required validation inside the approved file scope. Revise the execution plan. The next version is not approved and coding does not start.`,
+        role: ENGINEERING,
+        stage: "BUILD",
+        decision: true,
+        path: "/build",
+        hash: "execution-plan",
+        waitingSince: task.updatedAt,
+      }),
+      blocker: blocker({
+        what: "Execution plan scope is incomplete",
+        why: `${task.title} needs an application entry point before npm run build can succeed.`,
+        required: "Revise the execution plan and approve the next version.",
+        who: ENGINEERING,
+        next: "Coding stays closed. The failed run is kept.",
+      }),
+    };
+  }
+  if (task.workspace === "OPEN" && task.revisedPlanReady && task.executionPlan === "APPROVED") {
+    return {
+      action: action(snapshot, {
+        key: "start-coding",
+        label: "Start Coding",
+        why: `${task.title} has a newer approved execution plan. Start a new coding run. The earlier failed run stays as evidence.`,
+        role: ENGINEERING,
+        stage: "BUILD",
+        decision: false,
+        path: "/build",
+        hash: "execution-plan",
+      }),
+      blocker: null,
+    };
+  }
+  if (task.workspace === "OPEN" && task.persistenceRecovery && task.executionPlan === "APPROVED") {
+    return {
+      action: action(snapshot, {
+        key: "record-repair-result",
+        label: "Record repair result",
+        why: "Repair execution could not be fully recorded. No further repair has been started. Review the saved workspace state before retrying.",
+        role: ENGINEERING,
+        stage: "BUILD",
+        decision: false,
+        path: "/build",
+        hash: "coding-progress",
+        waitingSince: task.updatedAt,
+      }),
+      blocker: null,
+    };
+  }
+  if (task.workspace === "OPEN" && task.codingRun === "FAILED" && task.repairAvailable && task.executionPlan === "APPROVED") {
+    return {
+      action: action(snapshot, {
+        key: "repair-implementation",
+        label: "Repair Implementation",
+        why: task.implementationIncomplete
+          ? `${task.title} did not complete an approved work item. Repair stays inside the approved execution plan and does not start a new coding run.`
+          : `${task.title} generated code that failed an approved validation command. Repair stays inside the approved execution plan.`,
+        role: ENGINEERING,
+        stage: "BUILD",
+        decision: false,
+        path: "/build",
+        hash: "coding-progress",
+        waitingSince: task.updatedAt,
+      }),
+      blocker: null,
+    };
+  }
+  if (task.workspace === "OPEN" && task.codingRun === "FAILED" && task.providerBlocked && task.executionPlan === "APPROVED") {
+    return {
+      action: action(snapshot, {
+        key: "retry-coding",
+        label: "Retry Coding",
+        why: `${task.title} stopped because the AI provider did not complete the request. Retry uses the same approved execution plan.`,
+        role: ENGINEERING,
+        stage: "BUILD",
+        decision: false,
+        path: "/build",
+        hash: "coding-progress",
+        waitingSince: task.updatedAt,
+      }),
+      blocker: null,
+    };
+  }
+  if (task.workspace === "OPEN" && task.codingRun === "FAILED") {
+    return {
+      action: action(snapshot, {
+        key: "review-coding-failure",
+        label: "Review Coding Failure",
+        why: `${task.title} stopped because a saved check or command failed.`,
+        role: ENGINEERING,
+        stage: "BUILD",
+        decision: true,
+        path: "/build",
+        hash: "coding-progress",
+        waitingSince: task.updatedAt,
+      }),
+      blocker: null,
+    };
+  }
+  if (task.workspace === "OPEN" && task.codingRun === "COMPLETED" && task.codeApproval === "NONE" && task.outOfScope) {
+    return {
+      action: action(snapshot, {
+        key: "restore-unapproved-change",
+        label: "Restore Unapproved Change",
+        why: `${task.title} includes a source change outside the approved execution plan. Restore that change, or propose a new plan version before approval.`,
+        role: ENGINEERING,
+        stage: "BUILD",
+        decision: true,
+        path: "/build",
+        hash: "coding-progress",
+        waitingSince: task.updatedAt,
+      }),
+      blocker: null,
+    };
+  }
+  if (task.workspace === "OPEN" && task.codingRun === "COMPLETED" && task.codeApproval === "NONE") {
+    return {
+      action: action(snapshot, {
+        key: "review-change",
+        label: "Review Code Changes",
+        why: `${task.title} finished the approved execution plan. Review the diff before verification. Coding has not approved the change.`,
+        role: ENGINEERING,
+        stage: "BUILD",
+        decision: true,
+        path: "/build",
         hash: "code",
+        waitingSince: task.updatedAt,
+      }),
+      blocker: null,
+    };
+  }
+  if (task.workspace === "OPEN" && task.executionPlan === "APPROVED" && task.codeApproval === "NONE" && (task.codingRun === "NONE" || task.codingRun === "READY")) {
+    return {
+      action: action(snapshot, {
+        key: "start-coding",
+        label: "Start Coding",
+        why: `${task.title} has an approved execution plan. Coding uses that plan and cannot approve the result.`,
+        role: ENGINEERING,
+        stage: "BUILD",
+        decision: false,
+        path: "/build",
+        hash: "execution-plan",
       }),
       blocker: null,
     };
@@ -982,6 +1296,22 @@ function taskStep(snapshot: GuidanceSnapshot): { action: NextAction | null; bloc
         key: "review-change",
         label: "Review Code Change",
         why: `${task.title} has a change waiting for a person.`,
+        role: ENGINEERING,
+        stage: "BUILD",
+        decision: true,
+        path: "/build",
+        hash: "code",
+        waitingSince: task.updatedAt,
+      }),
+      blocker: null,
+    };
+  }
+  if (task.codeApproval === "CURRENT" && task.status !== "COMPLETED") {
+    return {
+      action: action(snapshot, {
+        key: "create-commit",
+        label: "Create Commit",
+        why: `${task.title} has an approved source snapshot. Create a local commit to lock it before Independent Verification. This does not publish, create a pull request, or merge.`,
         role: ENGINEERING,
         stage: "BUILD",
         decision: true,
@@ -1008,45 +1338,90 @@ function taskStep(snapshot: GuidanceSnapshot): { action: NextAction | null; bloc
       blocker: null,
     };
   }
-  if (task.verification === "NONE" || task.verification === "DEMO") {
+  const verification = verificationAction(task.verification);
+  if (verification && task.verification !== "APPROVED") {
     return {
       action: action(snapshot, {
-        key: "start-check",
-        label: "Start Independent Check",
-        why: task.verification === "DEMO"
-          ? "The recorded check is sample data. A real independent check is still required."
-          : `${task.title} is complete. The author of the code does not approve the check.`,
+        key: verification.key,
+        label: verification.label,
+        why: verificationWhy(task),
         role: ENGINEERING,
         stage: "PROVE",
-        decision: false,
+        decision: verification.decision,
         path: "/testing",
         hash: "check",
-      }),
-      blocker: null,
-    };
-  }
-  if (task.verification === "AWAITING") {
-    return {
-      action: action(snapshot, {
-        key: "approve-verification",
-        label: "Approve Verification",
-        why: "The independent check has a result. A person decides whether it is enough.",
-        role: ENGINEERING,
-        stage: "PROVE",
-        decision: true,
-        path: "/testing",
-        hash: "check",
-        waitingSince: task.updatedAt,
+        waitingSince: verification.decision ? task.updatedAt : null,
+        subjectId: task.id,
       }),
       blocker: null,
     };
   }
   if (!task.published) {
+    if (!snapshot.githubAccountConnected && !snapshot.githubConnected) {
+      return {
+        action: action(snapshot, {
+          key: "configure-github",
+          label: "Configure GitHub",
+          why: "Implementation and Independent Verification are approved. Configure a GitHub connection to publish this branch.",
+          role: ENGINEERING,
+          stage: "PROVE",
+          decision: false,
+          path: "/settings",
+          hash: "github",
+        }),
+        blocker: null,
+      };
+    }
+    if (!snapshot.productRepositoryMapped && !snapshot.githubConnected) {
+      return {
+        action: action(snapshot, {
+          key: "choose-product-repository",
+          label: "Choose GitHub repository",
+          why: "GitHub is connected. Choose the repository for this product before publishing the approved branch.",
+          role: ENGINEERING,
+          stage: "PROVE",
+          decision: false,
+          path: "/build",
+          hash: "repository",
+        }),
+        blocker: null,
+      };
+    }
     return {
       action: action(snapshot, {
         key: "publish-branch",
         label: "Publish Branch",
-        why: "The approved commit stays local until a person publishes it.",
+        why: "The approved commit stays local until a person publishes it. Publishing does not create a pull request, merge, or deploy.",
+        role: ENGINEERING,
+        stage: "PROVE",
+        decision: false,
+        path: "/testing",
+        hash: "publish",
+      }),
+      blocker: null,
+    };
+  }
+  if ((task.pullRequest === "NONE" || task.pullRequest === "DEMO") && task.remoteMain === "MISSING") {
+    return {
+      action: action(snapshot, {
+        key: "initialize-remote-main",
+        label: "Initialize Remote Main Branch",
+        why: "The remote repository has no main branch. Publishing the baseline commit creates that branch. It does not change the published task branch, create a pull request, or change GitHub settings.",
+        role: ENGINEERING,
+        stage: "PROVE",
+        decision: false,
+        path: "/testing",
+        hash: "publish",
+      }),
+      blocker: null,
+    };
+  }
+  if ((task.pullRequest === "NONE" || task.pullRequest === "DEMO") && task.remoteMain === "OTHER_DEFAULT") {
+    return {
+      action: action(snapshot, {
+        key: "create-pr",
+        label: "Create Pull Request",
+        why: "GitHub's default branch is not main. Repository settings were not changed.",
         role: ENGINEERING,
         stage: "PROVE",
         decision: false,
@@ -1072,11 +1447,16 @@ function taskStep(snapshot: GuidanceSnapshot): { action: NextAction | null; bloc
     };
   }
   if (task.pullRequest === "OPEN") {
+    const next = task.pullRequestNext ?? {
+      key: "refresh-pr",
+      label: "Refresh Pull Request",
+      why: "Refresh reads GitHub evidence. It does not approve the pull request. It does not merge it.",
+    };
     return {
       action: action(snapshot, {
-        key: "refresh-pr",
-        label: "Refresh Pull Request",
-        why: "A person merges the pull request in GitHub. Refresh reads that result back. AI Product Builder does not merge.",
+        key: next.key,
+        label: next.label,
+        why: next.why,
         role: ENGINEERING,
         stage: "PROVE",
         decision: false,
@@ -1088,6 +1468,17 @@ function taskStep(snapshot: GuidanceSnapshot): { action: NextAction | null; bloc
     };
   }
   return null;
+}
+
+function verificationWhy(task: TaskSnapshot) {
+  if (task.verification === "DEMO") return "The recorded check is sample data. A real independent check is still required.";
+  if (task.verification === "NONE") return `${task.title} is complete. The author of the code does not approve the check.`;
+  if (task.verification === "RUNNING") return `${task.title} has an independent check in progress.`;
+  if (task.verification === "RETRYABLE") return `${task.title} did not finish Independent Verification. The product was not judged. Retry uses the same approved commit.`;
+  if (task.verification === "REVIEW") return `${task.title} has a verification result that still needs a person's review.`;
+  if (task.verification === "AWAITING") return "The independent check passed. A person decides whether it is enough.";
+  if (task.verification === "FAILED") return `${task.title} failed an executed check. Review the findings before requesting changes.`;
+  return `${task.title} is ready for the next verification decision.`;
 }
 
 function taskSettled(task: TaskSnapshot) {
@@ -1284,8 +1675,8 @@ function stageStatus(stage: ProductStage, snapshot: GuidanceSnapshot, next: Next
 
 function evidence(snapshot: GuidanceSnapshot): ProductGuidance["evidence"] {
   const items: EvidenceItem[] = [
-    item("Product Brief", snapshot.discovery.briefStatus === "APPROVED", snapshot.discovery.demo, snapshot.discovery.briefStatus === "NONE" ? "No brief yet." : "Waiting for approval."),
-    item("Product Definition", snapshot.definition.approved, snapshot.definition.demo, "Not approved."),
+    item("Product Brief", snapshot.discovery.briefStatus === "APPROVED" && !snapshot.discovery.needsReview, snapshot.discovery.demo, snapshot.discovery.needsReview ? "Needs review again." : snapshot.discovery.briefStatus === "NONE" ? "No brief yet." : "Waiting for approval."),
+    item("Product Definition", snapshot.definition.approved && !snapshot.definition.needsReview, snapshot.definition.demo, snapshot.definition.needsReview ? "Needs review again." : "Not approved."),
     item("First Slice", snapshot.definition.slice === "APPROVED", snapshot.definition.demo, snapshot.definition.slice === "NONE" ? "No First Slice yet." : "Not confirmed."),
     item("Design", snapshot.design.architecture === "APPROVED" && !snapshot.design.architectureReview, snapshot.design.demo, snapshot.design.architectureReview ? "Needs review again." : "Not approved."),
     item("Delivery Plan", snapshot.design.plan === "APPROVED" && !snapshot.design.planReview, snapshot.design.demo, snapshot.design.planReview ? "Needs review again." : "Not approved."),

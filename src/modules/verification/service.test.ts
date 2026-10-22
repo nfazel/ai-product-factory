@@ -10,6 +10,7 @@ import { setAIProviderForTests, type AIProvider } from "@/modules/ai/provider";
 import { listAgentCatalogue } from "@/modules/agent/service";
 import { noteVerificationCommitChanged } from "@/modules/verification/impact";
 import { VERIFICATION_SYSTEM_PROMPT } from "@/modules/verification/prompt";
+import { AIFailure } from "@/modules/ai/failures";
 import {
   applyVerificationTool,
   approveVerification,
@@ -18,8 +19,10 @@ import {
   createVerificationDefect,
   getProveView,
   recordManualResult,
+  retryVerification,
   startVerification,
 } from "@/modules/verification/service";
+import { verificationEntryBlockers } from "@/modules/verification/gates";
 
 const products: string[] = [];
 const repos: string[] = [];
@@ -37,17 +40,16 @@ function git(dir: string, args: string[]) {
   });
 }
 
-function makeRepo(pass = true) {
+function makeRepo(pass: boolean | "absent" = true, build = false) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "apf-verify-repo-"));
   repos.push(dir);
   fs.mkdirSync(path.join(dir, "src/claims"), { recursive: true });
   fs.writeFileSync(path.join(dir, "src/claims/submit.ts"), "export const claim = \"notice\"\n");
   fs.writeFileSync(path.join(dir, "src/claims/submit.test.ts"), "test(\"notice\", () => { expect(1).toBe(1) })\n");
-  const script = pass ? "process.exit(0)" : "process.exit(1)";
-  fs.writeFileSync(
-    path.join(dir, "package.json"),
-    JSON.stringify({ name: "demo-claims", scripts: { test: `node -e "${script}"` } }),
-  );
+  const scripts: Record<string, string> = {};
+  if (pass !== "absent") scripts.test = `node -e "process.exit(${pass ? 0 : 1})"`;
+  if (build) scripts.build = "node -e \"process.exit(0)\"";
+  fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify({ name: "demo-claims", scripts }));
   git(dir, ["init", "-b", "main"]);
   git(dir, ["config", "user.email", "test@example.com"]);
   git(dir, ["config", "user.name", "Test"]);
@@ -56,8 +58,8 @@ function makeRepo(pass = true) {
   return dir;
 }
 
-function prepareRepo(pass = true) {
-  const repo = makeRepo(pass);
+function prepareRepo(pass: boolean | "absent" = true, build = false) {
+  const repo = makeRepo(pass, build);
   process.env.PRODUCT_REPOSITORY_ROOT = repo;
   process.env.PRODUCT_REPOSITORY_WORKTREE_ROOT = worktreeRoot;
   process.env.AI_PROVIDER = "openai";
@@ -131,7 +133,9 @@ function provider(options: {
 }
 
 async function completedTask(options?: {
-  pass?: boolean;
+  pass?: boolean | "absent";
+  build?: boolean;
+  testApplicability?: "REQUIRED" | "NOT_APPLICABLE";
   status?: "COMPLETED" | "APPROVED";
   approval?: boolean;
   sha?: boolean;
@@ -140,7 +144,7 @@ async function completedTask(options?: {
   workspace?: boolean;
   criteria?: number;
 }) {
-  const repo = prepareRepo(options?.pass ?? true);
+  const repo = prepareRepo(options?.pass ?? true, options?.build ?? false);
   const sha = git(repo, ["rev-parse", "HEAD"]).trim();
   const product = await db.product.create({
     data: {
@@ -237,6 +241,24 @@ async function completedTask(options?: {
         stale: options?.stale === true,
       },
     });
+    await db.codingExecutionPlan.create({
+      data: {
+        workspaceId: workspace.id,
+        summary: "Claim submission",
+        version: 1,
+        status: "COMPLETED",
+        filesExpectedToChange: ["src/claims/submit.ts"],
+        steps: ["Update the claim form"],
+        validationCommands: [
+          ...(options?.build
+            ? [{ command: "npm run build", kind: "VALIDATION", applicability: "REQUIRED", reason: "The plan requires a build." }]
+            : []),
+          { command: "npm test", kind: "VALIDATION", applicability: options?.testApplicability ?? "REQUIRED", reason: "The plan states whether tests apply." },
+        ],
+        approvedBy: "Local user",
+        approvedAt: new Date("2020-01-01T00:00:00.000Z"),
+      },
+    });
     if (options?.checks !== false) {
       await db.codingEvidence.create({
         data: {
@@ -250,6 +272,20 @@ async function completedTask(options?: {
           exitCode: 0,
         },
       });
+      if (options?.build) {
+        await db.codingEvidence.create({
+          data: {
+            workspaceId: workspace.id,
+            implementationTaskId: task.id,
+            type: "BUILD",
+            source: "COMMAND_RUNNER",
+            description: "production build",
+            result: "PASS",
+            command: "npm run build",
+            exitCode: 0,
+          },
+        });
+      }
     }
     await db.codingSelfReview.create({
       data: { workspaceId: workspace.id, summary: "The Coding Agent says every criterion passed." },
@@ -327,6 +363,55 @@ describe("verification entry", () => {
     expect(await db.agentRun.count({ where: { productId: setup.product.id } })).toBe(0);
   });
 
+  it("blocks verification of the baseline when the approved snapshot is still uncommitted", async () => {
+    const setup = await completedTask();
+    const workspace = await db.repositoryWorkspace.findFirstOrThrow({ where: { implementationTaskId: setup.task.id } });
+    await db.codingDiff.create({
+      data: {
+        workspaceId: workspace.id,
+        files: [{ path: "src/claims/submit.ts", status: "modified", additions: 1, deletions: 0 }],
+        additions: 1,
+        deletions: 0,
+        patch: "approved",
+      },
+    });
+    await db.codeChangeApproval.updateMany({
+      where: { implementationTaskId: setup.task.id },
+      data: { baseCommit: setup.sha, headCommit: setup.sha },
+    });
+    await expect(startVerification(setup.product.id, setup.task.id)).rejects.toThrow(/not the baseline/);
+    expect(await db.verificationSession.count({ where: { productId: setup.product.id } })).toBe(0);
+  });
+
+  it("allows verification entry for the approved commit", async () => {
+    const setup = await completedTask();
+    const parent = setup.sha;
+    fs.writeFileSync(path.join(setup.repo, "src/claims/submit.ts"), "export const claim = \"approved\"\n");
+    git(setup.repo, ["add", "src/claims/submit.ts"]);
+    git(setup.repo, ["commit", "-m", "approved snapshot"]);
+    const approved = git(setup.repo, ["rev-parse", "HEAD"]).trim();
+    const workspace = await db.repositoryWorkspace.findFirstOrThrow({ where: { implementationTaskId: setup.task.id } });
+    await db.repositoryWorkspace.update({
+      where: { id: workspace.id },
+      data: { baseCommit: parent, headCommit: approved },
+    });
+    await db.codingDiff.create({
+      data: {
+        workspaceId: workspace.id,
+        files: [{ path: "src/claims/submit.ts", status: "modified", additions: 1, deletions: 0 }],
+        additions: 1,
+        deletions: 0,
+        patch: "approved",
+      },
+    });
+    await db.codeChangeApproval.updateMany({
+      where: { implementationTaskId: setup.task.id },
+      data: { baseCommit: parent, headCommit: approved },
+    });
+    const reasons = await verificationEntryBlockers(setup.product.id, setup.task.id);
+    expect(reasons.filter((reason) => /baseline|commit SHA|product repository/i.test(reason))).toEqual([]);
+  });
+
   it("blocks a stale execution contract", async () => {
     const setup = await completedTask({ stale: true });
     await expect(startVerification(setup.product.id, setup.task.id)).rejects.toThrow(/execution contract is stale/);
@@ -343,8 +428,12 @@ describe("verification entry", () => {
 
   it("reports a missing repository before creating a run", async () => {
     const setup = await completedTask();
+    await db.repository.update({
+      where: { productId: setup.product.id },
+      data: { status: "UNAVAILABLE", localPath: "" },
+    });
     delete process.env.PRODUCT_REPOSITORY_ROOT;
-    await expect(startVerification(setup.product.id, setup.task.id)).rejects.toThrow(/PRODUCT_REPOSITORY_ROOT/);
+    await expect(startVerification(setup.product.id, setup.task.id)).rejects.toThrow(/does not have a repository yet/);
     expect(await db.agentRun.count({ where: { productId: setup.product.id } })).toBe(0);
   });
 });
@@ -362,6 +451,8 @@ describe("verification execution", () => {
     expect(fs.readFileSync(path.join(setup.repo, "src/claims/submit.ts"), "utf8")).toContain("notice");
     expect(git(setup.repo, ["rev-parse", "HEAD"]).trim()).toBe(setup.sha);
     const created = session?.testCases.find((item) => item.title === "Submit valid claim");
+    expect(session?.executions.some((item) => item.kind === "EXISTING_REGRESSION" && item.command === "npm test" && item.status === "PASSED")).toBe(true);
+    expect(session?.executions.some((item) => item.kind === "NEW_VERIFICATION" && item.command.startsWith("node --test verification/"))).toBe(true);
     expect(created?.provenance).toBe("VERIFICATION_AGENT");
     expect(session?.testCases.some((item) => item.provenance === "HUMAN_EXISTING")).toBe(true);
     const coverage = session?.coverages.find((item) => item.acceptanceCriterionId === setup.criterion.id);
@@ -476,8 +567,31 @@ describe("verification execution", () => {
       where: { implementationTaskId: setup.task.id },
       data: { headCommit: "b".repeat(40) },
     });
-    await expect(startVerification(setup.product.id, setup.task.id)).rejects.toThrow(/could not be created/);
+    await expect(startVerification(setup.product.id, setup.task.id)).rejects.toThrow(/approved commit SHA/);
     expect(await db.verificationEvidence.count({ where: { sessionId: session!.id } })).toBe(before);
+  });
+
+  it("does not rewrite a historical verification session", async () => {
+    const setup = await completedTask();
+    const historical = await db.verificationSession.create({
+      data: {
+        productId: setup.product.id,
+        implementationTaskId: setup.task.id,
+        commitSha: setup.sha,
+        status: "BLOCKED",
+        overallVerdict: "INCONCLUSIVE",
+        verdictReason: "No acceptance criteria were available to verify.",
+        failureClass: "VERIFICATION_EVIDENCE_INSUFFICIENT",
+      },
+    });
+    setAIProviderForTests(provider({ criterionId: setup.criterion.id }));
+    const created = await startVerification(setup.product.id, setup.task.id);
+    const again = await db.verificationSession.findUnique({ where: { id: historical.id } });
+    expect(created?.id).not.toBe(historical.id);
+    expect(again?.status).toBe("BLOCKED");
+    expect(again?.overallVerdict).toBe("INCONCLUSIVE");
+    expect(again?.verdictReason).toBe("No acceptance criteria were available to verify.");
+    expect(again?.failureClass).toBe("VERIFICATION_EVIDENCE_INSUFFICIENT");
   });
 
   it("preserves the first session when verification is run again", async () => {
@@ -542,17 +656,162 @@ describe("verification execution", () => {
     await expect(startVerification(setup.product.id, setup.task.id)).rejects.toThrow(/model unavailable/);
     const session = await db.verificationSession.findFirst({ where: { productId: setup.product.id } });
     expect(session?.status).toBe("FAILED");
+    expect(session?.overallVerdict).toBeNull();
+    expect(session?.failureClass).toBe("VERIFICATION_EXECUTION_FAILED");
     expect(await db.verificationExecution.count({ where: { sessionId: session!.id } })).toBeGreaterThan(0);
     expect(await db.agentRun.count({ where: { productId: setup.product.id, status: "FAILED" } })).toBeGreaterThan(0);
   });
 
-  it("configures the verification agent only when AI and a repository exist", async () => {
+  it("does not turn a missing test script into a product failure", async () => {
+    const setup = await completedTask({ pass: "absent" });
+    setAIProviderForTests(provider({ criterionId: setup.criterion.id }));
+    const session = await startVerification(setup.product.id, setup.task.id);
+    expect(session?.executions.some((item) => item.command === "npm test" && item.status === "FAILED")).toBe(false);
+    expect(session?.evidence.some((item) => item.command === "npm test" && item.result === "UNAVAILABLE")).toBe(true);
+    expect(session?.overallVerdict).not.toBe("FAIL");
+    expect(session?.defectLinks).toHaveLength(0);
+  });
+
+  it("treats tests marked not applicable by the approved plan as not run", async () => {
+    const setup = await completedTask({ pass: "absent", build: true, testApplicability: "NOT_APPLICABLE" });
+    setAIProviderForTests(provider({ criterionId: setup.criterion.id }));
+    const session = await startVerification(setup.product.id, setup.task.id);
+    expect(session?.executions.some((item) => item.command === "npm test" && item.status === "NOT_RUN")).toBe(true);
+    expect(session?.evidence.some((item) => item.command === "npm test" && item.result === "NOT APPLICABLE")).toBe(true);
+    expect(session?.executions.some((item) => item.command === "npm run build" && item.status === "PASSED")).toBe(true);
+    expect(session?.coverages[0]?.status).toBe("VERIFIED");
+    expect(session?.overallVerdict).toBe("PASS");
+  });
+
+  it("does not treat a passing technical check as proof of an unexecuted acceptance criterion", async () => {
+    const setup = await completedTask({ build: true, criteria: 2 });
+    const body = passingBody(setup.criterion.id).replace(`// verifies:${setup.criterion.id}\n`, "");
+    setAIProviderForTests(provider({ criterionId: setup.criterion.id, body }));
+    const session = await startVerification(setup.product.id, setup.task.id);
+    expect(session?.executions.some((item) => item.command === "npm run build" && item.status === "PASSED")).toBe(true);
+    expect(session?.coverages.every((item) => item.status !== "VERIFIED")).toBe(true);
+    expect(session?.overallVerdict).not.toBe("PASS");
+    expect(session?.overallVerdict).not.toBe("PASS_WITH_CONCERNS");
+  });
+
+  it("records a provider failure without a product verdict", async () => {
+    const setup = await completedTask();
+    setAIProviderForTests({
+      async generate(request) {
+        if (request.schemaName === "verification_interpretation") {
+          throw new AIFailure(
+            "The configured model is temporarily unavailable because of high demand. Nothing was generated. You can retry.",
+            "PROVIDER_UNAVAILABLE",
+          );
+        }
+        return provider({ criterionId: setup.criterion.id }).generate(request);
+      },
+    });
+    await expect(startVerification(setup.product.id, setup.task.id)).rejects.toThrow(/high demand/);
+    const session = await db.verificationSession.findFirst({ where: { productId: setup.product.id } });
+    expect(session?.status).toBe("FAILED");
+    expect(session?.overallVerdict).toBeNull();
+    expect(session?.failureClass).toBe("AI_PROVIDER_UNAVAILABLE");
+    expect(["PASS", "FAIL", "PASS_WITH_CONCERNS"]).not.toContain(session?.overallVerdict);
+  });
+
+  it("retries against the same approved commit in a new workspace and keeps the failed attempt", async () => {
+    const setup = await completedTask();
+    setAIProviderForTests(provider({ criterionId: setup.criterion.id, throwOn: "verification_interpretation" }));
+    await expect(startVerification(setup.product.id, setup.task.id)).rejects.toThrow(/model unavailable/);
+    const first = await db.verificationSession.findFirstOrThrow({
+      where: { productId: setup.product.id },
+      include: { workspace: true },
+    });
+    const approvalBefore = await db.codeChangeApproval.findFirstOrThrow({ where: { implementationTaskId: setup.task.id } });
+    const headBefore = git(setup.repo, ["rev-parse", "HEAD"]).trim();
+    setAIProviderForTests(provider({ criterionId: setup.criterion.id }));
+    const second = await retryVerification(setup.product.id, setup.task.id);
+    expect(second?.id).not.toBe(first.id);
+    expect(second?.commitSha).toBe(setup.sha);
+    expect(second?.workspace?.workspacePath).not.toBe(first.workspace?.workspacePath);
+    expect(fs.existsSync(second!.workspace!.workspacePath)).toBe(true);
+    expect(await db.verificationSession.count({ where: { productId: setup.product.id } })).toBe(2);
+    const approvalAfter = await db.codeChangeApproval.findFirstOrThrow({ where: { implementationTaskId: setup.task.id } });
+    expect(approvalAfter.diffHash).toBe(approvalBefore.diffHash);
+    expect(approvalAfter.headCommit).toBe(approvalBefore.headCommit);
+    expect(git(setup.repo, ["rev-parse", "HEAD"]).trim()).toBe(headBefore);
+    expect(fs.readFileSync(path.join(setup.repo, "src/claims/submit.ts"), "utf8")).toContain("notice");
+  });
+
+  it("creates a fresh worktree when the previous temporary checkout is gone", async () => {
+    const setup = await completedTask();
+    setAIProviderForTests(provider({ criterionId: setup.criterion.id }));
+    const first = await startVerification(setup.product.id, setup.task.id);
+    const head = git(setup.repo, ["rev-parse", "HEAD"]).trim();
+    fs.rmSync(first!.workspace!.workspacePath, { recursive: true, force: true });
+    const second = await retryVerification(setup.product.id, setup.task.id);
+    expect(fs.existsSync(second!.workspace!.workspacePath)).toBe(true);
+    expect(second?.workspace?.baseCommit).toBe(setup.sha);
+    expect(second?.id).not.toBe(first?.id);
+    expect(git(setup.repo, ["rev-parse", "HEAD"]).trim()).toBe(head);
+    const kept = await db.verificationSession.findUnique({ where: { id: first!.id } });
+    expect(kept?.commitSha).toBe(setup.sha);
+  });
+
+  it("blocks retry when the code approval no longer matches the commit", async () => {
+    const setup = await completedTask();
+    setAIProviderForTests(provider({ criterionId: setup.criterion.id }));
+    const first = await startVerification(setup.product.id, setup.task.id);
+    await db.codeChangeApproval.updateMany({
+      where: { implementationTaskId: setup.task.id },
+      data: { stale: true },
+    });
+    await expect(retryVerification(setup.product.id, setup.task.id)).rejects.toThrow(/code approval/);
+    expect(await db.verificationSession.count({ where: { productId: setup.product.id } })).toBe(1);
+    await db.codeChangeApproval.updateMany({
+      where: { implementationTaskId: setup.task.id },
+      data: { stale: false },
+    });
+    fs.writeFileSync(path.join(setup.repo, "src/claims/submit.ts"), "export const claim = \"later\"\n");
+    git(setup.repo, ["add", "src/claims/submit.ts"]);
+    git(setup.repo, ["commit", "-m", "later"]);
+    const later = git(setup.repo, ["rev-parse", "HEAD"]).trim();
+    await db.repositoryWorkspace.updateMany({
+      where: { implementationTaskId: setup.task.id },
+      data: { headCommit: later },
+    });
+    await expect(retryVerification(setup.product.id, setup.task.id)).rejects.toThrow(/approved commit SHA/);
+    expect(await db.verificationSession.count({ where: { productId: setup.product.id } })).toBe(1);
+    expect(first?.commitSha).toBe(setup.sha);
+  });
+
+  it("still allows verification entry when the temporary coding checkout is missing", async () => {
+    const setup = await completedTask();
+    await db.repositoryWorkspace.updateMany({
+      where: { implementationTaskId: setup.task.id },
+      data: { workspacePath: path.join(os.tmpdir(), `missing-${setup.task.id}`) },
+    });
+    const reasons = await verificationEntryBlockers(setup.product.id, setup.task.id);
+    expect(reasons.some((reason) => /not in the product repository/i.test(reason))).toBe(false);
+  });
+
+  it("records an integrated plan without executing or verifying the slice", async () => {
+    const setup = await completedTask();
+    const before = await db.verificationSession.count({ where: { productId: setup.product.id } });
+    const integrated = await createIntegratedVerification(setup.product.id, setup.slice.id);
+    const view = await getProveView(setup.product.id);
+    expect(integrated.status).toBe("BLOCKED");
+    expect(integrated.overallVerdict).toBe("INCONCLUSIVE");
+    expect(JSON.stringify(integrated.evidenceGaps)).toMatch(/not executed/);
+    expect(view?.readiness.label).toBe("NOT VERIFIED");
+    expect(view?.readiness.reasons.join(" ")).toContain(setup.task.title);
+    expect(view?.readiness.reasons.join(" ")).not.toContain(setup.task.id);
+    expect(await db.verificationSession.count({ where: { productId: setup.product.id } })).toBe(before);
+  });
+
+  it("configures the verification agent from AI; repository readiness is per product", async () => {
     const repo = prepareRepo();
     setAIProviderForTests(provider({ criterionId: "unused" }));
     const ready = await listAgentCatalogue();
     expect(ready.find((agent) => agent.agentType === "TESTING")?.configured).toBe(true);
     delete process.env.PRODUCT_REPOSITORY_ROOT;
-    expect((await listAgentCatalogue()).find((agent) => agent.agentType === "TESTING")?.configured).toBe(false);
+    expect((await listAgentCatalogue()).find((agent) => agent.agentType === "TESTING")?.configured).toBe(true);
     process.env.PRODUCT_REPOSITORY_ROOT = repo;
     setAIProviderForTests(null);
     delete process.env.OPENAI_API_KEY;

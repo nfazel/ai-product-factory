@@ -1,14 +1,16 @@
 import "server-only";
 
 import fs from "node:fs";
-import path from "node:path";
 
 import { recordActivity } from "@/modules/activity/service";
+import { validationProcessEnvironment } from "@/modules/coding/bootstrap";
+import { safeCommandOutput } from "@/modules/coding/command-output";
 import { runProcess } from "@/modules/coding/git";
 import {
   approveCommand,
   classifyRead,
   classifyWrite,
+  ensureParentDirectory,
   isSecretPath,
   isTestFile,
   resolveInside,
@@ -74,6 +76,10 @@ export async function executeRepositoryTool(context: ToolContext, request: ToolR
   return outcome;
 }
 
+function commandEnvironment(command: string, workspacePath: string) {
+  return validationProcessEnvironment(command, process.env.DATABASE_URL, workspacePath);
+}
+
 async function apply(context: ToolContext, request: ToolRequest): Promise<ToolResult> {
   if (request.action === "GET_STATUS" || request.action === "GET_DIFF") {
     return { allowed: true, reason: "", kind: "ok", metadata: { action: request.action } };
@@ -92,17 +98,25 @@ async function apply(context: ToolContext, request: ToolRequest): Promise<ToolRe
       return { allowed: false, reason: approved.reason, kind: "command", metadata: {} };
     }
     const started = Date.now();
-    const result = await runProcess(approved.argv, context.workspacePath);
+    const environment = commandEnvironment(request.command, context.workspacePath);
+    const result = await runProcess(approved.argv, context.workspacePath, 120_000, environment.env);
+    const output = [environment.note, safeCommandOutput(result.stdout, result.stderr)].filter(Boolean).join("\n\n");
     return {
       allowed: true,
       reason: "",
       kind: "ok",
-      content: `${result.stdout}\n${result.stderr}`.slice(0, 4000),
-      metadata: { exitCode: result.code, durationMs: Date.now() - started },
+      content: output,
+      metadata: {
+        exitCode: result.code,
+        durationMs: Date.now() - started,
+        output,
+        ...(environment.note ? { validationEnvironment: environment.note } : {}),
+      },
     };
   }
 
-  const located = resolveInside(context.workspacePath, request.path);
+  const writing = request.action === "CREATE_FILE" || request.action === "WRITE_FILE";
+  const located = resolveInside(context.workspacePath, request.path, { allowMissingParents: writing });
   if (!located.ok) {
     const kind = located.reason.includes("Symbolic") ? "restricted" : "scope";
     return { allowed: false, reason: located.reason, kind, metadata: {} };
@@ -139,10 +153,9 @@ async function apply(context: ToolContext, request: ToolRequest): Promise<ToolRe
     return { allowed: true, reason: "", kind: "ok", content, metadata: { bytes: Buffer.byteLength(content) } };
   }
 
-  const write = classifyWrite(located.relative, context.allowedPaths, context.restrictedPaths);
-  if (!write.ok) return { allowed: false, reason: write.reason, kind: write.kind, metadata: {} };
-
   if (request.action === "DELETE_FILE") {
+    const removal = classifyWrite(located.relative, context.allowedPaths, context.restrictedPaths);
+    if (!removal.ok) return { allowed: false, reason: removal.reason, kind: removal.kind, metadata: {} };
     if (!context.allowFileDelete) {
       return {
         allowed: false,
@@ -161,8 +174,11 @@ async function apply(context: ToolContext, request: ToolRequest): Promise<ToolRe
     return { allowed: true, reason: "", kind: "ok", metadata: { bytes: 0 } };
   }
 
-  const before = fs.existsSync(located.absolute) && fs.statSync(located.absolute).isFile()
-    ? fs.readFileSync(located.absolute, "utf8")
+  const prepared = ensureParentDirectory(context.workspacePath, located.relative, context.allowedPaths, context.restrictedPaths);
+  if (!prepared.ok) return { allowed: false, reason: prepared.reason, kind: prepared.kind, metadata: {} };
+  const writeTarget = prepared.absolute;
+  const before = fs.existsSync(writeTarget) && fs.statSync(writeTarget).isFile()
+    ? fs.readFileSync(writeTarget, "utf8")
     : "";
   const weakening = weakensChecks(located.relative, before, request.content);
   if (weakening) {
@@ -172,7 +188,7 @@ async function apply(context: ToolContext, request: ToolRequest): Promise<ToolRe
     return { allowed: true, reason: "unchanged", kind: "ok", metadata: { skipped: true } };
   }
   const touched = await changedPaths(context.workspaceId);
-  if (!touched.has(located.relative) && touched.size >= context.maxFiles) {
+  if (!touched.has(prepared.relative) && touched.size >= context.maxFiles) {
     return {
       allowed: false,
       reason: `The file limit of ${context.maxFiles} has been reached.`,
@@ -180,8 +196,7 @@ async function apply(context: ToolContext, request: ToolRequest): Promise<ToolRe
       metadata: {},
     };
   }
-  fs.mkdirSync(path.dirname(located.absolute), { recursive: true });
-  fs.writeFileSync(located.absolute, request.content);
+  fs.writeFileSync(writeTarget, request.content);
   return {
     allowed: true,
     reason: "",

@@ -104,6 +104,8 @@ export function toBrief(row: BriefRow): ProductBriefRecord {
     riskClarity: row.riskClarity,
     readyForReview: row.readyForReview,
     readinessReason: row.readinessReason,
+    reviewRequired: row.reviewRequired,
+    reviewReason: row.reviewReason,
     status: row.status,
     fromRequirements: row.fromRequirements,
   };

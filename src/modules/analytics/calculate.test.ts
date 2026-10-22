@@ -283,8 +283,8 @@ describe("factory intelligence", () => {
     const view = calculateProduct(
       product({
         codingRisks: [
-          { id: "risk-1", taskId: "task-1", taskTitle: "Submit", riskLevel: "LOW", executionMode: "AUTONOMOUS", overrideRiskLevel: null, overrideExecutionMode: null, overriddenAt: null },
-          { id: "risk-2", taskId: "task-2", taskTitle: "Pay", riskLevel: "LOW", executionMode: "SUPERVISED", overrideRiskLevel: null, overrideExecutionMode: null, overriddenAt: "2026-10-05T09:00:00.000Z" },
+          { id: "risk-1", taskId: "task-1", taskTitle: "Submit", riskLevel: "LOW", executionMode: "AUTONOMOUS", overrideRiskLevel: null, overrideExecutionMode: null, overriddenAt: null, disposition: "OPEN" },
+          { id: "risk-2", taskId: "task-2", taskTitle: "Pay", riskLevel: "LOW", executionMode: "SUPERVISED", overrideRiskLevel: null, overrideExecutionMode: null, overriddenAt: "2026-10-05T09:00:00.000Z", disposition: "OPEN" },
         ],
         workspaces: [
           { id: "ws-1", taskId: "task-1", contractStale: false, staleReason: "", staleFlaggedAt: null, createdAt: "2026-10-05T10:00:00.000Z", completedAt: null },

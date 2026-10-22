@@ -1,5 +1,6 @@
 import {
   CODING_EXECUTION_LABEL,
+  CODING_RISK_DISPOSITION_LABEL,
   CODING_RISK_LABEL,
   EVIDENCE_TYPE_LABEL,
   FINDING_CATEGORY_LABEL,
@@ -8,16 +9,24 @@ import {
   THREAT_STATUS_LABEL,
   type SignalLevel,
 } from "@/domain/constants";
+import { ClarificationAnswer, type ClarificationRevision } from "@/components/clarification/answer-card";
+import { ClarificationHold } from "@/components/clarification/keep-version";
 import {
   CodingPolicyEditor,
-  CodingRiskOverrideForm,
+  CodingRiskActions,
   FindingActions,
   GovernanceApprovalControls,
   GovernanceProposalActions,
   GovernanceRunControls,
-  QuestionAnswerForm,
 } from "@/components/build/governance-controls";
 import type { CodingReadiness } from "@/modules/governance/coding-readiness";
+import {
+  codingRiskImpact,
+  codingRiskStatusMeaning,
+  codingRiskStillBlocks,
+  recommendationOverridden,
+  summarizeCodingRisks,
+} from "@/modules/governance/coding-risk-decision";
 import {
   findingBlocksProgression,
   findingStatusMeaning,
@@ -151,12 +160,123 @@ function Check({ label, value }: { label: string; value: string }) {
   );
 }
 
+function CodingRiskSection({
+  productId,
+  risks,
+  reviewVersion,
+  designVersion,
+}: {
+  productId: string;
+  risks: NonNullable<Workspace["review"]>["codingRisks"];
+  reviewVersion?: number;
+  designVersion?: number;
+}) {
+  const summary = summarizeCodingRisks(risks);
+  const groups = [
+    { key: "OPEN", title: "Open", items: risks.filter((risk) => risk.disposition === "OPEN") },
+    { key: "RISK_ACCEPTED", title: "Risk accepted", items: risks.filter((risk) => risk.disposition === "RISK_ACCEPTED") },
+    { key: "RESOLVED", title: "Resolved", items: risks.filter((risk) => risk.disposition === "RESOLVED") },
+  ] as const;
+  return (
+    <div>
+      <h3 className="text-sm font-semibold">Coding risks</h3>
+      <dl className="mt-3 grid grid-cols-3 gap-2">
+        <Count label="Open" value={summary.open} />
+        <Count label="Risk accepted" value={summary.riskAccepted} />
+        <Count label="Resolved" value={summary.resolved} />
+      </dl>
+      {groups.map((group) =>
+        group.items.length === 0 ? null : (
+          <div key={group.key} className="mt-4">
+            <h4 className="text-sm font-medium">{group.title}</h4>
+            <ul className="mt-2 space-y-3">
+              {group.items.map((risk) => {
+                const overridden = recommendationOverridden(risk);
+                const blocks = codingRiskStillBlocks(risk);
+                return (
+                  <li key={risk.id} id={`coding-risk-${risk.implementationTaskId}`} className="rounded-xl border p-3 text-sm leading-6">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="font-medium">{risk.task.title}</p>
+                      <span className="rounded-full bg-stone-100 px-2 py-0.5 text-xs font-medium">{CODING_RISK_LABEL[risk.riskLevel]}</span>
+                      <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${blocks ? "bg-red-50 text-red-900" : "bg-stone-100"}`}>
+                        {blocks ? "Blocks progression" : "Does not block progression"}
+                      </span>
+                    </div>
+                    <p className="mt-2">
+                      <span className="font-medium">Status. </span>
+                      {codingRiskStatusMeaning(risk.disposition)}
+                    </p>
+                    <p className="mt-2">
+                      <span className="font-medium">Risk. </span>
+                      {risk.reason}
+                    </p>
+                    <p className="mt-2">
+                      <span className="font-medium">Why it matters. </span>
+                      {codingRiskImpact(risk.riskLevel)}
+                    </p>
+                    <p className="mt-2">
+                      <span className="font-medium">Source. </span>
+                      {risk.task.referenceCode ? `${risk.task.referenceCode} — ` : ""}
+                      {risk.task.title}. Coding analysis of this implementation task.
+                      {reviewVersion ? ` Governance review v${reviewVersion}.` : ""}
+                      {designVersion ? ` Design v${designVersion}.` : ""}
+                    </p>
+                    <p className="mt-2">
+                      <span className="font-medium">AI recommendation. </span>
+                      {CODING_RISK_LABEL[risk.riskLevel]} risk, {CODING_EXECUTION_LABEL[risk.recommendedExecutionMode]} execution.
+                    </p>
+                    {overridden ? (
+                      <p className="mt-2">
+                        <span className="font-medium">Recommendation overridden. </span>
+                        Alternative: {risk.overrideRiskLevel ? CODING_RISK_LABEL[risk.overrideRiskLevel] : CODING_RISK_LABEL[risk.riskLevel]}
+                        {" / "}
+                        {risk.overrideExecutionMode ? CODING_EXECUTION_LABEL[risk.overrideExecutionMode] : CODING_EXECUTION_LABEL[risk.recommendedExecutionMode]}.
+                        {" "}
+                        {risk.overrideReason}
+                        {risk.disposition === "OPEN" ? " The risk remains open until the alternative mitigation is completed or the risk is accepted." : ""}
+                        {risk.overriddenBy ? ` Recorded by ${risk.overriddenBy}.` : ""}
+                      </p>
+                    ) : null}
+                    {risk.decisionRationale ? (
+                      <p className="mt-2">
+                        <span className="font-medium">{CODING_RISK_DISPOSITION_LABEL[risk.disposition]}. </span>
+                        {risk.decisionRationale}
+                        {risk.decidedBy ? ` Recorded by ${risk.decidedBy}.` : ""}
+                        {risk.decidedAt ? ` ${when(risk.decidedAt)}.` : ""}
+                      </p>
+                    ) : null}
+                    <CodingRiskActions
+                      productId={productId}
+                      assessmentId={risk.id}
+                      open={risk.disposition === "OPEN"}
+                      title={risk.task.title}
+                      severity={CODING_RISK_LABEL[risk.riskLevel]}
+                      impact={codingRiskImpact(risk.riskLevel)}
+                      recommendation={`${CODING_RISK_LABEL[risk.riskLevel]} risk, ${CODING_EXECUTION_LABEL[risk.recommendedExecutionMode]} execution. ${risk.reason}`}
+                      blocks={blocks}
+                      aiLevel={risk.riskLevel}
+                      aiMode={risk.recommendedExecutionMode}
+                    />
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        ),
+      )}
+      {risks.length === 0 ? <p className="mt-2 text-sm text-muted-foreground">No coding risks have been recorded.</p> : null}
+    </div>
+  );
+}
+
 export function GovernancePanel({
   productId,
   governance,
+  clarification = {},
 }: {
   productId: string;
   governance: Workspace;
+  clarification?: Record<string, { revisions: ClarificationRevision[]; impacts: string[] }>;
 }) {
   const review = governance.review;
   const policy = review?.policy ?? null;
@@ -177,6 +297,7 @@ export function GovernancePanel({
           ))}
         </div>
       ) : null}
+      {review?.reviewRequired ? <ClarificationHold productId={productId} target="GOVERNANCE" reason={review.reviewReason} /> : null}
       {review ? <GovernanceSummary review={review} /> : null}
       <GovernanceRunControls productId={productId} />
       {governance.proposal ? (
@@ -328,33 +449,7 @@ export function GovernancePanel({
           ))}
         </ul>
       </div>
-      <div>
-        <h3 className="text-sm font-semibold">Coding risk by implementation task</h3>
-        <ul className="mt-3 space-y-3">
-          {(review?.codingRisks ?? []).map((risk) => {
-            const level = risk.overrideRiskLevel ?? risk.riskLevel;
-            const mode = risk.overrideExecutionMode ?? risk.recommendedExecutionMode;
-            return (
-              <li key={risk.id} id={`coding-risk-${risk.implementationTaskId}`} className="rounded-xl border p-3 text-sm leading-6">
-                <p className="font-medium">{risk.task.title}</p>
-                <p>
-                  AI coding risk {CODING_RISK_LABEL[level]}. Recommended mode {CODING_EXECUTION_LABEL[mode]}.
-                </p>
-                <p className="text-muted-foreground">{risk.reason}</p>
-                {risk.overriddenBy ? (
-                  <p>
-                    Human override by {risk.overriddenBy}
-                    {risk.overriddenAt ? ` at ${risk.overriddenAt.toISOString()}` : ""}. {risk.overrideReason}
-                  </p>
-                ) : (
-                  <p className="text-muted-foreground">No human override.</p>
-                )}
-                <CodingRiskOverrideForm productId={productId} assessmentId={risk.id} />
-              </li>
-            );
-          })}
-        </ul>
-      </div>
+      <CodingRiskSection productId={productId} risks={review?.codingRisks ?? []} reviewVersion={review?.version} designVersion={review?.architecture.version} />
       <div>
         <h3 className="text-sm font-semibold">Coding rules</h3>
         {policy ? (
@@ -394,7 +489,17 @@ export function GovernancePanel({
               <p>
                 Impact {question.impact}. Status {question.status}. Blocking: {question.blocking ? "Yes" : "No"}.
               </p>
-              {question.answer ? <p>Answer: {question.answer}</p> : <QuestionAnswerForm productId={productId} questionId={question.id} />}
+              <ClarificationAnswer
+                productId={productId}
+                kind="GOVERNANCE"
+                questionId={question.id}
+                question={question.question}
+                answer={question.answer}
+                answeredAt={question.resolvedAt?.toISOString() ?? null}
+                revisions={clarification[question.id]?.revisions ?? []}
+                impacts={clarification[question.id]?.impacts ?? []}
+                showQuestion={false}
+              />
             </li>
           ))}
         </ul>

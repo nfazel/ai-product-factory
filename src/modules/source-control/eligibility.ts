@@ -1,28 +1,19 @@
 import { runGit } from "@/modules/coding/git";
 import { db } from "@/lib/db";
-
-const SHA = /^[0-9a-f]{40}$/i;
+import { publicationIssues } from "@/modules/source-control/publication";
 
 export async function pushBlockers(productId: string, taskId: string) {
   const reasons: string[] = [];
   const task = await db.implementationTask.findFirst({
     where: { id: taskId, plan: { productId } },
     include: {
-      workspaces: { orderBy: { createdAt: "desc" }, include: { contract: true, escalations: true, codeApprovals: true } },
+      workspaces: { orderBy: { createdAt: "desc" }, include: { contract: true, escalations: true } },
     },
   });
   if (!task) return ["The implementation task was not found."];
-  if (task.status !== "COMPLETED") reasons.push("The implementation task is not completed.");
   const workspace = task.workspaces[0];
-  if (!workspace) reasons.push("The coding workspace for this task was not found.");
-  if (workspace && !SHA.test(workspace.headCommit)) reasons.push("Publication requires the approved commit SHA.");
   if (workspace?.executionContractStale || workspace?.contract?.stale) {
     reasons.push("The execution contract is stale. Publication cannot start.");
-  }
-  const approval = workspace?.codeApprovals.find((item) => !item.stale);
-  if (!approval) reasons.push("A current human code approval is required before publication.");
-  else if (workspace && SHA.test(approval.headCommit) && approval.headCommit !== workspace.headCommit) {
-    reasons.push("The code approval does not match the current commit.");
   }
   if (workspace?.escalations.some((item) => item.status === "OPEN")) {
     reasons.push("An unresolved coding escalation blocks publication.");
@@ -48,10 +39,7 @@ export async function pushBlockers(productId: string, taskId: string) {
   if (!policy || policy.reapprovalRequired || policy.review.status !== "APPROVED" || !policyApproval) {
     reasons.push("Coding Policy is not current.");
   }
-  const connection = await db.sourceControlConnection.findUnique({ where: { id: "factory" } });
-  if (!connection || connection.status !== "CONNECTED") {
-    reasons.push("The GitHub connection is not valid.");
-  }
+  reasons.push(...(await publicationIssues(productId, taskId)));
   return reasons;
 }
 

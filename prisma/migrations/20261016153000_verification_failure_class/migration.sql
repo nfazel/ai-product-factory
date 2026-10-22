@@ -1,0 +1,3 @@
+ALTER TYPE "VerificationExecutionKind" ADD VALUE IF NOT EXISTS 'PLAN_CHECK';
+
+ALTER TABLE "VerificationSession" ADD COLUMN IF NOT EXISTS "failureClass" TEXT NOT NULL DEFAULT '';

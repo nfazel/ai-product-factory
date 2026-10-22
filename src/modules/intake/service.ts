@@ -399,13 +399,11 @@ export async function confirmRequirement(productId: string, requirementId: strin
 
 export async function answerIntakeQuestion(productId: string, questionId: string, answer: string) {
   await requireExisting(productId);
-  const question = await db.intakeQuestion.findFirst({ where: { id: questionId, productId } });
-  if (!question) throw new DomainError("Question not found.", "NOT_FOUND");
-  if (answer.trim().length < 2) throw new DomainError("Write an answer before saving it.");
-  return db.intakeQuestion.update({
-    where: { id: question.id },
-    data: { status: "ANSWERED", answer: answer.trim(), answeredBy: person(), answeredAt: new Date() },
-  });
+  const { saveClarificationAnswer } = await import("@/modules/clarification/service");
+  await saveClarificationAnswer({ productId, kind: "INTAKE", questionId, answer });
+  const saved = await db.intakeQuestion.findFirst({ where: { id: questionId, productId } });
+  if (!saved) throw new DomainError("Question not found.", "NOT_FOUND");
+  return saved;
 }
 
 export async function addressFinding(productId: string, findingId: string, status: "ADDRESSED" | "DISMISSED") {

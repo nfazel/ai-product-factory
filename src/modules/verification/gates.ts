@@ -1,9 +1,16 @@
 import "server-only";
 
+import fs from "node:fs";
+
 import { db } from "@/lib/db";
-import { codingConfigurationGap } from "@/modules/coding/config";
-import { asStrings } from "@/modules/coding/strings";
+import { approvedPlanWindows, evaluatePlanChecks } from "@/modules/coding/check-identity";
+import { parsePlannedCommands } from "@/modules/coding/commands";
+import { commitExists } from "@/modules/coding/git";
+import { reviewableDiffFiles } from "@/modules/coding/review";
+import { productRepositoryReady, REPOSITORY_NOT_CONFIGURED, resolveProductRepository } from "@/modules/source-control/product-repository";
 import { DomainError } from "@/modules/shared/errors";
+
+const COMMIT_SHA = /^[0-9a-f]{40}$/;
 
 export async function verificationEntryBlockers(productId: string, taskId: string) {
   const reasons: string[] = [];
@@ -20,31 +27,68 @@ export async function verificationEntryBlockers(productId: string, taskId: strin
   const workspace = await db.repositoryWorkspace.findFirst({
     where: { productId, implementationTaskId: taskId },
     orderBy: { createdAt: "desc" },
-    include: { contract: true, evidence: true, codeApprovals: true },
+    include: { contract: true, plan: true, evidence: { orderBy: { createdAt: "asc" } }, codeApprovals: { orderBy: { createdAt: "desc" } }, diff: true },
   });
   if (!workspace) {
     reasons.push("The coding workspace for this task was not found.");
   } else {
-    if (!/^[0-9a-f]{40}$/.test(workspace.headCommit)) {
-      reasons.push("Verification requires the approved commit SHA.");
-    }
     if (workspace.executionContractStale || workspace.contract?.stale) {
       reasons.push("The execution contract is stale. Verification cannot start.");
     }
-    const checks = asStrings(workspace.contract?.requiredChecks);
-    const passed = workspace.evidence.filter((item) => item.result === "PASS" && item.exitCode === 0);
-    if (checks.length === 0 || checks.some((check) => !passed.some((item) => item.description === check || item.command === check))) {
-      reasons.push("Required coding checks did not pass.");
+    const plan = workspace.plan;
+    if (!plan || (plan.status !== "APPROVED" && plan.status !== "COMPLETED")) {
+      reasons.push("An approved execution plan is required before verification.");
+    } else {
+      const decision = evaluatePlanChecks({
+        planVersion: plan.version,
+        windows: approvedPlanWindows({
+          version: plan.version,
+          status: plan.status,
+          approvedAt: plan.approvedAt,
+          history: plan.history,
+        }),
+        checks: parsePlannedCommands(plan.validationCommands),
+        evidence: workspace.evidence.map((item) => ({
+          command: item.command,
+          description: item.description,
+          result: item.result,
+          exitCode: item.exitCode,
+          at: item.completedAt ?? item.createdAt,
+        })),
+      });
+      if (!decision.ready) reasons.push("Required coding checks did not pass.");
+    }
+    const approval = workspace.codeApprovals.find((item) => !item.stale) ?? null;
+    if (!approval) {
+      reasons.push("A human code approval is required before verification.");
+    } else if (!COMMIT_SHA.test(approval.headCommit) || approval.headCommit !== workspace.headCommit) {
+      reasons.push("Verification requires the approved commit SHA.");
+    } else if (reviewableDiffFiles(workspace.diff?.files).length > 0 && approval.headCommit === workspace.baseCommit) {
+      reasons.push("Verification requires the commit created from the approved code change, not the baseline.");
+    } else if (!(await approvedCommitIsPresent(productId, workspace.workspacePath, approval.headCommit))) {
+      reasons.push("The approved commit is not in the product repository.");
     }
   }
-  const approval = await db.codeChangeApproval.findFirst({
-    where: { productId, implementationTaskId: taskId, stale: false },
-  });
-  if (!approval) reasons.push("A human code approval is required before verification.");
-  if (codingConfigurationGap() === "repository") {
-    reasons.push("No repository is configured. Set PRODUCT_REPOSITORY_ROOT to a local Git repository.");
+  if (!workspace) {
+    const approval = await db.codeChangeApproval.findFirst({
+      where: { productId, implementationTaskId: taskId, stale: false },
+    });
+    if (!approval) reasons.push("A human code approval is required before verification.");
+  }
+  if (!(await productRepositoryReady(productId))) {
+    reasons.push(REPOSITORY_NOT_CONFIGURED);
   }
   return reasons;
+}
+
+async function approvedCommitIsPresent(productId: string, workspacePath: string, sha: string) {
+  if (workspacePath && fs.existsSync(workspacePath) && (await commitExists(workspacePath, sha))) return true;
+  try {
+    const repository = await resolveProductRepository(productId);
+    return commitExists(repository.localPath, sha);
+  } catch {
+    return false;
+  }
 }
 
 export async function assertVerificationEntry(productId: string, taskId: string) {

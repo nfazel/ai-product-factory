@@ -8,9 +8,9 @@ export function setSourceControlProviderForTests(provider: SourceControlProvider
   override = provider;
 }
 
-export async function getSourceControlProvider() {
+export async function getSourceControlProvider(target?: { owner: string; repository: string }) {
   if (override) return override;
-  const credentials = await loadCredentials();
+  const credentials = await loadCredentials(target);
   if (!credentials) {
     throw new SourceControlFailure("GitHub credentials are not configured.", "AUTH");
   }

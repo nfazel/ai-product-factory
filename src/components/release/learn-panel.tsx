@@ -6,7 +6,7 @@ type View = NonNullable<Awaited<ReturnType<typeof getLearnView>>>;
 export function LearnPanel({ productId, view }: { productId: string; view: View }) {
   return (
     <div className="space-y-4">
-      <section className="rounded-2xl border bg-card p-5">
+      <section id="move" tabIndex={-1} className="scroll-mt-20 rounded-2xl border bg-card p-5 focus:outline-none target:ring-2 target:ring-indigo-500">
         <p className="text-xs font-medium tracking-wide text-indigo-700">LEARN</p>
         <h2 className="mt-1 text-lg font-semibold">{view.readyToLearn.label}</h2>
         <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-muted-foreground">
@@ -17,6 +17,7 @@ export function LearnPanel({ productId, view }: { productId: string; view: View 
         <p className="mt-3 text-sm text-muted-foreground">The product is in {view.stage}. A person moves it to Learn when this gate is open.</p>
         {view.releaseOutcome ? <p className="mt-2 text-sm">{view.releaseOutcome.summary}</p> : null}
       </section>
+      <div id="evidence" tabIndex={-1} className="scroll-mt-20 space-y-4 focus:outline-none target:ring-2 target:ring-indigo-500">
       {view.outcomes.map((outcome) => (
         <section key={outcome.id} className="space-y-3 rounded-2xl border bg-card p-5 text-sm">
           <p className="text-xs font-medium tracking-wide text-indigo-700">PRODUCT OUTCOME</p>
@@ -42,6 +43,7 @@ export function LearnPanel({ productId, view }: { productId: string; view: View 
           {outcome.status !== "ACHIEVED" ? <AchieveForm productId={productId} outcomeId={outcome.id} /> : null}
         </section>
       ))}
+      </div>
       <section className="space-y-3 rounded-2xl border bg-card p-5 text-sm">
         <p className="text-xs font-medium tracking-wide text-indigo-700">ASSUMPTIONS</p>
         <h2 className="text-lg font-semibold">What we still believe</h2>
@@ -54,7 +56,7 @@ export function LearnPanel({ productId, view }: { productId: string; view: View 
           </div>
         ))}
       </section>
-      <section className="space-y-3 rounded-2xl border bg-card p-5 text-sm">
+      <section id="decision" tabIndex={-1} className="scroll-mt-20 space-y-3 rounded-2xl border bg-card p-5 text-sm focus:outline-none target:ring-2 target:ring-indigo-500">
         <p className="text-xs font-medium tracking-wide text-indigo-700">WHAT WE LEARNED</p>
         <h2 className="text-lg font-semibold">Next decision</h2>
         {view.records.map((record) => (

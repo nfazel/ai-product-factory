@@ -211,6 +211,14 @@ export const findingCommentSchema = z
   })
   .strict();
 
+export const codingRiskDecisionSchema = z
+  .object({
+    productId: z.string().trim().min(1),
+    assessmentId: z.string().trim().min(1),
+    rationale: z.string().trim().max(2000),
+  })
+  .strict();
+
 export const codingRiskOverrideSchema = z
   .object({
     productId: z.string().trim().min(1),

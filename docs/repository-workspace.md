@@ -4,7 +4,7 @@ The Coding Agent changes code only inside an isolated workspace. The configured 
 
 ## Configuration
 
-`PRODUCT_REPOSITORY_ROOT` is an environment variable. The browser cannot submit a filesystem path.
+Each product has its own `Repository` row. Build → Repository creates a local Git workspace for a new application, or connects an existing local Git repository for an existing application. `PRODUCT_REPOSITORY_ROOT` remains a legacy fallback only when that product has no repository row. The browser does not accept an arbitrary path for a new application. An existing application can submit an absolute path, and the server rejects relative paths, `..`, and this application's source tree.
 
 Before use, the application resolves the real path and checks that:
 
@@ -65,7 +65,7 @@ Checks run with the worktree as the working directory, so they do not run this a
 
 ## Commit
 
-**Create Commit** is available only after a human `CODE_CHANGE` approval whose diff hash still matches. The message includes the task id. The helper refuses `git push`, `git merge`, `git rebase`, and `git reset --hard`. The new SHA is stored on the workspace. The base branch is not moved.
+**Create Approved Commit** is available only after a human `CODE_CHANGE` approval whose diff hash still matches the current reviewable snapshot. The commit stages only the approved and derived paths from that snapshot. Generated files such as `.next/`, `node_modules/`, `next-env.d.ts`, and Prisma client output stay out of the commit even when they are present in the worktree and not listed in `.gitignore`. After staging, the index is compared with the approved paths and file bytes. A mismatch removes the staged paths and does not create a commit. The message includes the task id. The helper refuses `git push`, `git merge`, `git rebase`, and `git reset --hard`. The new SHA is stored on the workspace and on the approval. The base branch is not moved, and the commit is not published.
 
 Commits are unsigned. The factory sets `commit.gpgsign=false` for its own Git processes and does not call the operator's signing program. A machine-wide `commit.gpgsign=true` setting would otherwise block the agent on an SSH or GPG helper that this application does not control. The commit author is `AI Product Factory`, not the operator's signing identity.
 

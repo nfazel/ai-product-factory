@@ -1,8 +1,9 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { assessGuidance, emptySnapshot } from "@/modules/guidance/assess";
+import { NEXT_ACTION_DESTINATIONS, nextActionDestination, type NextActionDestination } from "@/modules/guidance/next-action-registry";
 import type { GuidanceSnapshot, TaskSnapshot } from "@/modules/guidance/types";
 
 function snap(patch: Partial<GuidanceSnapshot> = {}): GuidanceSnapshot {
@@ -22,6 +23,16 @@ function task(patch: Partial<TaskSnapshot> = {}): TaskSnapshot {
     published: false,
     pullRequest: "NONE",
     verification: "NONE",
+    executionPlan: "NONE",
+    codingRun: "NONE",
+    contractBlocked: false,
+    providerBlocked: false,
+    repairAvailable: false,
+    persistenceRecovery: false,
+    planIncomplete: false,
+    implementationIncomplete: false,
+    outOfScope: false,
+    revisedPlanReady: false,
     updatedAt: "2026-10-01T00:00:00.000Z",
     ...patch,
   };
@@ -33,6 +44,7 @@ const briefApproved: GuidanceSnapshot["discovery"] = {
   readyForReview: true,
   openQuestions: 0,
   demo: false,
+  needsReview: false,
   updatedAt: "2026-10-01T00:00:00.000Z",
 };
 
@@ -46,6 +58,7 @@ const defined: GuidanceSnapshot["definition"] = {
   slice: "APPROVED",
   openQuestions: 0,
   demo: false,
+  needsReview: false,
   updatedAt: null,
   outcome: {
     title: "Claims submitted digitally",
@@ -287,6 +300,29 @@ describe("next action", () => {
     expect(ready.stage).toBe("BUILD");
   });
 
+  it("points the next action at the affected artefact after a clarification answer changes", () => {
+    const readyToCode = pastDefine({
+      design: designed,
+      review: reviewed,
+      repositoryReady: true,
+      tasks: [task({ status: "IN_PROGRESS", workspace: "OPEN", executionPlan: "APPROVED", codingRun: "READY" })],
+    });
+    expect(assessGuidance(readyToCode).action?.key).toBe("start-coding");
+    const reviewedAnswer = assessGuidance({
+      ...readyToCode,
+      clarificationReview: {
+        target: "DEFINITION",
+        key: "review-definition",
+        label: "Review Product Definition",
+        why: "A clarification answer changed after the Product Definition was saved. The approved version was not rewritten.",
+      },
+    });
+    expect(reviewedAnswer.action?.key).toBe("review-definition");
+    expect(reviewedAnswer.action?.href).toBe("/products/p1/definition#proposal");
+    const cosmetic = assessGuidance({ ...readyToCode, clarificationReview: null });
+    expect(cosmetic.action?.key).toBe("start-coding");
+  });
+
   it("maps every Build next action to a control that exists on the page", () => {
     const buildPage = readFileSync(resolve("src/app/(app)/products/[id]/build/page.tsx"), "utf8");
     const controls = readFileSync(resolve("src/components/build/controls.tsx"), "utf8");
@@ -307,12 +343,31 @@ describe("next action", () => {
       [{ design: designed, review: { ...reviewed, approved: false } }, "approve-review", "#review"],
       [{ design: designed, review: { ...reviewed, policyApproved: false } }, "approve-rules", "#review"],
       [{ design: designed, review: reviewed, tasks: [task()] }, "approve-task", "#code"],
-      [{ design: designed, review: reviewed, tasks: [task({ status: "APPROVED" })] }, "start-coding", "#code"],
+      [{ design: designed, review: reviewed, tasks: [task({ status: "APPROVED" })] }, "setup-repository", "#repository"],
+      [{ design: designed, review: reviewed, repositoryReady: true, tasks: [task({ status: "APPROVED" })] }, "generate-execution-plan", "#execution-plan"],
+      [{ design: designed, review: reviewed, repositoryReady: true, tasks: [task({ status: "IN_PROGRESS", workspace: "OPEN", executionPlan: "ESCALATED" })] }, "review-execution-plan", "#execution-plan"],
+      [{ design: designed, review: reviewed, repositoryReady: true, tasks: [task({ status: "IN_PROGRESS", workspace: "OPEN", executionPlan: "APPROVED", codingRun: "READY" })] }, "start-coding", "#execution-plan"],
+      [{ design: designed, review: reviewed, repositoryReady: true, tasks: [task({ status: "IN_PROGRESS", workspace: "OPEN", executionPlan: "APPROVED", codingRun: "WAITING", contractBlocked: true })] }, "revise-execution-plan", "#execution-plan"],
+      [{ design: designed, review: reviewed, repositoryReady: true, tasks: [task({ status: "IN_PROGRESS", workspace: "OPEN", executionPlan: "EXECUTING", codingRun: "RUNNING" })] }, "view-coding-progress", "#coding-progress"],
+      [{ design: designed, review: reviewed, repositoryReady: true, tasks: [task({ status: "IN_PROGRESS", workspace: "OPEN", executionPlan: "APPROVED", codingRun: "WAITING" })] }, "resolve-coding-blocker", "#coding-progress"],
+      [{ design: designed, review: reviewed, repositoryReady: true, tasks: [task({ status: "IN_PROGRESS", workspace: "OPEN", executionPlan: "APPROVED", codingRun: "FAILED", repairAvailable: true, planIncomplete: true })] }, "revise-execution-plan", "#execution-plan"],
+      [{ design: designed, review: reviewed, repositoryReady: true, tasks: [task({ status: "IN_PROGRESS", workspace: "OPEN", executionPlan: "APPROVED", codingRun: "FAILED", repairAvailable: true, persistenceRecovery: true })] }, "record-repair-result", "#coding-progress"],
+      [{ design: designed, review: reviewed, repositoryReady: true, tasks: [task({ status: "IN_PROGRESS", workspace: "OPEN", executionPlan: "APPROVED", codingRun: "FAILED", repairAvailable: true })] }, "repair-implementation", "#coding-progress"],
+      [{ design: designed, review: reviewed, repositoryReady: true, tasks: [task({ status: "IN_PROGRESS", workspace: "OPEN", executionPlan: "APPROVED", codingRun: "FAILED", providerBlocked: true })] }, "retry-coding", "#coding-progress"],
+      [{ design: designed, review: reviewed, repositoryReady: true, tasks: [task({ status: "IN_PROGRESS", workspace: "OPEN", executionPlan: "APPROVED", codingRun: "FAILED" })] }, "review-coding-failure", "#coding-progress"],
+      [{ design: designed, review: reviewed, repositoryReady: true, tasks: [task({ status: "IN_PROGRESS", workspace: "OPEN", executionPlan: "COMPLETED", codingRun: "COMPLETED", outOfScope: true })] }, "restore-unapproved-change", "#coding-progress"],
+      [{ design: designed, review: reviewed, repositoryReady: true, tasks: [task({ status: "IN_PROGRESS", workspace: "OPEN", executionPlan: "COMPLETED", codingRun: "COMPLETED" })] }, "review-change", "#code"],
       [{ design: designed, review: reviewed, tasks: [task({ status: "IN_PROGRESS", workspace: "OPEN" })] }, "review-change", "#code"],
-      [{ design: designed, review: reviewed, tasks: [task({ status: "IN_PROGRESS", workspace: "OPEN", codeApproval: "CURRENT" })] }, "approve-change", "#code"],
+      [{ design: designed, review: reviewed, tasks: [task({ status: "IN_PROGRESS", workspace: "OPEN", codeApproval: "CURRENT" })] }, "create-commit", "#code"],
+      [{ design: designed, review: reviewed, tasks: [task({ status: "CODE_REVIEW", workspace: "OPEN", executionPlan: "COMPLETED", codingRun: "COMPLETED", codeApproval: "CURRENT" })] }, "create-commit", "#code"],
       [{ design: designed, review: reviewed, tasks: [task({ status: "COMPLETED", codeApproval: "CURRENT" })] }, "start-check", "#check"],
+      [{ design: designed, review: reviewed, tasks: [task({ status: "COMPLETED", codeApproval: "CURRENT", verification: "RUNNING" })] }, "view-verification", "#check"],
+      [{ design: designed, review: reviewed, tasks: [task({ status: "COMPLETED", codeApproval: "CURRENT", verification: "RETRYABLE" })] }, "retry-verification", "#check"],
+      [{ design: designed, review: reviewed, tasks: [task({ status: "COMPLETED", codeApproval: "CURRENT", verification: "REVIEW" })] }, "review-verification", "#check"],
       [{ design: designed, review: reviewed, tasks: [task({ status: "COMPLETED", codeApproval: "CURRENT", verification: "AWAITING" })] }, "approve-verification", "#check"],
-      [{ design: designed, review: reviewed, tasks: [task({ status: "COMPLETED", codeApproval: "CURRENT", verification: "APPROVED" })] }, "publish-branch", "#publish"],
+      [{ design: designed, review: reviewed, tasks: [task({ status: "COMPLETED", codeApproval: "CURRENT", verification: "FAILED" })] }, "review-verification-findings", "#check"],
+      [{ design: designed, review: reviewed, githubConnected: true, tasks: [task({ status: "COMPLETED", codeApproval: "CURRENT", verification: "APPROVED" })] }, "publish-branch", "#publish"],
+      [{ design: designed, review: reviewed, tasks: [task({ status: "COMPLETED", codeApproval: "CURRENT", verification: "APPROVED", published: true, remoteMain: "MISSING" })] }, "initialize-remote-main", "#publish"],
       [{ design: designed, review: reviewed, tasks: [task({ status: "COMPLETED", codeApproval: "CURRENT", verification: "APPROVED", published: true })] }, "create-pr", "#publish"],
       [{ design: designed, review: reviewed, tasks: [task({ status: "COMPLETED", codeApproval: "CURRENT", verification: "APPROVED", published: true, pullRequest: "OPEN" })] }, "refresh-pr", "#publish"],
     ];
@@ -332,6 +387,83 @@ describe("next action", () => {
     expect(buildPage).toContain("Design has not been generated yet.");
     expect(buildPage).toContain("Approve Design");
     expect(buildPage).toContain("A delivery plan has not been generated yet.");
+  });
+
+  it("points a connected account at the product repository until one is chosen", () => {
+    const guidance = assessGuidance(pastDefine({
+      design: designed,
+      review: reviewed,
+      githubAccountConnected: true,
+      tasks: [task({ status: "COMPLETED", codeApproval: "CURRENT", verification: "APPROVED" })],
+    }));
+    expect(guidance.action?.key).toBe("choose-product-repository");
+    expect(guidance.action?.label).toBe("Choose GitHub repository");
+    expect(guidance.action?.why).toBe(
+      "GitHub is connected. Choose the repository for this product before publishing the approved branch.",
+    );
+    expect(guidance.action?.href).toBe("/products/p1/build#repository");
+  });
+
+  it("points an approved task at GitHub settings until a connection exists", () => {
+    const guidance = assessGuidance(pastDefine({
+      design: designed,
+      review: reviewed,
+      tasks: [task({ status: "COMPLETED", codeApproval: "CURRENT", verification: "APPROVED" })],
+    }));
+    expect(guidance.action?.label).toBe("Configure GitHub");
+    expect(guidance.action?.why).toBe(
+      "Implementation and Independent Verification are approved. Configure a GitHub connection to publish this branch.",
+    );
+    expect(guidance.action?.href).toBe("/settings#github");
+  });
+
+  it("fails when a next action has no executable destination", () => {
+    function walk(directory: string): string {
+      return readdirSync(directory).map((name) => {
+        const full = resolve(directory, name);
+        if (statSync(full).isDirectory()) return walk(full);
+        return name.endsWith(".tsx") ? readFileSync(full, "utf8") : "";
+      }).join("\n");
+    }
+    const surfaces: Record<string, string> = {
+      "/discovery": walk(resolve("src/app/(app)/products/[id]/discovery")) + walk(resolve("src/components/intake")),
+      "/definition": walk(resolve("src/app/(app)/products/[id]/definition")) + walk(resolve("src/components/definition")) + readFileSync(resolve("src/components/intake/requirements-panel.tsx"), "utf8"),
+      "/build": walk(resolve("src/app/(app)/products/[id]/build")) + walk(resolve("src/components/build")),
+      "/testing": walk(resolve("src/app/(app)/products/[id]/testing")) + walk(resolve("src/components/prove")) + walk(resolve("src/components/source-control")),
+      "/releases": walk(resolve("src/app/(app)/products/[id]/releases")) + walk(resolve("src/components/release")),
+      "/metrics": walk(resolve("src/app/(app)/products/[id]/metrics")) + walk(resolve("src/components/release")),
+      "/settings": readFileSync(resolve("src/app/(app)/settings/page.tsx"), "utf8"),
+    };
+    const guidanceUi = readFileSync(resolve("src/components/guidance/guidance-ui.tsx"), "utf8");
+    for (const [key, destination] of Object.entries(NEXT_ACTION_DESTINATIONS) as Array<[string, NextActionDestination]>) {
+      const surface = surfaces[destination.path];
+      expect(surface, key).toBeTruthy();
+      if (destination.kind === "settings") {
+        expect(guidanceUi, key).toBeTruthy();
+        if (destination.hash) expect(surface, key).toContain(`id="${destination.hash}"`);
+        continue;
+      }
+      if (destination.kind === "move") {
+        expect(guidanceUi, key).toContain(`"${key}"`);
+        continue;
+      }
+      if (destination.kind === "generate") {
+        expect(guidanceUi, key).toContain("generateDefinitionAction");
+        continue;
+      }
+      if (destination.execution === "command") {
+        expect(guidanceUi, key).toContain(`"${key}"`);
+        expect(guidanceUi, key).toMatch(/RetryVerificationButton|StartVerificationButton/);
+        const verificationActions = readFileSync(resolve("src/components/prove/prove-controls.tsx"), "utf8");
+        expect(verificationActions, key).toMatch(/retryVerificationAction|startVerificationAction/);
+      }
+      if (destination.execution === "confirm") {
+        expect(guidanceUi, key).toContain("does not perform");
+      }
+      if (!destination.hash) continue;
+      expect(surface, key).toContain(`id="${destination.hash}"`);
+    }
+    expect(() => nextActionDestination("approve-execution-plan-without-a-destination")).toThrow(/no executable destination/);
   });
 
   it("blocks on an engineering finding instead of offering coding", () => {
@@ -374,6 +506,23 @@ describe("next action", () => {
     expect(guidance.action?.label).toBe("Review Code Change");
   });
 
+  it("offers a local commit after approval and independent verification after that commit", () => {
+    const approved = assessGuidance(pastDefine({
+      design: designed,
+      review: reviewed,
+      tasks: [task({ status: "CODE_REVIEW", workspace: "OPEN", codeApproval: "CURRENT", codingRun: "COMPLETED", executionPlan: "COMPLETED" })],
+    }));
+    expect(approved.action?.key).toBe("create-commit");
+    expect(approved.action?.label).toBe("Create Commit");
+    const committed = assessGuidance(pastDefine({
+      design: designed,
+      review: reviewed,
+      tasks: [task({ status: "COMPLETED", codeApproval: "CURRENT" })],
+    }));
+    expect(committed.action?.key).toBe("start-check");
+    expect(committed.action?.label).toBe("Start Independent Verification");
+  });
+
   it("asks a person to approve verification", () => {
     const guidance = assessGuidance(pastDefine({
       design: designed,
@@ -381,6 +530,27 @@ describe("next action", () => {
       tasks: [task({ status: "COMPLETED", codeApproval: "CURRENT", verification: "AWAITING" })],
     }));
     expect(guidance.action?.label).toBe("Approve Verification");
+    expect(guidance.action?.execution).toBe("confirm");
+    expect(guidance.action?.subjectId).toBe("t1");
+  });
+
+  it("does not offer approval when a failed verification has no verdict", () => {
+    const guidance = assessGuidance(pastDefine({
+      design: designed,
+      review: reviewed,
+      tasks: [task({ status: "COMPLETED", codeApproval: "CURRENT", verification: "RETRYABLE" })],
+    }));
+    expect(guidance.action?.key).toBe("retry-verification");
+    expect(guidance.action?.label).toBe("Retry Independent Verification");
+    expect(guidance.action?.execution).toBe("command");
+    expect(guidance.action?.subjectId).toBe("t1");
+    const failed = assessGuidance(pastDefine({
+      design: designed,
+      review: reviewed,
+      tasks: [task({ status: "COMPLETED", codeApproval: "CURRENT", verification: "FAILED" })],
+    }));
+    expect(failed.action?.label).toBe("Review Findings / Request Changes");
+    expect(failed.action?.key).not.toBe("approve-verification");
   });
 
   it("asks to refresh an open pull request and does not merge it", () => {

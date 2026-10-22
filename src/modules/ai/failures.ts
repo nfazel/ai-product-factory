@@ -84,6 +84,7 @@ export function providerFailureCategory(error: unknown): AIFailureCategory | "do
     return "SCHEMA_VALIDATION_FAILED";
   }
   if (isRejectedRequest(status, message)) return "INVALID_RESPONSE";
+  if (temporaryModelDemand(status, message)) return "PROVIDER_UNAVAILABLE";
   if (name === "APIConnectionError" || (status !== undefined && status >= 500)) return "PROVIDER_UNAVAILABLE";
   return "PROVIDER_UNAVAILABLE";
 }
@@ -148,6 +149,16 @@ export function mapProviderFailure(error: unknown): never {
       "INVALID_RESPONSE",
     );
   }
+  if (temporaryModelDemand(status, message)) {
+    console.error("[ai] provider model is temporarily at capacity", {
+      httpStatus: status ?? 503,
+      providerStatus: providerStatus(message),
+    });
+    throw new AIFailure(
+      "The configured model is temporarily unavailable because of high demand. Nothing was generated. You can retry.",
+      "PROVIDER_UNAVAILABLE",
+    );
+  }
   if (name === "APIConnectionError" || (status !== undefined && status >= 500)) {
     throw new AIFailure(
       "The AI provider is unavailable. Nothing was generated. You can retry.",
@@ -168,6 +179,87 @@ function statusOf(error: unknown) {
 
 function isRejectedRequest(status: number | undefined, message: string) {
   return status === 400 || /INVALID_ARGUMENT/.test(message);
+}
+
+function temporaryModelDemand(status: number | undefined, message: string) {
+  return /high demand|overloaded/i.test(message) || (status === 503 && /"status"\s*:\s*"UNAVAILABLE"/i.test(message));
+}
+
+const PROVIDER_FAILURES = new Set<string>([
+  "NOT_CONFIGURED",
+  "MODEL_NOT_CONFIGURED",
+  "MODEL_NOT_AVAILABLE",
+  "AUTHENTICATION_FAILED",
+  "RATE_LIMITED",
+  "PROVIDER_UNAVAILABLE",
+  "TIMEOUT",
+  "INVALID_RESPONSE",
+  "SCHEMA_VALIDATION_FAILED",
+]);
+
+export function isProviderFailureCategory(category: string | null | undefined) {
+  return Boolean(category && PROVIDER_FAILURES.has(category));
+}
+
+export function planStatusAfterProviderFailure(input: {
+  planStatus: string;
+  errorCategory: string | null;
+}) {
+  if (input.planStatus === "EXECUTING" && isProviderFailureCategory(input.errorCategory)) {
+    return "APPROVED" as const;
+  }
+  return input.planStatus;
+}
+
+export function describedProviderFailure(input: {
+  provider: string | null;
+  category: string | null;
+  error: string | null;
+}) {
+  const gemini = input.provider === "GOOGLE_GEMINI";
+  const stored = input.error?.trim() ?? "";
+  if (/high demand/i.test(stored)) {
+    return gemini
+      ? "Gemini is temporarily unavailable because the configured model is experiencing high demand. You can retry this Coding run."
+      : "The configured model is temporarily unavailable because of high demand. You can retry.";
+  }
+  if (input.category === "AUTHENTICATION_FAILED") {
+    return gemini
+      ? "Gemini authentication failed. Check the configured API credential."
+      : "The AI provider rejected the credentials. Check the configured API credential.";
+  }
+  if (input.category === "RATE_LIMITED") {
+    return gemini
+      ? "Gemini temporarily rejected the request because the usage limit was reached. Retry later."
+      : "The AI provider rate limit was reached. Wait and retry. Nothing was generated.";
+  }
+  if (input.category === "MODEL_NOT_AVAILABLE") {
+    return gemini
+      ? "The configured Gemini model is unavailable or does not support this request."
+      : "The configured model is not available from this provider. No other model was substituted.";
+  }
+  if (input.category === "INVALID_RESPONSE") {
+    return gemini
+      ? "Gemini rejected the Coding Agent request. The request configuration needs attention."
+      : "The AI provider could not complete this request because the request format was not accepted.";
+  }
+  if (input.category === "TIMEOUT") {
+    return gemini
+      ? "Gemini did not respond in time. You can retry this Coding run."
+      : "The AI provider did not respond in time. Nothing was generated. You can retry.";
+  }
+  if (input.category === "SCHEMA_VALIDATION_FAILED") {
+    return stored || "The model response did not match the required structure. Nothing was saved from this response.";
+  }
+  if (input.category === "NOT_CONFIGURED" || input.category === "MODEL_NOT_CONFIGURED") {
+    return stored || "AI is not configured. Open Settings and check the provider and model.";
+  }
+  if (input.category === "PROVIDER_UNAVAILABLE") {
+    return gemini
+      ? "Gemini is temporarily unavailable. You can retry this Coding run."
+      : "The AI provider is unavailable. Nothing was generated. You can retry.";
+  }
+  return stored || "The AI provider failed. Nothing was generated.";
 }
 
 function providerStatus(message: string) {

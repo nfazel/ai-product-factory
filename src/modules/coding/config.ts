@@ -38,9 +38,8 @@ export function repositoryRootConfigured() {
   }
 }
 
-export function codingConfigurationGap(): "ai" | "repository" | null {
+export function codingConfigurationGap(): "ai" | null {
   if (!isAIConfigured()) return "ai";
-  if (!repositoryRootConfigured()) return "repository";
   return null;
 }
 

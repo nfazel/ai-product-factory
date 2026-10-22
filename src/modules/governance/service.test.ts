@@ -7,6 +7,7 @@ import { GOVERNANCE_SYSTEM_PROMPT } from "@/modules/governance/prompt";
 import { persistCommittedGovernance } from "@/modules/governance/repository";
 import { toStoredGovernance } from "@/modules/governance/schema";
 import {
+  acceptCodingRisk,
   acceptEntireGovernanceProposal,
   approveCodingPolicy,
   approveGovernanceReview,
@@ -15,6 +16,7 @@ import {
   generateGovernanceReview,
   markGovernanceReady,
   overrideCodingRisk,
+  resolveCodingRisk,
   updateCodingPolicy,
   updateGovernanceFinding,
 } from "@/modules/governance/service";
@@ -559,7 +561,59 @@ describe("coding readiness blockers", () => {
     });
     expect(activity?.description).toMatch(/Local user/);
     expect(activity?.description).toMatch(/person will review/);
+    expect(activity?.description).toMatch(/remains OPEN/);
+    const overridden = await db.codingRiskAssessment.findUnique({ where: { id: risk.id } });
+    expect(overridden?.disposition).toBe("OPEN");
+    expect(overridden?.overrideRiskLevel).toBe("MEDIUM");
+    expect((await assessCodingReadiness(setup.product.id)).blockers.join(" ")).toMatch(/still open/);
+    expect((await assessCodingReadiness(setup.product.id)).ready).toBe(false);
+  });
+
+  it("accepts a prohibited coding risk without treating it as resolved", async () => {
+    const { setup, risk } = await approvedReview({ prohibited: true });
+    await expect(
+      acceptCodingRisk({ productId: setup.product.id, assessmentId: risk.id, rationale: "later" }),
+    ).rejects.toThrow(/rationale is required/i);
+    await acceptCodingRisk({
+      productId: setup.product.id,
+      assessmentId: risk.id,
+      rationale: "Accepted for the pilot because this task stays behind manual operations.",
+    });
+    const saved = await db.codingRiskAssessment.findUnique({ where: { id: risk.id } });
+    expect(saved?.disposition).toBe("RISK_ACCEPTED");
+    expect(saved?.disposition).not.toBe("RESOLVED");
+    expect(saved?.decidedBy).toBe("Local user");
+    const evidence = await db.governanceEvidence.findFirst({ where: { reviewId: saved?.reviewId, source: "Local user" } });
+    expect(evidence?.result).toMatch(/manual operations/);
+    const activity = await db.activity.findFirst({ where: { productId: setup.product.id, type: "CODING_RISK_ACCEPTED" } });
+    expect(activity?.description).toMatch(/accepted the residual risk/);
+    expect((await assessCodingReadiness(setup.product.id)).blockers.join(" ")).not.toMatch(/PROHIBITED/);
+  });
+
+  it("resolves a coding risk only after evidence is recorded", async () => {
+    const { setup, risk } = await approvedReview({ prohibited: true });
+    await overrideCodingRisk({
+      productId: setup.product.id,
+      assessmentId: risk.id,
+      riskLevel: "MEDIUM",
+      executionMode: "HUMAN_ONLY",
+      rationale: "Use a reviewed migration script instead of an autonomous change.",
+    });
+    expect((await db.codingRiskAssessment.findUnique({ where: { id: risk.id } }))?.disposition).toBe("OPEN");
+    await expect(
+      resolveCodingRisk({ productId: setup.product.id, assessmentId: risk.id, rationale: "done" }),
+    ).rejects.toThrow(/rationale is required/i);
+    await resolveCodingRisk({
+      productId: setup.product.id,
+      assessmentId: risk.id,
+      rationale: "The credential migration was completed by a person and verified in the workspace.",
+    });
+    const saved = await db.codingRiskAssessment.findUnique({ where: { id: risk.id } });
+    expect(saved?.disposition).toBe("RESOLVED");
+    expect(saved?.overrideReason).toMatch(/migration script/);
     expect((await assessCodingReadiness(setup.product.id)).ready).toBe(true);
+    const reread = await db.codingRiskAssessment.findUnique({ where: { id: risk.id } });
+    expect(reread?.disposition).toBe("RESOLVED");
   });
 
   it("requires a rationale before a critical risk is accepted", async () => {

@@ -3,6 +3,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { binaryPatchNote, boundedDiffCount, sanitizeStoredPatch } from "@/modules/coding/diff";
+import { isGeneratedReviewPath } from "@/modules/coding/review";
 import { isSecretPath, PATCH_LIMIT } from "@/modules/coding/policy";
 
 export type GitResult = { code: number; stdout: string; stderr: string };
@@ -17,13 +19,19 @@ export function childEnv() {
   return env;
 }
 
-export function runProcess(argv: string[], cwd: string, timeoutMs = 120_000): Promise<GitResult> {
+export function runProcess(
+  argv: string[],
+  cwd: string,
+  timeoutMs = 120_000,
+  extraEnv?: Record<string, string>,
+): Promise<GitResult> {
   return new Promise((resolve) => {
     const child = spawn(/*turbopackIgnore: true*/ argv[0] ?? "", argv.slice(1), {
       cwd,
       shell: false,
       env: {
         ...childEnv(),
+        ...extraEnv,
         GIT_PAGER: "cat",
         PAGER: "cat",
         GIT_TERMINAL_PROMPT: "0",
@@ -100,6 +108,13 @@ export function branchNameFor(taskId: string, title: string) {
   return `ai-factory/task-${taskId}-${slug || "change"}`;
 }
 
+export async function pruneMissingWorktrees(repositoryPath: string) {
+  const result = await runGit(repositoryPath, ["worktree", "prune"]);
+  if (result.code !== 0) {
+    throw new Error(result.stderr.trim() || "Stale Git worktree metadata could not be pruned.");
+  }
+}
+
 export async function createWorktree(input: {
   repositoryPath: string;
   workspacePath: string;
@@ -110,6 +125,7 @@ export async function createWorktree(input: {
   if (fs.existsSync(input.workspacePath)) {
     throw new Error("The workspace path already exists.");
   }
+  await pruneMissingWorktrees(input.repositoryPath);
   const existing = await runGit(input.repositoryPath, ["rev-parse", "--verify", "--quiet", input.branchName]);
   const branch = existing.code === 0 ? `${input.branchName}-${Date.now().toString(36)}` : input.branchName;
   const created = await runGit(input.repositoryPath, [
@@ -149,11 +165,32 @@ export type DiffFile = {
   deletions: number;
 };
 
-export async function captureWorkspaceDiff(workspacePath: string) {
+export function ensureWorktreeLink(workspacePath: string, repositoryPath: string) {
+  const link = path.join(workspacePath, ".git");
+  if (fs.existsSync(link)) return false;
+  const worktrees = path.join(repositoryPath, ".git", "worktrees");
+  if (!fs.existsSync(worktrees)) return false;
+  const expected = path.join(fs.realpathSync(workspacePath), ".git");
+  for (const name of fs.readdirSync(worktrees)) {
+    const pointer = path.join(worktrees, name, "gitdir");
+    if (!fs.existsSync(pointer)) continue;
+    const recorded = fs.readFileSync(pointer, "utf8").trim();
+    if (recorded !== expected && recorded !== link) continue;
+    fs.writeFileSync(link, `gitdir: ${path.join(worktrees, name)}\n`);
+    return true;
+  }
+  return false;
+}
+
+export async function captureWorkspaceDiff(workspacePath: string, repositoryPath?: string) {
+  if (repositoryPath) ensureWorktreeLink(workspacePath, repositoryPath);
   const nameStatus = await runGit(workspacePath, ["diff", "HEAD", "--name-status"]);
   const numstat = await runGit(workspacePath, ["diff", "HEAD", "--numstat"]);
   const patchResult = await runGit(workspacePath, ["diff", "HEAD", "--patch"]);
   const untracked = await runGit(workspacePath, ["ls-files", "--others", "--exclude-standard"]);
+  if (nameStatus.code !== 0 || untracked.code !== 0) {
+    throw new Error(nameStatus.stderr.trim() || untracked.stderr.trim() || "The workspace diff could not be read because the worktree is not a Git repository.");
+  }
   const counts = new Map<string, { additions: number; deletions: number }>();
   for (const line of numstat.stdout.split("\n")) {
     if (!line.trim()) continue;
@@ -169,34 +206,162 @@ export async function captureWorkspaceDiff(workspacePath: string) {
     const [status, filePath] = line.split("\t");
     const kind = status === "A" ? "added" : status === "D" ? "deleted" : "modified";
     const count = counts.get(filePath ?? "") ?? { additions: 0, deletions: 0 };
+    if (isGeneratedReviewPath(filePath ?? "")) continue;
     files.push({ path: filePath ?? "", status: kind, ...count });
   }
   let fullPatch = patchResult.stdout;
   for (const filePath of untracked.stdout.split("\n").map((line) => line.trim()).filter(Boolean)) {
-    if (files.some((file) => file.path === filePath)) continue;
+    if (files.some((file) => file.path === filePath) || isGeneratedReviewPath(filePath)) continue;
     if (isSecretPath(filePath)) {
       files.push({ path: filePath, status: "added", additions: 0, deletions: 0 });
       continue;
     }
-    let text = "";
+    let bytes: Buffer;
     try {
-      text = fs.readFileSync(path.join(workspacePath, filePath), "utf8");
+      bytes = fs.readFileSync(/*turbopackIgnore: true*/ path.join(workspacePath, filePath));
     } catch {
       continue;
     }
+    if (bytes.includes(0)) {
+      files.push({ path: filePath, status: "added", additions: 0, deletions: 0 });
+      fullPatch += binaryPatchNote(filePath);
+      continue;
+    }
+    const text = bytes.toString("utf8");
     const additions = text.split("\n").length;
     files.push({ path: filePath, status: "added", additions, deletions: 0 });
     fullPatch += `\ndiff --git a/${filePath} b/${filePath}\n--- /dev/null\n+++ b/${filePath}\n${text}`;
   }
-  const truncated = fullPatch.length > PATCH_LIMIT;
+  const safe = sanitizeStoredPatch(fullPatch);
+  const truncated = safe.patch.length > PATCH_LIMIT;
+  const patch = truncated ? safe.patch.slice(0, PATCH_LIMIT) : safe.patch;
   return {
     files,
-    additions: files.reduce((sum, file) => sum + file.additions, 0),
-    deletions: files.reduce((sum, file) => sum + file.deletions, 0),
-    patch: truncated ? fullPatch.slice(0, PATCH_LIMIT) : fullPatch,
-    fullPatch,
+    additions: boundedDiffCount(files.reduce((sum, file) => sum + file.additions, 0)),
+    deletions: boundedDiffCount(files.reduce((sum, file) => sum + file.deletions, 0)),
+    patch: sanitizeStoredPatch(patch).patch,
+    fullPatch: safe.patch,
     truncated,
   };
+}
+
+function approvedCommitPath(filePath: string) {
+  const normalized = filePath.replaceAll("\\", "/");
+  if (!normalized || normalized.startsWith("/") || normalized.split("/").includes("..") || isGeneratedReviewPath(normalized) || isSecretPath(normalized)) {
+    throw new Error(`The approved snapshot includes a path that cannot be committed: ${filePath}`);
+  }
+  return normalized;
+}
+
+function snapshotStatus(status: string) {
+  if (status === "deleted" || status === "removed" || status === "D") return "deleted";
+  if (status === "modified" || status === "changed" || status === "M") return "modified";
+  if (status === "added" || status === "A") return "added";
+  throw new Error("The staged commit does not match the approved snapshot.");
+}
+
+function parseCachedNameStatus(stdout: string) {
+  const files: { path: string; status: string }[] = [];
+  for (const line of stdout.split("\n")) {
+    if (!line.trim()) continue;
+    const [status, filePath] = line.split("\t");
+    if (!status || !filePath) throw new Error("The staged commit does not match the approved snapshot.");
+    files.push({ path: filePath, status: snapshotStatus(status) });
+  }
+  return files;
+}
+
+async function unstageApproved(workspacePath: string, paths: string[]) {
+  if (paths.length === 0) return;
+  await runGit(workspacePath, ["restore", "--staged", "--", ...paths]);
+}
+
+async function assertStagedSnapshot(
+  workspacePath: string,
+  expected: { path: string; status: string }[],
+  captured: Map<string, Buffer>,
+) {
+  const staged = await runGit(workspacePath, ["-c", "core.quotepath=false", "diff", "--cached", "--name-status"]);
+  if (staged.code !== 0) throw new Error(staged.stderr.trim() || "The staged commit does not match the approved snapshot.");
+  const actual = parseCachedNameStatus(staged.stdout);
+  const key = (file: { path: string; status: string }) => `${snapshotStatus(file.status)}:${file.path}`;
+  const left = actual.map(key).sort();
+  const right = expected.map(key).sort();
+  if (left.length !== right.length || left.some((item, index) => item !== right[index])) {
+    throw new Error("The staged commit does not match the approved snapshot.");
+  }
+  for (const file of expected) {
+    if (file.status === "deleted") continue;
+    const absolute = path.resolve(workspacePath, file.path);
+    const current = fs.readFileSync(absolute);
+    const previous = captured.get(file.path);
+    if (!previous || !current.equals(previous)) throw new Error("The staged commit does not match the approved snapshot.");
+    const index = await runGit(workspacePath, ["rev-parse", "--verify", `:${file.path}`]);
+    const work = await runGit(workspacePath, ["hash-object", "--", file.path]);
+    if (index.code !== 0 || work.code !== 0 || index.stdout.trim() !== work.stdout.trim()) {
+      throw new Error("The staged commit does not match the approved snapshot.");
+    }
+  }
+}
+
+export async function commitApprovedSnapshot(
+  workspacePath: string,
+  files: { path: string; status: string }[],
+  message: string,
+) {
+  const expected = files.map((file) => ({ path: approvedCommitPath(file.path), status: snapshotStatus(file.status) }));
+  if (expected.length === 0) throw new Error("The approved snapshot has no files to commit.");
+  const captured = new Map<string, Buffer>();
+  for (const file of expected) {
+    if (file.status === "deleted") continue;
+    const absolute = path.resolve(workspacePath, file.path);
+    if (!fs.existsSync(absolute) || !fs.statSync(absolute).isFile()) {
+      throw new Error("The staged commit does not match the approved snapshot.");
+    }
+    captured.set(file.path, fs.readFileSync(absolute));
+  }
+  const already = await runGit(workspacePath, ["-c", "core.quotepath=false", "diff", "--cached", "--name-only"]);
+  if (already.code !== 0) throw new Error(already.stderr.trim() || "The staged commit could not be read.");
+  const stagedNames = already.stdout.split("\n").map((line) => line.trim()).filter(Boolean);
+  if (stagedNames.length > 0) {
+    const cleared = await runGit(workspacePath, ["restore", "--staged", "--", ...stagedNames]);
+    if (cleared.code !== 0) throw new Error(cleared.stderr.trim() || "Staged files could not be cleared before the approved commit.");
+  }
+  const added = await runGit(workspacePath, ["add", "--", ...expected.map((file) => file.path)]);
+  if (added.code !== 0) {
+    await unstageApproved(workspacePath, expected.map((file) => file.path));
+    throw new Error(added.stderr.trim() || "The approved files could not be staged.");
+  }
+  try {
+    await assertStagedSnapshot(workspacePath, expected, captured);
+  } catch (error) {
+    await unstageApproved(workspacePath, expected.map((file) => file.path));
+    throw error;
+  }
+  const committed = await runGit(workspacePath, [
+    "-c",
+    "user.name=AI Product Factory",
+    "-c",
+    "user.email=coding-agent@localhost",
+    "commit",
+    "-m",
+    message,
+  ]);
+  if (committed.code !== 0) {
+    await unstageApproved(workspacePath, expected.map((file) => file.path));
+    throw new Error(committed.stderr.trim() || "Git commit failed.");
+  }
+  const sha = await runGit(workspacePath, ["rev-parse", "HEAD"]);
+  if (sha.code !== 0 || !/^[0-9a-f]{40}$/.test(sha.stdout.trim())) {
+    throw new Error("The commit SHA could not be read.");
+  }
+  return sha.stdout.trim();
+}
+
+export async function commitExists(directory: string, sha: string) {
+  if (!/^[0-9a-f]{40}$/.test(sha)) return false;
+  const result = await runGit(directory, ["cat-file", "-e", `${sha}^{commit}`]);
+  return result.code === 0;
 }
 
 export async function commitWorkspace(workspacePath: string, message: string) {
@@ -220,6 +385,25 @@ export async function commitWorkspace(workspacePath: string, message: string) {
     throw new Error("The commit SHA could not be read.");
   }
   return sha.stdout.trim();
+}
+
+export async function restoreBaselineFile(workspacePath: string, baseCommit: string, relativePath: string, status: string) {
+  if (!/^[0-9a-f]{40}$/.test(baseCommit)) throw new Error("The baseline commit is not a commit SHA.");
+  const normalized = relativePath.replaceAll("\\", "/");
+  if (!normalized || normalized.startsWith("/") || normalized.split("/").includes("..")) {
+    throw new Error("The file path is not inside the workspace.");
+  }
+  const absolute = path.resolve(workspacePath, normalized);
+  const relative = path.relative(workspacePath, absolute);
+  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new Error("The file path is not inside the workspace.");
+  }
+  if (status === "added") {
+    if (fs.existsSync(absolute) && fs.statSync(absolute).isFile()) fs.rmSync(absolute);
+    return;
+  }
+  const restored = await runGit(workspacePath, ["restore", `--source=${baseCommit}`, "--worktree", "--", normalized]);
+  if (restored.code !== 0) throw new Error(restored.stderr.trim() || "The baseline file could not be restored.");
 }
 
 export async function repositoryStatus(workspacePath: string) {

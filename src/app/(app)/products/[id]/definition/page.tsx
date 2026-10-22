@@ -5,7 +5,9 @@ import { notFound } from "next/navigation";
 import { AINotConfiguredNotice } from "@/components/ai/not-configured";
 import { DefinitionControls } from "@/components/definition/controls";
 import { RequirementsPanel } from "@/components/intake/requirements-panel";
-import { AnswerForm, EntityAction } from "@/components/definition/entity-actions";
+import { ClarificationAnswer } from "@/components/clarification/answer-card";
+import { ClarificationHold } from "@/components/clarification/keep-version";
+import { EntityAction } from "@/components/definition/entity-actions";
 import { ProposalPanel } from "@/components/definition/proposal-panel";
 import { PageSkeleton } from "@/components/feedback/states";
 import {
@@ -23,6 +25,7 @@ import {
 } from "@/domain/constants";
 import { NextActionPanel } from "@/components/guidance/guidance-ui";
 import { getProductGuidance } from "@/modules/guidance/service";
+import { loadClarificationPresentation } from "@/modules/clarification/service";
 import { getDefinitionWorkspace } from "@/modules/requirements/service";
 import { markDynamic } from "@/server/dynamic";
 
@@ -52,6 +55,16 @@ async function Definition({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const [workspace, guidance] = await Promise.all([getDefinitionWorkspace(id), getProductGuidance(id)]);
   if (!workspace || !workspace.definition || !guidance) notFound();
+  const clarification = await loadClarificationPresentation(
+    id,
+    workspace.questions.map((question) => ({
+      id: question.id,
+      kind: "REQUIREMENT" as const,
+      answer: question.answer,
+      answeredAt: question.resolvedAt,
+      workItemId: question.workItemId,
+    })),
+  );
 
   const approved = workspace.definition.status === "APPROVED";
   const showReview =
@@ -91,6 +104,9 @@ async function Definition({ params }: { params: Promise<{ id: string }> }) {
                 title={workspace.aiNotice?.title}
                 body={workspace.aiNotice?.body}
               />
+            ) : null}
+            {workspace.definition.reviewRequired ? (
+              <ClarificationHold productId={workspace.product.id} target="DEFINITION" reason={workspace.definition.reviewReason} />
             ) : null}
             {workspace.definition.reviewSummary ? (
               <p className="text-sm leading-6">{workspace.definition.reviewSummary}</p>
@@ -340,10 +356,17 @@ async function Definition({ params }: { params: Promise<{ id: string }> }) {
                 <p className="mt-1 text-xs text-muted-foreground">
                   {QUESTION_STATUS_LABEL[question.status]} · {question.impact} impact
                 </p>
-                {question.answer ? <p className="mt-2 text-sm">{question.answer}</p> : null}
-                {question.status === "OPEN" ? (
-                  <AnswerForm productId={workspace.product.id} entityId={question.id} />
-                ) : null}
+                <ClarificationAnswer
+                  productId={workspace.product.id}
+                  kind="REQUIREMENT"
+                  questionId={question.id}
+                  question={question.question}
+                  answer={question.answer}
+                  answeredAt={question.resolvedAt?.toISOString() ?? null}
+                  revisions={clarification[question.id]?.revisions ?? []}
+                  impacts={clarification[question.id]?.impacts ?? []}
+                  showQuestion={false}
+                />
               </li>
             ))}
           </ul>

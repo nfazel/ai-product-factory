@@ -2,8 +2,9 @@ import { Suspense } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { ClarificationAnswer } from "@/components/clarification/answer-card";
+import { ClarificationHold } from "@/components/clarification/keep-version";
 import {
-  AnswerEditor,
   BuildControls,
   CodebaseForm,
   DesignApprovalControls,
@@ -18,8 +19,9 @@ import {
   TechnologyEditor,
 } from "@/components/build/controls";
 import { CodingPanel } from "@/components/build/coding-panel";
+import { RepositoryPanel } from "@/components/build/repository-panel";
 import { BuildReadiness, GovernancePanel } from "@/components/build/governance-panel";
-import { CODING_EXECUTION_LABEL, CODING_RISK_LABEL } from "@/domain/constants";
+import { CODING_EXECUTION_LABEL, CODING_RISK_DISPOSITION_LABEL, CODING_RISK_LABEL } from "@/domain/constants";
 import { PageSkeleton } from "@/components/feedback/states";
 import {
   ADR_STATUS_LABEL,
@@ -37,6 +39,9 @@ import { storedArchitectureSchema } from "@/modules/architecture/schema";
 import { NextActionPanel } from "@/components/guidance/guidance-ui";
 import { getProductGuidance } from "@/modules/guidance/service";
 import { getBuildWorkspace } from "@/modules/architecture/service";
+import { loadClarificationPresentation } from "@/modules/clarification/service";
+import { loadInstallationRepositoryChoices, revalidateProductRepositoryAccess } from "@/modules/source-control/github-account";
+import { getProductRepositoryView } from "@/modules/source-control/product-repository";
 import { getProveView } from "@/modules/verification/service";
 import { markDynamic } from "@/server/dynamic";
 
@@ -73,8 +78,33 @@ async function Build({
   await markDynamic();
   const { id } = await params;
   const query = await searchParams;
-  const [workspace, prove, guidance] = await Promise.all([getBuildWorkspace(id), getProveView(id), getProductGuidance(id)]);
+  await revalidateProductRepositoryAccess(id);
+  const [workspace, prove, guidance, repository, installationRepositories] = await Promise.all([
+    getBuildWorkspace(id),
+    getProveView(id),
+    getProductGuidance(id),
+    getProductRepositoryView(id),
+    loadInstallationRepositoryChoices(),
+  ]);
   if (!workspace || !guidance) notFound();
+  const architectureQuestions = workspace.architecture?.questions ?? [];
+  const governanceQuestions = workspace.governance.review?.questions ?? [];
+  const clarification = await loadClarificationPresentation(id, [
+    ...architectureQuestions.map((question) => ({
+      id: question.id,
+      kind: "ARCHITECTURE" as const,
+      answer: question.answer,
+      answeredAt: question.resolvedAt,
+      solutionArchitectureId: question.solutionArchitectureId,
+    })),
+    ...governanceQuestions.map((question) => ({
+      id: question.id,
+      kind: "GOVERNANCE" as const,
+      answer: question.answer,
+      answeredAt: question.resolvedAt,
+      reviewId: question.reviewId,
+    })),
+  ]);
 
   const architecture = workspace.architecture;
   const selected =
@@ -118,11 +148,17 @@ async function Build({
           and the coding rules, and no blocking finding remains.
         </p>
         {architecture?.reviewRequired ? (
+          <ClarificationHold productId={id} target="DESIGN" reason={architecture.reviewReason} />
+        ) : null}
+        {architecture?.reviewRequired && !architecture.reviewReason.includes("CLARIFICATION REVIEW.") ? (
           <p className="mt-3 rounded-xl bg-amber-50 p-3 text-sm leading-6 text-amber-950">
             Design needs attention. {architecture.reviewReason}
           </p>
         ) : null}
         {workspace.plan?.reviewRequired ? (
+          <ClarificationHold productId={id} target="DELIVERY" reason={workspace.plan.reviewReason} />
+        ) : null}
+        {workspace.plan?.reviewRequired && !workspace.plan.reviewReason.includes("CLARIFICATION REVIEW.") ? (
           <p className="mt-3 rounded-xl bg-amber-50 p-3 text-sm leading-6 text-amber-950">
             Delivery plan needs attention. {workspace.plan.reviewReason}
           </p>
@@ -513,7 +549,7 @@ async function Build({
         <article className="rounded-2xl border bg-card p-4 sm:p-5">
           <h2 className="text-base font-semibold">Technology choices</h2>
           <ul className="mt-3 space-y-4">
-            {(architecture?.technologies ?? []).map((choice) => (
+            {(architecture?.technologies.length ?? 0) === 0 ? <li className="text-sm text-muted-foreground">No technology choices yet.</li> : (architecture?.technologies ?? []).map((choice) => (
               <li key={choice.id} className="rounded-xl border p-3 text-sm leading-6">
                 <p className="font-medium">{choice.choice}</p>
                 <p>{choice.reason}</p>
@@ -531,15 +567,12 @@ async function Build({
                 />
               </li>
             ))}
-            {(architecture?.technologies.length ?? 0) === 0 ? (
-              <li className="text-sm text-muted-foreground">No technology choices yet.</li>
-            ) : null}
           </ul>
         </article>
         <article className="rounded-2xl border bg-card p-4 sm:p-5">
           <h2 className="text-base font-semibold">Architecture decisions</h2>
           <ul className="mt-3 space-y-3">
-            {(architecture?.decisions ?? []).map((decision) => (
+            {(architecture?.decisions.length ?? 0) === 0 ? <li className="text-sm text-muted-foreground">No architecture decisions yet.</li> : (architecture?.decisions ?? []).map((decision) => (
               <li key={decision.id} className="rounded-xl border p-3 text-sm leading-6">
                 <div className="flex items-center justify-between gap-2">
                   <p className="font-medium">{decision.title}</p>
@@ -550,9 +583,6 @@ async function Build({
                 <p className="text-muted-foreground">Alternatives: {decision.alternatives}</p>
               </li>
             ))}
-            {(architecture?.decisions.length ?? 0) === 0 ? (
-              <li className="text-sm text-muted-foreground">No architecture decisions yet.</li>
-            ) : null}
           </ul>
         </article>
       </section>
@@ -561,7 +591,7 @@ async function Build({
         <article className="rounded-2xl border bg-card p-4 sm:p-5">
           <h2 className="text-base font-semibold">Data design</h2>
           <ul className="mt-3 space-y-3 text-sm leading-6">
-            {(architecture?.dataEntities ?? []).map((entity) => (
+            {(architecture?.dataEntities.length ?? 0) === 0 ? <li className="text-muted-foreground">No logical data entities yet.</li> : (architecture?.dataEntities ?? []).map((entity) => (
               <li key={entity.id}>
                 <p className="font-medium">
                   {entity.name} · {entity.classification}
@@ -572,15 +602,12 @@ async function Build({
                 </p>
               </li>
             ))}
-            {(architecture?.dataEntities.length ?? 0) === 0 ? (
-              <li className="text-muted-foreground">No logical data entities yet.</li>
-            ) : null}
           </ul>
         </article>
         <article className="rounded-2xl border bg-card p-4 sm:p-5">
           <h2 className="text-base font-semibold">Integrations</h2>
           <ul className="mt-3 space-y-3 text-sm leading-6">
-            {(architecture?.integrations ?? []).map((integration) => (
+            {(architecture?.integrations.length ?? 0) === 0 ? <li className="text-muted-foreground">No integrations proposed.</li> : (architecture?.integrations ?? []).map((integration) => (
               <li key={integration.id}>
                 <p className="font-medium">
                   {integration.name} · {integration.direction}
@@ -591,9 +618,6 @@ async function Build({
                 </p>
               </li>
             ))}
-            {(architecture?.integrations.length ?? 0) === 0 ? (
-              <li className="text-muted-foreground">No integrations proposed.</li>
-            ) : null}
           </ul>
         </article>
       </section>
@@ -605,7 +629,7 @@ async function Build({
           independent check of security and engineering risk. This is not a penetration test.
         </p>
         <ul className="mt-4 grid gap-3 sm:grid-cols-2">
-          {(architecture?.findings ?? []).map((finding) => (
+          {(architecture?.findings.length ?? 0) === 0 ? <li className="text-sm text-muted-foreground">No security findings yet.</li> : (architecture?.findings ?? []).map((finding) => (
             <li key={finding.id} className="rounded-xl border p-3 text-sm leading-6">
               <p className="font-medium">{SECURITY_AREA_LABEL[finding.area]}</p>
               <p>{finding.title}</p>
@@ -613,47 +637,45 @@ async function Build({
               <p className="text-xs font-medium">{SECURITY_CLASSIFICATION_LABEL[finding.classification]}</p>
             </li>
           ))}
-          {(architecture?.findings.length ?? 0) === 0 ? (
-            <li className="text-sm text-muted-foreground">No security findings yet.</li>
-          ) : null}
         </ul>
       </section>
 
       <section className="rounded-2xl border bg-card p-4 sm:p-5">
         <h2 className="text-base font-semibold">Non-functional requirement coverage</h2>
         <ul className="mt-3 space-y-2 text-sm leading-6">
-          {(architecture?.nfrCoverages ?? []).map((coverage) => (
+          {(architecture?.nfrCoverages.length ?? 0) === 0 ? <li className="text-muted-foreground">No coverage links yet.</li> : (architecture?.nfrCoverages ?? []).map((coverage) => (
             <li key={coverage.id}>
               {coverage.nfr.title} → {coverage.mechanism}
               {coverage.component ? ` (${coverage.component.name})` : ""}
               {coverage.adr ? ` · ${coverage.adr.title}` : ""}
             </li>
           ))}
-          {(architecture?.nfrCoverages.length ?? 0) === 0 ? (
-            <li className="text-muted-foreground">No coverage links yet.</li>
-          ) : null}
         </ul>
       </section>
 
       <section className="rounded-2xl border bg-card p-4 sm:p-5">
         <h2 className="text-base font-semibold">Open questions</h2>
         <ul className="mt-3 space-y-4">
-          {(architecture?.questions ?? []).map((question) => (
+          {(architecture?.questions.length ?? 0) === 0 ? <li className="text-sm text-muted-foreground">No architecture questions.</li> : (architecture?.questions ?? []).map((question) => (
             <li key={question.id} className="rounded-xl border p-3 text-sm leading-6">
               <p className="font-medium">{question.question}</p>
               <p className="text-muted-foreground">{question.reason}</p>
               <p>
                 {question.status} · {question.impact}
-                {question.answer ? ` · ${question.answer}` : ""}
               </p>
-              {question.status === "OPEN" ? (
-                <AnswerEditor productId={id} questionId={question.id} />
-              ) : null}
+              <ClarificationAnswer
+                productId={id}
+                kind="ARCHITECTURE"
+                questionId={question.id}
+                question={question.question}
+                answer={question.answer}
+                answeredAt={question.resolvedAt?.toISOString() ?? null}
+                revisions={clarification[question.id]?.revisions ?? []}
+                impacts={clarification[question.id]?.impacts ?? []}
+                showQuestion={false}
+              />
             </li>
           ))}
-          {(architecture?.questions.length ?? 0) === 0 ? (
-            <li className="text-sm text-muted-foreground">No architecture questions.</li>
-          ) : null}
         </ul>
       </section>
       </section>
@@ -775,10 +797,17 @@ async function Build({
       </section>
       </section>
 
-      <GovernancePanel productId={id} governance={workspace.governance} />
+      <GovernancePanel productId={id} governance={workspace.governance} clarification={clarification} />
+      <section id="repository" tabIndex={-1} className="scroll-mt-20 space-y-3 rounded-2xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
+        {repository ? (
+          <RepositoryPanel productId={id} repository={repository} installationRepositories={installationRepositories} />
+        ) : null}
+      </section>
+      <section id="execution-plan" tabIndex={-1} className="scroll-mt-20 space-y-3 rounded-2xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
       <section id="code" tabIndex={-1} className="scroll-mt-20 space-y-3 rounded-2xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
         <h2 className="text-lg font-semibold">Code</h2>
         <p className="text-sm text-muted-foreground">One approved task at a time. The coding assistant cannot approve its own change.</p>
+        <section id="coding-progress" tabIndex={-1} className="scroll-mt-20 space-y-3 rounded-2xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
         {workspace.codingExecution ? (
           <CodingPanel productId={id} coding={workspace.codingExecution} />
         ) : (
@@ -786,6 +815,8 @@ async function Build({
             Coding has not started. Approve the design, the delivery plan, the engineering review, and a coding task first.
           </p>
         )}
+      </section>
+      </section>
       </section>
       <section className="rounded-2xl border bg-card p-5">
         <p className="text-xs font-medium tracking-wide text-indigo-700">VERIFICATION</p>
@@ -920,17 +951,20 @@ function TaskCodingRisk({
         overrideExecutionMode: keyof typeof CODING_EXECUTION_LABEL | null;
         overrideReason: string;
         overriddenBy: string;
+        disposition: keyof typeof CODING_RISK_DISPOSITION_LABEL;
         implementationTaskId: string;
       }
     | undefined;
 }) {
   if (!risk) return null;
-  const level = risk.overrideRiskLevel ?? risk.riskLevel;
   const mode = risk.overrideExecutionMode ?? risk.recommendedExecutionMode;
   return (
     <p className="text-muted-foreground">
-      AI coding risk {CODING_RISK_LABEL[level]}. Recommended mode {CODING_EXECUTION_LABEL[mode]}. {risk.reason}
-      {risk.overriddenBy ? ` Human override by ${risk.overriddenBy}: ${risk.overrideReason}` : ""}
+      Coding risk {CODING_RISK_LABEL[risk.riskLevel]}. Status {CODING_RISK_DISPOSITION_LABEL[risk.disposition]}.
+      AI recommended mode {CODING_EXECUTION_LABEL[risk.recommendedExecutionMode]}. {risk.reason}
+      {risk.overriddenBy
+        ? ` Recommendation overridden to ${CODING_EXECUTION_LABEL[mode]} by ${risk.overriddenBy}: ${risk.overrideReason.replace(/\.+$/, "")}.${risk.disposition === "OPEN" ? " The risk remains open." : ""}`
+        : ""}
     </p>
   );
 }

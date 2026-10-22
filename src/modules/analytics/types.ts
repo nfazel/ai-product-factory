@@ -244,6 +244,7 @@ export type AnalyticsInput = {
     overrideRiskLevel: string | null;
     overrideExecutionMode: string | null;
     overriddenAt: string | null;
+    disposition: string;
   }[];
   policies: { reapprovalRequired: boolean; reapprovalReason: string; reapprovalFlaggedAt: string | null }[];
   slices: { id: string; name: string; status: string; createdAt: string }[];

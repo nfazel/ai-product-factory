@@ -64,6 +64,8 @@ export function contractText(contract: {
     `Objective: ${contract.objective}`,
     `Story: ${contract.storyTitle}`,
     `Acceptance criteria: ${asStrings(contract.acceptanceCriteria).join(" | ") || "none"}`,
+    "Technical obligations come from the approved execution plan. Command success alone does not verify them.",
+    "Parent-feature acceptance criteria are outside this task until they are tested separately.",
     `NFRs: ${asStrings(contract.nfrs).join(" | ") || "none"}`,
     `Architecture: ${contract.architectureConstraints}`,
     `Security: ${contract.securityConstraints}`,

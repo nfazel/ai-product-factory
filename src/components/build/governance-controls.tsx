@@ -21,7 +21,9 @@ import {
   commitGovernanceAction,
   generateGovernanceAction,
   markGovernanceReadyAction,
+  acceptCodingRiskAction,
   overrideCodingRiskAction,
+  resolveCodingRiskAction,
   regenerateGovernanceAction,
   updateCodingPolicyAction,
   updateFindingAction,
@@ -290,46 +292,221 @@ function CommentForm({ productId, findingId }: { productId: string; findingId: s
   );
 }
 
-export function CodingRiskOverrideForm({
+export function CodingRiskActions({
   productId,
   assessmentId,
+  open,
+  title,
+  severity,
+  impact,
+  recommendation,
+  blocks,
+  aiLevel,
+  aiMode,
 }: {
   productId: string;
   assessmentId: string;
+  open: boolean;
+  title: string;
+  severity: string;
+  impact: string;
+  recommendation: string;
+  blocks: boolean;
+  aiLevel: string;
+  aiMode: string;
+}) {
+  if (!open) return null;
+  return (
+    <div className="mt-3 space-y-3">
+      <CodingRiskNoteForm
+        productId={productId}
+        assessmentId={assessmentId}
+        action={resolveCodingRiskAction}
+        summary="Resolve risk"
+        intro="Use this when the underlying issue has been addressed. Resolving a risk is different from accepting it or changing the recommendation."
+        fieldLabel="How this was addressed"
+        hint="Required. Describe the mitigation or the verification."
+        submitLabel="Record resolution"
+      />
+      <details className="rounded-xl border border-amber-200 bg-amber-50/60 p-3">
+        <summary className="cursor-pointer text-sm font-medium">Accept risk</summary>
+        <CodingRiskDecisionBody
+          productId={productId}
+          assessmentId={assessmentId}
+          action={acceptCodingRiskAction}
+          title={title}
+          severity={severity}
+          impact={impact}
+          recommendation={recommendation}
+          blocks={blocks}
+        />
+      </details>
+      <CodingRiskApproachForm
+        productId={productId}
+        assessmentId={assessmentId}
+        aiLevel={aiLevel}
+        aiMode={aiMode}
+      />
+    </div>
+  );
+}
+
+function CodingRiskDecisionBody({
+  productId,
+  assessmentId,
+  action,
+  title,
+  severity,
+  impact,
+  recommendation,
+  blocks,
+}: {
+  productId: string;
+  assessmentId: string;
+  action: typeof acceptCodingRiskAction;
+  title: string;
+  severity: string;
+  impact: string;
+  recommendation: string;
+  blocks: boolean;
+}) {
+  const [state, formAction] = useActionState(action, idleState);
+  return (
+    <form action={formAction} className="mt-3 space-y-3">
+      <input type="hidden" name="productId" value={productId} />
+      <input type="hidden" name="assessmentId" value={assessmentId} />
+      <p className="text-sm leading-6">
+        You are accepting the residual risk. This does not mark the issue as fixed.
+        {blocks
+          ? " Under the current rules, a recorded acceptance means this prohibited task no longer blocks coding."
+          : " This risk does not block coding."}
+      </p>
+      <dl className="space-y-2 text-sm leading-6">
+        <div>
+          <dt className="text-xs font-medium text-muted-foreground">Risk</dt>
+          <dd>{title}</dd>
+        </div>
+        <div>
+          <dt className="text-xs font-medium text-muted-foreground">Severity</dt>
+          <dd>{severity}</dd>
+        </div>
+        <div>
+          <dt className="text-xs font-medium text-muted-foreground">Potential impact</dt>
+          <dd>{impact}</dd>
+        </div>
+        <div>
+          <dt className="text-xs font-medium text-muted-foreground">AI recommendation</dt>
+          <dd>{recommendation}</dd>
+        </div>
+        <div>
+          <dt className="text-xs font-medium text-muted-foreground">Residual risk being accepted</dt>
+          <dd>The issue remains: {title}. Acceptance leaves it distinguishable from a resolved risk.</dd>
+        </div>
+      </dl>
+      <TextAreaField
+        label="Why this risk is accepted"
+        name="rationale"
+        hint="Required. For example: accepted for the pilot because manual moderation covers the limited cohort."
+        required
+        minLength={12}
+      />
+      <SubmitButton pendingLabel="Saving" variant="outline">Record risk acceptance</SubmitButton>
+      <FormMessage state={state} />
+    </form>
+  );
+}
+
+function CodingRiskNoteForm({
+  productId,
+  assessmentId,
+  action,
+  summary,
+  intro,
+  fieldLabel,
+  hint,
+  submitLabel,
+}: {
+  productId: string;
+  assessmentId: string;
+  action: typeof resolveCodingRiskAction;
+  summary: string;
+  intro: string;
+  fieldLabel: string;
+  hint: string;
+  submitLabel: string;
+}) {
+  const [state, formAction] = useActionState(action, idleState);
+  return (
+    <details className="rounded-xl border p-3">
+      <summary className="cursor-pointer text-sm font-medium">{summary}</summary>
+      <form action={formAction} className="mt-3 space-y-2">
+        <input type="hidden" name="productId" value={productId} />
+        <input type="hidden" name="assessmentId" value={assessmentId} />
+        <p className="text-sm leading-6 text-muted-foreground">{intro}</p>
+        <TextAreaField label={fieldLabel} name="rationale" hint={hint} required minLength={12} />
+        <SubmitButton pendingLabel="Saving">{submitLabel}</SubmitButton>
+        <FormMessage state={state} />
+      </form>
+    </details>
+  );
+}
+
+function CodingRiskApproachForm({
+  productId,
+  assessmentId,
+  aiLevel,
+  aiMode,
+}: {
+  productId: string;
+  assessmentId: string;
+  aiLevel: string;
+  aiMode: string;
 }) {
   const [state, formAction] = useActionState(overrideCodingRiskAction, idleState);
   return (
-    <form action={formAction} className="mt-3 grid gap-2 sm:grid-cols-2">
-      <input type="hidden" name="productId" value={productId} />
-      <input type="hidden" name="assessmentId" value={assessmentId} />
-      <label className="text-sm">
-        <span className="mb-1 block text-xs text-muted-foreground">Override risk</span>
-        <select name="riskLevel" className="h-9 w-full rounded-lg border bg-background px-2 text-sm" defaultValue="MEDIUM">
-          {CODING_RISK_LEVELS.map((level) => (
-            <option key={level} value={level}>
-              {CODING_RISK_LABEL[level]}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label className="text-sm">
-        <span className="mb-1 block text-xs text-muted-foreground">Override mode</span>
-        <select name="executionMode" className="h-9 w-full rounded-lg border bg-background px-2 text-sm" defaultValue="SUPERVISED">
-          {CODING_EXECUTION_MODES.map((mode) => (
-            <option key={mode} value={mode}>
-              {CODING_EXECUTION_LABEL[mode]}
-            </option>
-          ))}
-        </select>
-      </label>
-      <div className="sm:col-span-2">
-        <TextAreaField label="Why this override" name="rationale" hint="A rationale is required." />
-      </div>
-      <SubmitButton pendingLabel="Saving">Save human override</SubmitButton>
-      <div className="sm:col-span-2">
-        <FormMessage state={state} />
-      </div>
-    </form>
+    <details className="rounded-xl border p-3">
+      <summary className="cursor-pointer text-sm font-medium">Use different approach</summary>
+      <form action={formAction} className="mt-3 grid gap-2 sm:grid-cols-2">
+        <input type="hidden" name="productId" value={productId} />
+        <input type="hidden" name="assessmentId" value={assessmentId} />
+        <p className="text-sm leading-6 text-muted-foreground sm:col-span-2">
+          This changes the recommended approach. It does not resolve the risk and it does not accept it. The risk stays open until the alternative is completed or the risk is accepted.
+        </p>
+        <label className="text-sm">
+          <span className="mb-1 block text-xs text-muted-foreground">Alternative severity</span>
+          <select name="riskLevel" className="h-9 w-full rounded-lg border bg-background px-2 text-sm" defaultValue={aiLevel}>
+            {CODING_RISK_LEVELS.map((level) => (
+              <option key={level} value={level}>
+                {CODING_RISK_LABEL[level]}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="text-sm">
+          <span className="mb-1 block text-xs text-muted-foreground">Alternative mode</span>
+          <select name="executionMode" className="h-9 w-full rounded-lg border bg-background px-2 text-sm" defaultValue={aiMode}>
+            {CODING_EXECUTION_MODES.map((mode) => (
+              <option key={mode} value={mode}>
+                {CODING_EXECUTION_LABEL[mode]}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="sm:col-span-2">
+          <TextAreaField
+            label="Alternative approach"
+            name="rationale"
+            hint="Required. Describe the approach you will use instead of the AI recommendation."
+            required
+            minLength={12}
+          />
+        </div>
+        <SubmitButton pendingLabel="Saving" variant="outline">Record different approach</SubmitButton>
+        <div className="sm:col-span-2">
+          <FormMessage state={state} />
+        </div>
+      </form>
+    </details>
   );
 }
 

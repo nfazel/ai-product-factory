@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import { SAFE_SETUP_COMMANDS, SAFE_VALIDATION_COMMANDS } from "@/modules/coding/commands";
 import { approveCommand, isSecretPath, resolveInside, ALWAYS_RESTRICTED, matchGlob } from "@/modules/coding/policy";
 
 const TEST_PATH = /^verification\/[A-Za-z0-9._/-]+\.test\.mjs$/;
@@ -63,6 +64,15 @@ export function classifyVerificationRead(root: string, relativePath: string) {
   return located;
 }
 
+const REPOSITORY_TEST_COMMANDS = [
+  "go test ./...",
+  "cargo test",
+  "pytest",
+  "composer test",
+  "mvn test",
+  "gradle test",
+] as const;
+
 export function approveVerificationCommand(raw: string) {
   const trimmed = raw.trim().replace(/\s+/g, " ");
   if (/[;&|`$<>\\\n\r]/.test(trimmed) || trimmed.includes("$(")) {
@@ -72,5 +82,16 @@ export function approveVerificationCommand(raw: string) {
   if (parts.length === 3 && parts[0] === "node" && parts[1] === "--test" && isVerificationTestPath(parts[2] ?? "")) {
     return { ok: true as const, argv: parts, command: trimmed };
   }
-  return approveCommand(trimmed, []);
+  const lower = trimmed.toLowerCase();
+  if (/\brm\b/.test(lower) || /\bsudo\b/.test(lower) || /\bcurl\b/.test(lower) || /\bwget\b/.test(lower) || /\bgit\s+push\b/.test(lower) || /--force/.test(lower)) {
+    return { ok: false as const, reason: "That command is not permitted." };
+  }
+  if (parts.some((token) => token.startsWith("-") || !/^[A-Za-z0-9._:@/=+]+$/.test(token))) {
+    return { ok: false as const, reason: "That command is not permitted." };
+  }
+  const allowed = new Set<string>([...SAFE_SETUP_COMMANDS, ...SAFE_VALIDATION_COMMANDS, ...REPOSITORY_TEST_COMMANDS]);
+  if (allowed.has(trimmed) || /^npm run test(?::[A-Za-z0-9._-]+)?$/.test(trimmed)) {
+    return { ok: true as const, argv: parts, command: trimmed };
+  }
+  return approveCommand(trimmed, [...SAFE_VALIDATION_COMMANDS]);
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
+import { useFormStatus } from "react-dom";
 
 import { FormMessage, SubmitButton, TextAreaField } from "@/components/forms/fields";
 import { idleState } from "@/lib/action-state";
@@ -12,8 +13,19 @@ import {
   rejectVerificationAction,
   requestTestingAction,
   rerunFailedAction,
+  retryVerificationAction,
   startVerificationAction,
 } from "@/server/actions/verification";
+
+function AttemptProgress({ label }: { label: string }) {
+  const { pending } = useFormStatus();
+  if (!pending) return null;
+  return (
+    <p role="status" className="text-sm leading-6">
+      {label}
+    </p>
+  );
+}
 
 function Hidden({ productId, taskId, sessionId }: { productId: string; taskId?: string; sessionId?: string }) {
   return (
@@ -30,41 +42,77 @@ export function StartVerificationButton({ productId, taskId }: { productId: stri
   return (
     <form action={action} className="space-y-2">
       <Hidden productId={productId} taskId={taskId} />
-      <SubmitButton pendingLabel="Verifying">Start verification</SubmitButton>
+      <SubmitButton pendingLabel="Starting Independent Verification">Start Independent Verification</SubmitButton>
+      <AttemptProgress label="Independent Verification is running for this task." />
       <FormMessage state={state} />
     </form>
   );
 }
 
-export function VerificationReview({ productId, sessionId }: { productId: string; sessionId: string }) {
+export function RetryVerificationButton({ productId, taskId }: { productId: string; taskId: string }) {
+  const [state, action] = useActionState(retryVerificationAction, idleState);
+  return (
+    <form action={action} className="space-y-2">
+      <Hidden productId={productId} taskId={taskId} />
+      <SubmitButton pendingLabel="Starting a new verification attempt">Retry Independent Verification</SubmitButton>
+      <p className="text-sm text-muted-foreground">
+        This starts a new verification attempt for the same approved commit. It does not rerun coding, publish, or merge.
+      </p>
+      <AttemptProgress label="A new verification attempt is running. The approved commit is unchanged." />
+      <FormMessage state={state} />
+    </form>
+  );
+}
+
+export function VerificationReview({
+  productId,
+  sessionId,
+  verdict,
+}: {
+  productId: string;
+  sessionId: string;
+  verdict: string | null;
+}) {
   const [approveState, approve] = useActionState(approveVerificationAction, idleState);
   const [requestState, request] = useActionState(requestTestingAction, idleState);
   const [rejectState, reject] = useActionState(rejectVerificationAction, idleState);
   const [rerunState, rerun] = useActionState(rerunFailedAction, idleState);
+  const passing = verdict === "PASS" || verdict === "PASS_WITH_CONCERNS";
+  const failed = verdict === "FAIL";
+  const review = verdict === "INCONCLUSIVE";
+  if (!passing && !failed && !review) return null;
   return (
     <div className="space-y-3">
-      <form action={approve} className="space-y-2">
-        <Hidden productId={productId} sessionId={sessionId} />
-        <SubmitButton pendingLabel="Approving">Approve Verification</SubmitButton>
-        <FormMessage state={approveState} />
-      </form>
-      <form action={rerun} className="space-y-2">
-        <Hidden productId={productId} sessionId={sessionId} />
-        <SubmitButton pendingLabel="Re-running">Re-run failed tests</SubmitButton>
-        <FormMessage state={rerunState} />
-      </form>
-      <form action={request} className="space-y-2">
-        <Hidden productId={productId} sessionId={sessionId} />
-        <TextAreaField label="What still needs testing" name="note" id={`${sessionId}-more-testing`} />
-        <SubmitButton pendingLabel="Saving">Request More Testing</SubmitButton>
-        <FormMessage state={requestState} />
-      </form>
-      <form action={reject} className="space-y-2">
-        <Hidden productId={productId} sessionId={sessionId} />
-        <TextAreaField label="Why this verification is rejected" name="note" id={`${sessionId}-reject`} />
-        <SubmitButton pendingLabel="Rejecting">Reject Verification</SubmitButton>
-        <FormMessage state={rejectState} />
-      </form>
+      {passing ? (
+        <form action={approve} className="space-y-2">
+          <Hidden productId={productId} sessionId={sessionId} />
+          <SubmitButton pendingLabel="Approving">Approve Verification</SubmitButton>
+          <FormMessage state={approveState} />
+        </form>
+      ) : null}
+      {failed ? (
+        <form action={rerun} className="space-y-2">
+          <Hidden productId={productId} sessionId={sessionId} />
+          <SubmitButton pendingLabel="Re-running">Re-run failed tests</SubmitButton>
+          <FormMessage state={rerunState} />
+        </form>
+      ) : null}
+      {failed || review ? (
+        <form action={request} className="space-y-2">
+          <Hidden productId={productId} sessionId={sessionId} />
+          <TextAreaField label="What still needs testing" name="note" id={`${sessionId}-more-testing`} />
+          <SubmitButton pendingLabel="Saving">{failed ? "Review Findings / Request Changes" : "Request More Testing"}</SubmitButton>
+          <FormMessage state={requestState} />
+        </form>
+      ) : null}
+      {failed ? (
+        <form action={reject} className="space-y-2">
+          <Hidden productId={productId} sessionId={sessionId} />
+          <TextAreaField label="Why this verification is rejected" name="note" id={`${sessionId}-reject`} />
+          <SubmitButton pendingLabel="Rejecting">Reject Verification</SubmitButton>
+          <FormMessage state={rejectState} />
+        </form>
+      ) : null}
     </div>
   );
 }
@@ -124,7 +172,10 @@ export function IntegratedButton({ productId, sliceId }: { productId: string; sl
     <form action={action} className="space-y-2">
       <input type="hidden" name="productId" value={productId} />
       <input type="hidden" name="sliceId" value={sliceId} />
-      <SubmitButton pendingLabel="Planning">Create integrated verification plan</SubmitButton>
+      <SubmitButton pendingLabel="Planning">Record integrated verification plan</SubmitButton>
+      <p className="text-sm text-muted-foreground">
+        This records a plan for the product slice. It does not run end-to-end checks, approve task verification, or complete product verification.
+      </p>
       <FormMessage state={state} />
     </form>
   );

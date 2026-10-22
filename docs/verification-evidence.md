@@ -65,7 +65,7 @@ Final automated coverage prefers `VERIFICATION_AGENT` evidence. The same agent t
 
 ## Non-functional and security behaviour
 
-Only confirmed non-functional requirements are assessed. Each one is stored as `NOT_TESTED` with the note that it requires manual verification, because no accessibility or performance tool is installed. The system does not invent those results.
+Only confirmed non-functional requirements are assessed. Each one starts as `NOT_TESTED`. Accessibility and performance requirements say that no matching tool is installed. Other requirements, including privacy, security, and compliance, say they were not exercised. The system does not invent those results.
 
 Security verification uses governance findings as conditions. Tests may check behaviours such as authorisation, invalid input, or unsafe file types when a real test can express them. That is not penetration testing and not a vulnerability scan. The security readiness area counts as evidenced when a security test passed, or when the contract has no security-finding condition.
 

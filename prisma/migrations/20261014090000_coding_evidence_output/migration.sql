@@ -1,0 +1,1 @@
+ALTER TABLE "CodingEvidence" ADD COLUMN "output" TEXT NOT NULL DEFAULT '';

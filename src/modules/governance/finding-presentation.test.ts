@@ -87,14 +87,14 @@ describe("governance finding presentation", () => {
       threats: [{ status: "ACCEPTED" }, { status: "MITIGATED" }],
       questions: [{ status: "ANSWERED", blocking: false }, { status: "OPEN", blocking: true }],
       codingRisks: [
-        { riskLevel: "LOW", overrideRiskLevel: null, overriddenBy: "" },
-        { riskLevel: "PROHIBITED", overrideRiskLevel: null, overriddenBy: "" },
+        { riskLevel: "LOW", disposition: "OPEN", overrideRiskLevel: "MEDIUM", overriddenBy: "Local user" },
+        { riskLevel: "PROHIBITED", disposition: "OPEN", overrideRiskLevel: null, overriddenBy: "" },
       ],
     });
     expect(summary.total).toBe(10);
-    expect(summary.passed).toBe(4);
+    expect(summary.passed).toBe(3);
     expect(summary.riskAccepted).toBe(2);
-    expect(summary.open).toBe(1);
+    expect(summary.open).toBe(2);
     expect(summary.blocking).toBe(3);
     expect(summary.complete).toBe(false);
     expect(governanceNextActionLabel({ reviewRequired: false, openCritical: 1, openHighBeforeCoding: 0, openFindings: 2 })).toBe(

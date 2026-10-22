@@ -12,8 +12,15 @@ import {
   regenerateCodingContract,
   rejectCodeChanges,
   requestCodingChanges,
+  proposeCoherentExecutionPlan,
+  requestExecutionPlanChanges,
+  recordRepairResult,
+  restoreUnapprovedChange,
+  proposeOutOfScopePlan,
+  repairCodingTask,
   resumeCodingTask,
   retryCodingTask,
+  reviseExecutionPlan,
   startCodingTask,
 } from "@/modules/coding/service";
 import { actionFailure, formValues, refreshWorkspace } from "@/server/action-helpers";
@@ -49,7 +56,7 @@ export async function startCodingAction(_prev: ActionState, formData: FormData):
   if (!parsed.success) return invalidState(parsed.error.issues);
   try {
     await startCodingTask(parsed.data.productId, parsed.data.taskId);
-    return done(parsed.data.productId, "The coding task started in an isolated workspace.");
+    return done(parsed.data.productId, "The execution plan was generated. Review it before coding starts.");
   } catch (error) {
     return actionFailure(error);
   }
@@ -60,7 +67,40 @@ export async function approvePlanAction(_prev: ActionState, formData: FormData):
   if (!parsed.success) return invalidState(parsed.error.issues);
   try {
     await approveExecutionPlan(parsed.data.productId, parsed.data.workspaceId);
-    return done(parsed.data.productId, "The execution plan is approved. Implementation continued in the same workspace.");
+    return done(parsed.data.productId, "Execution plan approved. Coding has not started.");
+  } catch (error) {
+    return actionFailure(error);
+  }
+}
+
+export async function requestPlanChangesAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const parsed = workspaceIds.extend({ changeRequest: z.string().trim().min(12).max(2000) }).safeParse(formValues(formData));
+  if (!parsed.success) return invalidState(parsed.error.issues);
+  try {
+    await requestExecutionPlanChanges(parsed.data.productId, parsed.data.workspaceId, parsed.data.changeRequest);
+    return done(parsed.data.productId, "Changes requested. The execution plan is not approved. Revise it to create the next version.");
+  } catch (error) {
+    return actionFailure(error);
+  }
+}
+
+export async function proposeContractPlanAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const parsed = workspaceIds.safeParse(formValues(formData));
+  if (!parsed.success) return invalidState(parsed.error.issues);
+  try {
+    await proposeCoherentExecutionPlan(parsed.data.productId, parsed.data.workspaceId);
+    return done(parsed.data.productId, "The next execution plan version is ready for review. It is not approved, and coding has not started.");
+  } catch (error) {
+    return actionFailure(error);
+  }
+}
+
+export async function revisePlanAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const parsed = workspaceIds.safeParse(formValues(formData));
+  if (!parsed.success) return invalidState(parsed.error.issues);
+  try {
+    await reviseExecutionPlan(parsed.data.productId, parsed.data.workspaceId);
+    return done(parsed.data.productId, "A new execution plan version is ready for review. It is not approved.");
   } catch (error) {
     return actionFailure(error);
   }
@@ -97,7 +137,7 @@ export async function approveCodeAction(_prev: ActionState, formData: FormData):
   if (!parsed.success) return invalidState(parsed.error.issues);
   try {
     await approveCodeChanges(parsed.data.productId, parsed.data.workspaceId);
-    return done(parsed.data.productId, "The code change is approved. It has not been merged.");
+    return done(parsed.data.productId, "Code changes approved. Create a local commit to lock this approved source snapshot before Independent Verification.");
   } catch (error) {
     return actionFailure(error);
   }
@@ -130,7 +170,51 @@ export async function commitCodingAction(_prev: ActionState, formData: FormData)
   if (!parsed.success) return invalidState(parsed.error.issues);
   try {
     const result = await createCodingCommit(parsed.data.productId, parsed.data.workspaceId);
-    return done(parsed.data.productId, `Created commit ${result.sha.slice(0, 12)}. It was not pushed.`);
+    return done(parsed.data.productId, `Approved source snapshot committed. Commit: ${result.sha.slice(0, 12)}. The implementation is now ready for Independent Verification.`);
+  } catch (error) {
+    return actionFailure(error);
+  }
+}
+
+export async function restoreUnapprovedChangeAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const parsed = workspaceIds.extend({ path: z.string().trim().min(1).max(240) }).safeParse(formValues(formData));
+  if (!parsed.success) return invalidState(parsed.error.issues);
+  try {
+    await restoreUnapprovedChange(parsed.data.productId, parsed.data.workspaceId, parsed.data.path);
+    return done(parsed.data.productId, `${parsed.data.path} was restored from the baseline. The model was not called.`);
+  } catch (error) {
+    return actionFailure(error);
+  }
+}
+
+export async function proposeOutOfScopePlanAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const parsed = workspaceIds.extend({ path: z.string().trim().min(1).max(240) }).safeParse(formValues(formData));
+  if (!parsed.success) return invalidState(parsed.error.issues);
+  try {
+    await proposeOutOfScopePlan(parsed.data.productId, parsed.data.workspaceId, parsed.data.path);
+    return done(parsed.data.productId, "A new execution plan version was proposed for that file. It is not approved, and the previous version remains in history.");
+  } catch (error) {
+    return actionFailure(error);
+  }
+}
+
+export async function recordRepairResultAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const parsed = workspaceIds.safeParse(formValues(formData));
+  if (!parsed.success) return invalidState(parsed.error.issues);
+  try {
+    await recordRepairResult(parsed.data.productId, parsed.data.workspaceId);
+    return done(parsed.data.productId, "The existing repair result was recorded. The model was not called again.");
+  } catch (error) {
+    return actionFailure(error);
+  }
+}
+
+export async function repairCodingAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const parsed = workspaceIds.safeParse(formValues(formData));
+  if (!parsed.success) return invalidState(parsed.error.issues);
+  try {
+    await repairCodingTask(parsed.data.productId, parsed.data.workspaceId);
+    return done(parsed.data.productId, "Implementation repair used the approved execution plan. The original validation evidence was kept.");
   } catch (error) {
     return actionFailure(error);
   }

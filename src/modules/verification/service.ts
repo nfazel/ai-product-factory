@@ -7,12 +7,14 @@ import { executeAgent, AgentNotConfiguredError } from "@/modules/agent/service";
 import { recordActivity } from "@/modules/activity/service";
 import { requestApproval, resolveApproval } from "@/modules/approval/service";
 import { hashText } from "@/modules/coding/policy";
-import { resolveConfiguredRepository } from "@/modules/coding/config";
+import { resolveProductRepository } from "@/modules/source-control/product-repository";
 import { upsertRepository } from "@/modules/coding/repository";
 import { assertWorktreeIsolated, branchNameFor, createWorktree, workspaceDirectory } from "@/modules/coding/git";
 import { getCurrentActor } from "@/modules/identity/actor";
 import { db } from "@/lib/db";
 import { recomputeSession } from "@/modules/verification/assess";
+import { classifyVerificationFailure, failureReason, isVerificationFailureClass } from "@/modules/verification/failure";
+import { initialNfrEvidenceNote } from "@/modules/verification/nfr-evidence";
 import { buildVerificationContract } from "@/modules/verification/contract";
 import { assertVerificationEntry, verificationEntryBlockers } from "@/modules/verification/gates";
 import { executeVerificationTool } from "@/modules/verification/tools";
@@ -31,7 +33,59 @@ function assertHuman(actor: string) {
   }
 }
 
+async function claimVerificationAttempt(input: {
+  productId: string;
+  taskId: string;
+  repositoryWorkspaceId: string;
+  commitSha: string;
+}) {
+  return db.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`verification:${input.taskId}`})::bigint)`;
+    const running = await tx.verificationSession.findFirst({
+      where: {
+        productId: input.productId,
+        implementationTaskId: input.taskId,
+        demo: false,
+        status: { in: ["PLANNING", "READY", "EXECUTING"] },
+      },
+    });
+    if (running) throw new DomainError("Independent Verification is already running for this task.");
+    return tx.verificationSession.create({
+      data: {
+        productId: input.productId,
+        implementationTaskId: input.taskId,
+        repositoryWorkspaceId: input.repositoryWorkspaceId,
+        commitSha: input.commitSha,
+        status: "PLANNING",
+        startedAt: new Date(),
+      },
+    });
+  });
+}
+
+export async function retryVerification(productId: string, taskId: string) {
+  const running = await db.verificationSession.findFirst({
+    where: {
+      productId,
+      implementationTaskId: taskId,
+      demo: false,
+      status: { in: ["PLANNING", "READY", "EXECUTING"] },
+    },
+  });
+  if (running) throw new DomainError("Independent Verification is already running for this task.");
+  return startVerification(productId, taskId);
+}
+
 export async function startVerification(productId: string, taskId: string) {
+  const running = await db.verificationSession.findFirst({
+    where: {
+      productId,
+      implementationTaskId: taskId,
+      demo: false,
+      status: { in: ["PLANNING", "READY", "EXECUTING"] },
+    },
+  });
+  if (running) throw new DomainError("Independent Verification is already running for this task.");
   await assertVerificationEntry(productId, taskId);
   await prepareAI();
   if (!isAIConfigured()) throw new AgentNotConfiguredError("TESTING");
@@ -56,14 +110,16 @@ export async function startVerification(productId: string, taskId: string) {
   if (!task) throw new DomainError("The implementation task was not found.", "NOT_FOUND");
   const codingWorkspace = task.workspaces[0];
   if (!codingWorkspace) throw new DomainError("The coding workspace for this task was not found.");
-  const configured = await resolveConfiguredRepository();
-  const repository = await upsertRepository({
-    productId,
-    name: configured.name,
-    localPath: configured.localPath,
-    defaultBranch: configured.defaultBranch,
-    status: "CONFIGURED",
-  });
+  const configured = await resolveProductRepository(productId);
+  const repository =
+    configured.record ??
+    (await upsertRepository({
+      productId,
+      name: configured.name,
+      localPath: configured.localPath,
+      defaultBranch: configured.defaultBranch,
+      status: "CONFIGURED",
+    }));
   const criteria = task.workItem?.acceptanceCriteria ?? [];
   const nfrs = await db.nonFunctionalRequirement.findMany({
     where: { productId, status: "CONFIRMED" },
@@ -82,15 +138,11 @@ export async function startVerification(productId: string, taskId: string) {
     commitSha: codingWorkspace.headCommit,
     changedFiles: changedFileNames(codingWorkspace.diff?.files),
   });
-  const session = await db.verificationSession.create({
-    data: {
-      productId,
-      implementationTaskId: taskId,
-      repositoryWorkspaceId: codingWorkspace.id,
-      commitSha: codingWorkspace.headCommit,
-      status: "PLANNING",
-      startedAt: new Date(),
-    },
+  const session = await claimVerificationAttempt({
+    productId,
+    taskId,
+    repositoryWorkspaceId: codingWorkspace.id,
+    commitSha: codingWorkspace.headCommit,
   });
   const workspace = await db.verificationWorkspace.create({
     data: {
@@ -119,7 +171,14 @@ export async function startVerification(productId: string, taskId: string) {
       where: { id: workspace.id },
       data: { workspacePath: directory, status: "FAILED" },
     });
-    await db.verificationSession.update({ where: { id: session.id }, data: { status: "FAILED" } });
+    await db.verificationSession.update({
+      where: { id: session.id },
+      data: {
+        status: "FAILED",
+        failureClass: "VERIFICATION_SETUP_FAILED",
+        verdictReason: failureReason("VERIFICATION_SETUP_FAILED"),
+      },
+    });
     throw new DomainError(
       `The verification workspace could not be created. The coding workspace and main working tree were not modified. ${error instanceof Error ? error.message : ""}`,
     );
@@ -134,7 +193,7 @@ export async function startVerification(productId: string, taskId: string) {
         nfrId: nfr.id,
         title: nfr.title,
         status: "NOT_TESTED",
-        note: "REQUIRES MANUAL VERIFICATION. No accessibility or performance tool is installed, so this NFR is not claimed as verified.",
+        note: initialNfrEvidenceNote(nfr),
       },
     });
   }
@@ -158,7 +217,24 @@ export async function startVerification(productId: string, taskId: string) {
       input: { phase: "execute", sessionId: session.id, taskId },
     });
   } catch (error) {
-    await db.verificationSession.update({ where: { id: session.id }, data: { status: "FAILED" } });
+    const existing = await db.verificationSession.findUnique({
+      where: { id: session.id },
+      select: { failureClass: true, overallVerdict: true, verdictReason: true },
+    });
+    if (!existing?.overallVerdict) {
+      const failureClass =
+        existing?.failureClass && isVerificationFailureClass(existing.failureClass)
+          ? existing.failureClass
+          : classifyVerificationFailure(error);
+      await db.verificationSession.update({
+        where: { id: session.id },
+        data: {
+          status: "FAILED",
+          failureClass,
+          verdictReason: existing?.verdictReason || failureReason(failureClass),
+        },
+      });
+    }
     throw error;
   }
   return getVerificationSession(productId, session.id);
@@ -422,6 +498,7 @@ export async function getProveView(productId: string) {
           workItem: {
             include: {
               acceptanceCriteria: true,
+              children: { include: { acceptanceCriteria: true } },
               parent: { include: { parent: true } },
               capability: { include: { outcome: true } },
             },
@@ -459,6 +536,7 @@ export async function getProveView(productId: string) {
       status: task.status,
       blockers: await verificationEntryBlockers(productId, task.id),
       trace: traceFor(task),
+      featureConcern: featureConcernFor(task),
       commitSha: task.workspaces[0]?.headCommit ?? "",
     })),
   );
@@ -514,6 +592,23 @@ function evidenceFingerprint(session: NonNullable<Awaited<ReturnType<typeof getV
   return hashText(body.join("|"));
 }
 
+function featureConcernFor(task: {
+  workItem: {
+    title: string;
+    acceptanceCriteria: { id: string }[];
+    children?: { title: string; acceptanceCriteria: { id: string; description: string }[] }[];
+  } | null;
+}) {
+  const own = new Set(task.workItem?.acceptanceCriteria.map((item) => item.id) ?? []);
+  const outside = (task.workItem?.children ?? []).flatMap((child) =>
+    child.acceptanceCriteria
+      .filter((item) => !own.has(item.id))
+      .map((item) => `${child.title}: ${item.description}`),
+  );
+  if (outside.length === 0) return "";
+  return `${task.workItem?.title ?? "The parent feature"} is not verified by this technical task. Functional criteria remain untested: ${outside.join(" ")}`;
+}
+
 function traceFor(task: {
   title: string;
   workItem: {
@@ -536,7 +631,7 @@ function traceFor(task: {
 
 function sliceReadiness(
   stage: string,
-  tasks: { id: string; status: string }[],
+  tasks: { id: string; title: string; status: string }[],
   sessions: {
     implementationTaskId: string;
     demo: boolean;
@@ -551,7 +646,7 @@ function sliceReadiness(
   }
   const reasons: string[] = [];
   for (const task of tasks) {
-    if (task.status !== "COMPLETED") reasons.push(`${task.id} is not a completed implementation.`);
+    if (task.status !== "COMPLETED") reasons.push(`${task.title} is not a completed implementation.`);
     const verified = sessions.find(
       (session) =>
         session.implementationTaskId === task.id &&
@@ -560,7 +655,7 @@ function sliceReadiness(
         (session.overallVerdict === "PASS" || session.overallVerdict === "PASS_WITH_CONCERNS") &&
         session.approvals.some((approval) => !approval.stale),
     );
-    if (!verified) reasons.push(`${task.id} does not have an approved verification.`);
+    if (!verified) reasons.push(`${task.title} does not have an approved verification.`);
   }
   const high = sessions.some((session) =>
     session.defectLinks.some(

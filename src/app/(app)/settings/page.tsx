@@ -4,10 +4,10 @@ import Link from "next/link";
 import { AIConfigurationForm } from "@/components/ai/configuration-form";
 import { PageSkeleton } from "@/components/feedback/states";
 import { PageHeader } from "@/components/layout/page-header";
-import { ValidateConnectionButton } from "@/components/source-control/source-control-controls";
+import { GitHubSettings } from "@/components/settings/github-settings";
 import { loadAIConfiguration } from "@/modules/ai/surface";
 import { repositoryRootConfigured } from "@/modules/coding/config";
-import { getConnectionSummary } from "@/modules/source-control/service";
+import { getGitHubConnectionView } from "@/modules/source-control/github-credentials";
 import { markDynamic } from "@/server/dynamic";
 
 export const metadata = { title: "Settings" };
@@ -31,9 +31,9 @@ export default function SettingsPage() {
 
 async function Settings() {
   await markDynamic();
-  const connection = await getConnectionSummary();
+  const github = await getGitHubConnectionView();
   const ai = await loadAIConfiguration();
-  const repositoryConfigured = repositoryRootConfigured();
+  const legacyRepository = repositoryRootConfigured();
   const active = ai.active;
 
   return (
@@ -112,45 +112,23 @@ async function Settings() {
           ) : null}
         </article>
         <article className="rounded-2xl border bg-card p-5">
-          <h2 className="text-base font-semibold">Local repository</h2>
+          <h2 className="text-base font-semibold">Product repositories</h2>
           <p className="mt-3 text-sm leading-6">
-            {repositoryConfigured ? "A local Git repository is configured for coding and independent checks." : "No local repository is configured. Coding and independent checks stay closed until PRODUCT_REPOSITORY_ROOT points at a separate Git repository."}
+            GitHub authentication is configured below. Each product chooses its own repository on its Build page. This page does not choose a product repository.
+          </p>
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">
+            {legacyRepository
+              ? "A legacy server repository is available as a fallback for products that do not have their own repository yet."
+              : "No legacy server repository is set. Products that do not have their own repository stay closed for Coding until you set one up on the product."}
           </p>
         </article>
-        <article className="rounded-2xl border bg-card p-5 lg:col-span-2">
-          <h2 className="text-base font-semibold">Source control</h2>
-          <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
-            <div>
-              <dt className="text-xs text-muted-foreground">Provider</dt>
-              <dd className="mt-1 font-medium">{connection.provider}</dd>
-            </div>
-            <div>
-              <dt className="text-xs text-muted-foreground">Connection</dt>
-              <dd className="mt-1 font-medium">{connection.status === "CONNECTED" ? "CONNECTED" : "NOT CONNECTED"}</dd>
-            </div>
-            <div>
-              <dt className="text-xs text-muted-foreground">Owner</dt>
-              <dd className="mt-1 font-medium">{connection.owner || "Not configured"}</dd>
-            </div>
-            <div>
-              <dt className="text-xs text-muted-foreground">Repository</dt>
-              <dd className="mt-1 font-medium">{connection.repositoryName || "Not configured"}</dd>
-            </div>
-            <div>
-              <dt className="text-xs text-muted-foreground">Default branch</dt>
-              <dd className="mt-1 font-medium">{connection.defaultBranch || "Not validated"}</dd>
-            </div>
-            <div>
-              <dt className="text-xs text-muted-foreground">Status detail</dt>
-              <dd className="mt-1 font-medium">{connection.status}</dd>
-            </div>
-          </dl>
-          <p className="mt-3 text-sm leading-6 text-muted-foreground">{connection.message}</p>
+        <article id="github" className="scroll-mt-20 rounded-2xl border bg-card p-5 lg:col-span-2">
+          <h2 className="text-base font-semibold">GitHub</h2>
           <p className="mt-2 text-sm leading-6 text-muted-foreground">
-            Credentials stay in server environment variables. This page cannot show or edit a token.
+            Connect GitHub for AI Product Builder. Each product then chooses the repository it publishes to. Credentials are encrypted and are not written into a product repository.
           </p>
           <div className="mt-4">
-            <ValidateConnectionButton />
+            <GitHubSettings connection={github} />
           </div>
         </article>
         <article className="rounded-2xl border bg-card p-5 lg:col-span-2">

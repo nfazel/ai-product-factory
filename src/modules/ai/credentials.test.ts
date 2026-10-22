@@ -309,10 +309,16 @@ describe("provider credentials", () => {
       return source.includes('"use client"') || source.includes("'use client'");
     });
     expect(clientFiles.length).toBeGreaterThan(3);
+    const serverSecrets = ["OPENAI_API_KEY", "GOOGLE_GEMINI_API_KEY", "AI_CREDENTIAL_ENCRYPTION_KEY"];
     for (const file of clientFiles) {
       const source = readFileSync(file, "utf8");
       expect(source, file).not.toMatch(/credential-crypto|decryptSecret|createDecipheriv|encryptSecret/);
-      expect(source, file).not.toMatch(/OPENAI_API_KEY|GOOGLE_GEMINI_API_KEY|AI_CREDENTIAL_ENCRYPTION_KEY/);
+      expect(source, file).not.toMatch(/OPENAI_API_KEY|GOOGLE_GEMINI_API_KEY/);
+      for (const name of serverSecrets) {
+        expect(source, file).not.toMatch(new RegExp(String.raw`process\.env\.${name}\b`));
+        expect(source, file).not.toMatch(new RegExp(String.raw`process\.env\s*\[\s*['"\`]${name}['"\`]\s*\]`));
+        expect(source, file).not.toMatch(new RegExp(String.raw`NEXT_PUBLIC_${name}\b`));
+      }
     }
   });
 

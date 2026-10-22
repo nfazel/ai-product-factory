@@ -100,11 +100,11 @@ cp .env.example .env
 | `OPENAI_API_KEY` | Optional server-only credential used when OpenAI is selected and Settings has no saved key |
 | `OLLAMA_BASE_URL` | Ollama address. Defaults to `http://127.0.0.1:11434`. No API key is required for normal local use |
 | `CODEBASE_CONTEXT_ROOT` | Optional absolute path. When set, Build can read that directory's `package.json` and top-level folder names. It cannot browse an arbitrary path |
-| `PRODUCT_REPOSITORY_ROOT` | Optional absolute path to a local Git repository the Coding Agent and the Testing & Verification Agent may use. The browser cannot set this |
+| `PRODUCT_REPOSITORY_ROOT` | Optional legacy fallback. A product repository is set up on that product's Build page. This path is used only when the product has no repository of its own |
 | `PRODUCT_REPOSITORY_ALLOW_FACTORY` | Optional. Set to `true` only when a local demo should use this application's own source tree |
-| `GITHUB_TOKEN` | Optional local personal access token. Server-only. Never put this in the browser |
-| `GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`, `GITHUB_APP_PRIVATE_KEY` | Optional GitHub App credentials. Preferred for a real installation. Server-only |
-| `GITHUB_OWNER`, `GITHUB_REPOSITORY` | Repository the factory may publish to after **Validate Connection** |
+| `GITHUB_TOKEN` | Optional server fallback when Settings has no saved personal access token. Never put this in a product repository |
+| `GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`, `GITHUB_APP_PRIVATE_KEY` | Optional GitHub App fallback. Settings can store the App instead. A server App is used before a saved token |
+| `GITHUB_OWNER`, `GITHUB_REPOSITORY` | Optional server repository fallback. Each product chooses its own repository on Build |
 | `GITHUB_MINIMUM_HUMAN_APPROVALS` | Optional. Defaults to 1. Branch protection can require more |
 | `GITHUB_SERVICE_ACCOUNT` | Optional login that must not count as a human reviewer |
 
@@ -163,7 +163,7 @@ Open a product and choose Build. Architecture and implementation planning happen
 
 **Run governance review** stays closed until the brief, the definition, the first slice, the solution architecture, and the implementation plan are approved. The governance agent does not approve its own review and does not write code. A person resolves findings, approves the coding policy, and approves the governance review. Coding readiness stays **NOT READY** until those approvals exist and no deterministic governance blocker remains. The label is **CODING READY** only then.
 
-**Start Coding Task** also needs an approved implementation task, a coding-risk mode other than human-only, no unresolved task dependency, and `PRODUCT_REPOSITORY_ROOT`. The Coding Agent works in a Git worktree. A person approves the code and may create a commit. The commit is not pushed or merged.
+**Start Coding Task** also needs an approved implementation task, a coding-risk mode other than human-only, no unresolved task dependency, and a product repository. Set that up on Build before coding. `PRODUCT_REPOSITORY_ROOT` is only a fallback for a product that has no repository of its own. The Coding Agent works in a Git worktree. A person approves the code and may create a commit. The commit is not pushed or merged.
 
 If an approved requirement changes after the architecture is approved, the page says **Architecture review required** and keeps the approval. If the architecture changes after the plan is approved, the page says **Implementation Plan review required** and keeps that approval. If the architecture or the plan changes after governance is approved, the page says **GOVERNANCE REVIEW REQUIRED** and keeps the approval. If the coding policy changes after it is approved, the page says **CODING POLICY REAPPROVAL REQUIRED** and keeps the approval.
 
@@ -197,7 +197,7 @@ The seeded Claims product keeps its existing demo records. Where those records a
 
 ## Demo repository
 
-The Coding Agent does not point itself at this source tree. Create a small Git repository and set `PRODUCT_REPOSITORY_ROOT` to its absolute path:
+The Coding Agent does not point itself at this source tree. On Build, **Set Up Repository** creates a local repository for a new application. `PRODUCT_REPOSITORY_ROOT` remains a legacy fallback for a product that has no repository of its own. A separate demo repository can still be created like this:
 
 ```bash
 mkdir -p "$HOME/apf-demo-repo/src/claims"
@@ -209,7 +209,7 @@ git add .
 git -c user.email=demo@localhost -c user.name="Demo" commit -m "Initial claims helper"
 ```
 
-Add `PRODUCT_REPOSITORY_ROOT` to `.env`, then restart the server. Approve the upstream Build gates, approve one implementation task, and choose **Start Coding Task**. The seed does not invent Git evidence.
+Point `PRODUCT_REPOSITORY_ROOT` at that demo only when a product has no repository of its own, then restart the server. Approve the upstream Build gates, approve one implementation task, and choose **Start Coding Task**. The seed does not invent Git evidence.
 
 ## What stays human
 

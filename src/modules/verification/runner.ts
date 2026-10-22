@@ -7,8 +7,13 @@ import { aiRunEvidence, combineAIEvidence, type AIRunEvidence } from "@/modules/
 import { getAIProvider } from "@/modules/ai/provider";
 import type { AgentExecutionRequest, AgentRunner } from "@/modules/agent/types";
 import { codingConfigurationGap } from "@/modules/coding/config";
+import { parsePlannedCommands } from "@/modules/coding/commands";
+import { asStrings } from "@/modules/coding/strings";
 import { db } from "@/lib/db";
 import { recomputeSession } from "@/modules/verification/assess";
+import { commandFailureIsEnvironment } from "@/modules/coding/bootstrap";
+import { commandUnavailable, selectVerificationChecks, type VerificationCheck } from "@/modules/verification/commands";
+import { failureReason } from "@/modules/verification/failure";
 import { verificationEntryBlockers } from "@/modules/verification/gates";
 import { VERIFICATION_SYSTEM_PROMPT, verificationUserMessage } from "@/modules/verification/prompt";
 import {
@@ -246,24 +251,15 @@ async function runExecute(session: NonNullable<Awaited<ReturnType<typeof loadSes
       data: { status: passed ? "PASSED" : "FAILED" },
     });
   }
-  const regression = await executeVerificationTool(
-    { sessionId: session.id, productId: session.productId, workspacePath },
-    { action: "RUN_COMMAND", command: "npm test" },
-  );
-  await db.verificationExecution.create({
-    data: {
-      sessionId: session.id,
-      command: "npm test",
-      kind: "EXISTING_REGRESSION",
-      status: regression.allowed ? (regression.exitCode === 0 ? "PASSED" : "FAILED") : "NOT_RUN",
-      exitCode: regression.exitCode,
-      outputSummary: regression.output,
-      startedAt: new Date(),
-      completedAt: new Date(),
-    },
-  });
+  const checkLines = await runRepositoryChecks(session, workspacePath);
   const contract = contractText(session.contract!);
-  const context = "Independent execution finished. Coding self-review is not a verdict.";
+  const context = [
+    "Independent execution finished. Coding self-review is not a verdict.",
+    "Technical checks:",
+    checkLines.join("\n") || "No repository or plan check was selected.",
+    "A passing technical check does not prove a product acceptance criterion.",
+    "A missing test command is not a product defect.",
+  ].join("\n");
   const evidence: AIRunEvidence[] = [];
   const interpretation = await ask(interpretationSchema, "verification_interpretation", "interpretation", contract, context, evidence);
   const defects = await ask(defectProposalSchema, "verification_defects", "defects", contract, context, evidence);
@@ -353,6 +349,126 @@ async function createDefect(
       commitSha: session.commitSha,
     },
   });
+}
+
+async function runRepositoryChecks(
+  session: { id: string; productId: string; repositoryWorkspaceId: string | null },
+  workspacePath: string,
+) {
+  const coding = session.repositoryWorkspaceId
+    ? await db.repositoryWorkspace.findFirst({
+        where: { id: session.repositoryWorkspaceId },
+        include: { plan: true },
+      })
+    : null;
+  const planned = [
+    ...asStrings(coding?.plan?.setupCommands).map((command) => ({
+      command,
+      applicability: "REQUIRED" as const,
+      kind: "SETUP" as const,
+    })),
+    ...parsePlannedCommands(coding?.plan?.validationCommands),
+  ];
+  const checks = selectVerificationChecks({ workspacePath, planned });
+  const lines: string[] = [];
+  for (const check of checks) {
+    const recorded = await recordCheck(session, workspacePath, check);
+    lines.push(`${check.command}: ${recorded}`);
+    if (check.kind === "SETUP" && recorded !== "PASSED") {
+      await db.verificationSession.update({
+        where: { id: session.id },
+        data: {
+          status: "FAILED",
+          failureClass: "VERIFICATION_SETUP_FAILED",
+          verdictReason: failureReason("VERIFICATION_SETUP_FAILED"),
+        },
+      });
+      throw new DomainError("Verification setup could not be completed. The product was not judged.");
+    }
+  }
+  return lines;
+}
+
+async function recordCheck(
+  session: { id: string; productId: string },
+  workspacePath: string,
+  check: VerificationCheck,
+) {
+  if (check.disposition === "NOT_APPLICABLE") {
+    await db.verificationExecution.create({
+      data: {
+        sessionId: session.id,
+        command: check.command,
+        kind: "PLAN_CHECK",
+        status: "NOT_RUN",
+        outputSummary: check.reason,
+        startedAt: new Date(),
+        completedAt: new Date(),
+      },
+    });
+    await db.verificationEvidence.create({
+      data: {
+        sessionId: session.id,
+        type: commandEvidenceType(check.command),
+        source: "REPOSITORY",
+        description: check.reason,
+        result: "NOT APPLICABLE",
+        command: check.command,
+      },
+    });
+    return "NOT APPLICABLE";
+  }
+  if (check.disposition === "UNAVAILABLE") {
+    await db.verificationExecution.create({
+      data: {
+        sessionId: session.id,
+        command: check.command,
+        kind: check.kind === "EXISTING_REGRESSION" ? "EXISTING_REGRESSION" : "PLAN_CHECK",
+        status: "BLOCKED",
+        outputSummary: check.reason,
+        startedAt: new Date(),
+        completedAt: new Date(),
+      },
+    });
+    await db.verificationEvidence.create({
+      data: {
+        sessionId: session.id,
+        type: commandEvidenceType(check.command),
+        source: "REPOSITORY",
+        description: check.reason,
+        result: "UNAVAILABLE",
+        command: check.command,
+      },
+    });
+    return "UNAVAILABLE";
+  }
+  const ran = await executeVerificationTool(
+    { sessionId: session.id, productId: session.productId, workspacePath },
+    { action: "RUN_COMMAND", command: check.command },
+  );
+  const unavailable = !ran.allowed || commandUnavailable(ran.output, ran.exitCode) || commandFailureIsEnvironment(ran.output);
+  const status = !ran.allowed || unavailable ? "BLOCKED" : ran.exitCode === 0 ? "PASSED" : "FAILED";
+  await db.verificationExecution.create({
+    data: {
+      sessionId: session.id,
+      command: check.command,
+      kind: check.kind === "SETUP" ? "PLAN_CHECK" : check.kind,
+      status,
+      exitCode: ran.exitCode,
+      outputSummary: ran.output || ran.reason || check.reason,
+      startedAt: new Date(),
+      completedAt: new Date(),
+    },
+  });
+  if (status === "PASSED") return "PASSED";
+  if (status === "BLOCKED") return "UNAVAILABLE";
+  return "FAILED";
+}
+
+function commandEvidenceType(command: string) {
+  if (command.includes("build")) return "BUILD_RESULT" as const;
+  if (command.includes("typecheck")) return "TYPECHECK_RESULT" as const;
+  return "TEST_RESULT" as const;
 }
 
 async function recordExistingTests(sessionId: string, workspacePath: string) {

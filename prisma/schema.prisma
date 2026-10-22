@@ -120,6 +120,8 @@ model Product {
   integratedVerifications IntegratedVerificationSession[]
   publishedChanges PublishedChange[]
   pullRequests PullRequestRecord[]
+  ciRequirementDecision CiRequirementDecision?
+  remoteMainBootstraps RemoteMainBootstrap[]
   sourceControlEvidence SourceControlEvidence[]
   releaseCandidates ReleaseCandidate[]
   outcomeObservations OutcomeObservation[]
@@ -130,6 +132,7 @@ model Product {
   intakeFindings RequirementFinding[]
   intakeQuestions IntakeQuestion[]
   requirementTraceLinks RequirementTraceLink[]
+  clarificationRevisions ClarificationAnswerRevision[]
 
   @@index([status])
   @@index([updatedAt])
@@ -406,6 +409,8 @@ model ProductBrief {
   riskClarity      SignalLevel        @default(LOW)
   readyForReview   Boolean            @default(false)
   readinessReason  String             @default("")
+  reviewRequired   Boolean            @default(false)
+  reviewReason     String             @default("")
   fromRequirements Boolean            @default(false)
   status           ProductBriefStatus @default(DRAFT)
   createdAt        DateTime           @default(now())
@@ -516,9 +521,11 @@ model ProductDefinition {
   id            String           @id @default(cuid())
   productId     String           @unique
   status        DefinitionStatus @default(NOT_STARTED)
-  seededDemo    Boolean          @default(false)
-  reviewSummary String           @default("")
-  approvedAt    DateTime?
+  seededDemo     Boolean          @default(false)
+  reviewSummary  String           @default("")
+  reviewRequired Boolean          @default(false)
+  reviewReason   String           @default("")
+  approvedAt     DateTime?
   createdAt     DateTime         @default(now())
   updatedAt     DateTime         @updatedAt
 
@@ -1248,6 +1255,12 @@ enum CodingRiskLevel {
   PROHIBITED
 }
 
+enum CodingRiskDisposition {
+  OPEN
+  RESOLVED
+  RISK_ACCEPTED
+}
+
 enum CodingExecutionMode {
   AUTONOMOUS
   SUPERVISED
@@ -1413,6 +1426,10 @@ model CodingRiskAssessment {
   overrideReason           String              @default("")
   overriddenBy             String              @default("")
   overriddenAt             DateTime?
+  disposition              CodingRiskDisposition @default(OPEN)
+  decisionRationale        String              @default("")
+  decidedBy                String              @default("")
+  decidedAt                DateTime?
   createdAt                DateTime            @default(now())
   updatedAt                DateTime            @updatedAt
 
@@ -1422,6 +1439,7 @@ model CodingRiskAssessment {
   @@unique([reviewId, implementationTaskId])
   @@index([implementationTaskId])
   @@index([riskLevel])
+  @@index([disposition])
 }
 
 model CodingPolicy {
@@ -1565,6 +1583,20 @@ enum SourceControlEvidenceType {
   CI_CHECK
   HUMAN_REVIEW
   PULL_REQUEST_MERGED
+  REMOTE_BRANCH_ABSENT
+}
+
+enum CiState {
+  PASSED
+  FAILED
+  PENDING
+  NOT_CONFIGURED
+  UNKNOWN
+}
+
+enum CiRequirement {
+  REQUIRED
+  EXCEPTION
 }
 
 enum SourceControlEvidenceSource {
@@ -1603,6 +1635,7 @@ enum ExecutionPlanStatus {
   EXECUTING
   COMPLETED
   ESCALATED
+  CHANGES_REQUESTED
 }
 
 enum CodingEscalationType {
@@ -1676,6 +1709,7 @@ model Repository {
   verificationWorkspaces VerificationWorkspace[]
   publishedChanges PublishedChange[]
   pullRequests PullRequestRecord[]
+  remoteMainBootstraps RemoteMainBootstrap[]
 
   @@unique([productId])
   @@index([status])
@@ -1761,7 +1795,14 @@ model CodingExecutionPlan {
   steps                Json                @default("[]")
   risks                String              @default("")
   validationPlan       String              @default("")
+  setupCommands        Json                @default("[]")
+  validationCommands   Json                @default("[]")
   status               ExecutionPlanStatus @default(PROPOSED)
+  version              Int                 @default(1)
+  approvedBy           String              @default("")
+  approvedAt           DateTime?
+  changeRequest        String              @default("")
+  history              Json                @default("[]")
   createdAt            DateTime            @default(now())
   updatedAt            DateTime            @updatedAt
 
@@ -1794,6 +1835,7 @@ model CodingEvidence {
   description          String              @default("")
   result               String              @default("")
   command              String              @default("")
+  output               String              @default("")
   exitCode             Int?
   startedAt            DateTime?
   completedAt          DateTime?
@@ -1933,6 +1975,7 @@ enum VerificationExecutionStatus {
 enum VerificationExecutionKind {
   NEW_VERIFICATION
   EXISTING_REGRESSION
+  PLAN_CHECK
 }
 
 enum VerificationEvidenceType {
@@ -1973,6 +2016,7 @@ model VerificationSession {
   overallVerdict        VerificationVerdict?
   proposedVerdict       String                     @default("")
   verdictReason         String                     @default("")
+  failureClass          String                     @default("")
   existingTestNotes     String                     @default("")
   aiSummary             String                     @default("")
   stale                 Boolean                    @default(false)
@@ -2018,6 +2062,9 @@ model VerificationContract {
   commitSha                String   @default("")
   changedFiles             Json     @default("[]")
   requiredAreas            Json     @default("[]")
+  obligations              Json     @default("[]")
+  definitionConcerns       Json     @default("[]")
+  planVersion              Int      @default(0)
   sourceFingerprint        String   @default("")
   stale                    Boolean  @default(false)
   createdAt                DateTime @default(now())
@@ -2240,6 +2287,12 @@ model SourceControlConnection {
   defaultBranch         String                        @default("")
   remoteName            String                        @default("origin")
   installationId        String                        @default("")
+  authMode              String                        @default("")
+  login                 String                        @default("")
+  appId                 String                        @default("")
+  encryptedCredential   String                        @default("")
+  encryptionIv          String                        @default("")
+  authTag               String                        @default("")
   status                SourceControlConnectionStatus @default(UNAVAILABLE)
   message               String                        @default("")
   minimumHumanApprovals Int                           @default(1)
@@ -2278,6 +2331,36 @@ model PublishedChange {
   @@index([status])
 }
 
+model RemoteMainBootstrap {
+  id           String   @id @default(cuid())
+  productId    String
+  repositoryId String
+  repository   String
+  branch       String
+  baselineSha  String
+  remoteSha    String
+  actor        String
+  createdAt    DateTime @default(now())
+
+  product          Product    @relation(fields: [productId], references: [id], onDelete: Cascade)
+  repositoryRecord Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  @@index([productId, createdAt])
+  @@index([repositoryId])
+}
+
+model CiRequirementDecision {
+  id          String        @id @default(cuid())
+  productId   String        @unique
+  requirement CiRequirement
+  rationale   String
+  actor       String
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+}
+
 model PullRequestRecord {
   id                   String           @id @default(cuid())
   productId            String
@@ -2296,6 +2379,11 @@ model PullRequestRecord {
   mergeCommitSha       String           @default("")
   mergedAt             DateTime?
   mergedBy             String           @default("")
+  mergeable            Boolean?
+  mergeableState       String           @default("")
+  ciState              CiState          @default(UNKNOWN)
+  ciDetail             String           @default("")
+  protectionAccess     String           @default("")
   protection           Json             @default("{}")
   demo                 Boolean          @default(false)
   createdAt            DateTime         @default(now())
@@ -2340,6 +2428,7 @@ model PullRequestReview {
   providerReviewId    String                 @default("")
   reviewer            String                 @default("")
   state               PullRequestReviewState @default(UNKNOWN)
+  commitSha           String                 @default("")
   body                String                 @default("")
   submittedAt         DateTime?
   createdAt           DateTime               @default(now())
@@ -2589,6 +2678,8 @@ model ReleaseCandidate {
   releaseNotesStatus   ReleaseNotesStatus     @default(DRAFT)
   releaseNotesApprovedBy String               @default("")
   demo                 Boolean                @default(false)
+  reviewRequired       Boolean                @default(false)
+  reviewReason         String                 @default("")
   createdBy            String                 @default("")
   createdAt            DateTime               @default(now())
   updatedAt            DateTime               @updatedAt
@@ -3016,6 +3107,14 @@ enum IntakeQuestionStatus {
   DISMISSED
 }
 
+enum ClarificationKind {
+  INTAKE
+  REQUIREMENT
+  ARCHITECTURE
+  GOVERNANCE
+  RELEASE
+}
+
 enum IntakeAnalysisStatus {
   CURRENT
   STALE
@@ -3204,6 +3303,23 @@ model IntakeQuestionLink {
 
   @@unique([questionId, sourceRequirementId])
   @@index([sourceRequirementId])
+}
+
+model ClarificationAnswerRevision {
+  id         String            @id @default(cuid())
+  productId  String
+  kind       ClarificationKind
+  questionId String
+  question   String
+  answer     String
+  changedBy  String
+  material   Boolean           @default(false)
+  createdAt  DateTime          @default(now())
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId, createdAt])
+  @@index([questionId, createdAt])
 }
 
 model AiSelection {

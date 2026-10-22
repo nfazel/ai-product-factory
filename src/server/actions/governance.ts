@@ -2,6 +2,7 @@
 
 import { invalidState, type ActionState } from "@/lib/action-state";
 import {
+  acceptCodingRisk,
   acceptEntireGovernanceProposal,
   answerGovernanceQuestion,
   approveCodingPolicy,
@@ -11,12 +12,19 @@ import {
   generateGovernanceReview,
   markGovernanceReady,
   overrideCodingRisk,
+  resolveCodingRisk,
   regenerateGovernanceSection,
   updateCodingPolicy,
   updateGovernanceFinding,
 } from "@/modules/governance/service";
 import {
+  acceptCodingRiskConfirmation,
+  overrideConfirmation,
+  resolveCodingRiskConfirmation,
+} from "@/modules/governance/coding-risk-decision";
+import {
   codingPolicySchema,
+  codingRiskDecisionSchema,
   codingRiskOverrideSchema,
   findingCommentSchema,
   findingUpdateSchema,
@@ -160,8 +168,36 @@ export async function overrideCodingRiskAction(
   const parsed = codingRiskOverrideSchema.safeParse(formValues(formData));
   if (!parsed.success) return invalidState(parsed.error.issues);
   try {
-    await overrideCodingRisk(parsed.data);
-    return done(parsed.data.productId, "The coding-risk recommendation was overridden.");
+    const updated = await overrideCodingRisk(parsed.data);
+    return done(parsed.data.productId, overrideConfirmation(updated.disposition));
+  } catch (error) {
+    return actionFailure(error);
+  }
+}
+
+export async function acceptCodingRiskAction(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const parsed = codingRiskDecisionSchema.safeParse(formValues(formData));
+  if (!parsed.success) return invalidState(parsed.error.issues);
+  try {
+    const updated = await acceptCodingRisk(parsed.data);
+    return done(parsed.data.productId, acceptCodingRiskConfirmation(updated));
+  } catch (error) {
+    return actionFailure(error);
+  }
+}
+
+export async function resolveCodingRiskAction(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const parsed = codingRiskDecisionSchema.safeParse(formValues(formData));
+  if (!parsed.success) return invalidState(parsed.error.issues);
+  try {
+    await resolveCodingRisk(parsed.data);
+    return done(parsed.data.productId, resolveCodingRiskConfirmation());
   } catch (error) {
     return actionFailure(error);
   }

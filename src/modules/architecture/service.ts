@@ -490,24 +490,17 @@ export async function answerArchitectureQuestion(input: {
   questionId: string;
   answer: string;
 }) {
-  const question = await db.architectureQuestion.findFirst({
+  const { saveClarificationAnswer } = await import("@/modules/clarification/service");
+  await saveClarificationAnswer({
+    productId: input.productId,
+    kind: "ARCHITECTURE",
+    questionId: input.questionId,
+    answer: input.answer,
+  });
+  const updated = await db.architectureQuestion.findFirst({
     where: { id: input.questionId, productId: input.productId },
   });
-  if (!question) throw new DomainError("Architecture question not found.", "NOT_FOUND");
-  const updated = await db.architectureQuestion.update({
-    where: { id: question.id },
-    data: {
-      answer: input.answer,
-      status: "ANSWERED",
-      answeredBy: getCurrentActor().name,
-      resolvedAt: new Date(),
-    },
-  });
-  await recordActivity({
-    productId: input.productId,
-    type: "ARCHITECTURE_QUESTION_ANSWERED",
-    description: "Answered an architecture question.",
-  });
+  if (!updated) throw new DomainError("Architecture question not found.", "NOT_FOUND");
   return updated;
 }
 

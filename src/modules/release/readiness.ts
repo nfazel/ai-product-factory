@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 
+import { currentChecks } from "@/modules/source-control/ci-state";
 import { redactSecrets } from "@/modules/source-control/redact";
 
 export const OPERATIONAL_AREAS = [
@@ -45,7 +46,7 @@ export type ReleasePullFact = {
   mergedBy: string;
   mergedAt: string | null;
   requiredChecks: string[] | null;
-  checks: { name: string; status: string; conclusion: string }[];
+  checks: { name: string; status: string; conclusion: string; startedAt?: string | null; completedAt?: string | null; headSha?: string }[];
   reviews: { reviewer: string; state: string }[];
 };
 
@@ -291,14 +292,15 @@ export function ciProblem(facts: ReleaseFacts) {
     const pull = task.pull;
     if (!pull || pull.demo) return "CI evidence is missing.";
     if (pull.checks.length === 0) return `CI evidence is missing for pull request #${pull.number}.`;
-    for (const check of pull.checks) {
+    const applicable = currentChecks(pull.checks, pull.headSha);
+    for (const check of applicable) {
       if (FAILED_CHECKS.has(check.conclusion)) return `GitHub check ${check.name} did not succeed.`;
       if (check.status !== "COMPLETED" || check.conclusion === "UNKNOWN") return `CI status for ${check.name} is unknown.`;
     }
     if (pull.requiredChecks) {
       for (const name of pull.requiredChecks) {
-        const check = pull.checks.find((item) => item.name === name);
-        if (!check || check.status !== "COMPLETED" || check.conclusion !== "SUCCESS") {
+        const matching = applicable.filter((item) => item.name === name);
+        if (matching.length === 0 || matching.some((item) => item.status !== "COMPLETED" || item.conclusion !== "SUCCESS")) {
           return `Required check ${name} did not succeed.`;
         }
       }

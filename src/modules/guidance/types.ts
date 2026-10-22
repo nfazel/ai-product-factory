@@ -1,4 +1,5 @@
 import type { ProductStage } from "@/domain/constants";
+import type { ClarificationNextReview } from "@/modules/clarification/materiality";
 
 export const STAGE_PROGRESS = [
   "NOT_STARTED",
@@ -29,9 +30,22 @@ export type TaskSnapshot = {
   contractStale: boolean;
   codeApproval: "NONE" | "CURRENT" | "STALE";
   workspace: "NONE" | "OPEN" | "DONE";
+  executionPlan: "NONE" | "PROPOSED" | "APPROVED" | "EXECUTING" | "COMPLETED" | "ESCALATED" | "CHANGES_REQUESTED";
+  codingRun: "NONE" | "READY" | "RUNNING" | "WAITING" | "FAILED" | "COMPLETED";
+  contractBlocked: boolean;
+  providerBlocked: boolean;
+  repairAvailable: boolean;
+  persistenceRecovery: boolean;
+  planIncomplete: boolean;
+  implementationIncomplete: boolean;
+  outOfScope: boolean;
+  revisedPlanReady: boolean;
   published: boolean;
+  /** MISSING means the remote base branch has not been created. READY leaves the existing pull request action unchanged. */
+  remoteMain?: "READY" | "MISSING" | "OTHER_DEFAULT";
   pullRequest: "NONE" | "OPEN" | "MERGED" | "DEMO";
-  verification: "NONE" | "AWAITING" | "APPROVED" | "STALE" | "DEMO";
+  pullRequestNext?: { key: string; label: string; why: string };
+  verification: "NONE" | "RUNNING" | "RETRYABLE" | "REVIEW" | "AWAITING" | "FAILED" | "APPROVED" | "STALE" | "DEMO";
   updatedAt: string | null;
 };
 
@@ -44,6 +58,11 @@ export type GuidanceSnapshot = {
   requirementsChanged: boolean;
   developmentContext: "UNSET" | "GREENFIELD" | "EXISTING_SYSTEM";
   codebaseCaptured: boolean;
+  repositoryReady: boolean;
+  githubAccountConnected: boolean;
+  productRepositoryMapped: boolean;
+  githubConnected: boolean;
+  clarificationReview: ClarificationNextReview | null;
   intake: {
     activeSources: number;
     extractionFailed: boolean;
@@ -62,6 +81,7 @@ export type GuidanceSnapshot = {
     readyForReview: boolean;
     openQuestions: number;
     demo: boolean;
+    needsReview: boolean;
     updatedAt: string | null;
   };
   definition: {
@@ -74,6 +94,7 @@ export type GuidanceSnapshot = {
     slice: "NONE" | "PROPOSED" | "APPROVED";
     openQuestions: number;
     demo: boolean;
+    needsReview: boolean;
     updatedAt: string | null;
     outcome: {
       title: string;
@@ -149,6 +170,9 @@ export type NextAction = {
   stage: ProductStage;
   decision: boolean;
   waitingSince: string | null;
+  /** Task this action applies to, when the workflow needs one. */
+  subjectId: string | null;
+  execution: "navigate" | "command" | "confirm";
 };
 
 export type BlockerView = {

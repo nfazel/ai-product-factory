@@ -6,21 +6,24 @@ The pipeline stays Explore, Define, Build, Prove, Ship, Learn. Publishing a bran
 
 ## Authentication
 
-Production should use a GitHub App:
+GitHub authentication belongs to AI Product Builder. Settings stores either a GitHub App (preferred) or a fine-grained personal access token. The credential is encrypted with `AI_CREDENTIAL_ENCRYPTION_KEY`, the same key used for AI provider credentials. After it is saved, the browser receives a masked value, not the credential.
+
+A person validates the connection from Settings. Validation records the GitHub login. Saving a credential does not call GitHub, and neither saving nor validation creates a repository, pushes, or merges.
+
+Environment variables remain an optional server fallback:
 
 - `GITHUB_APP_ID`
 - `GITHUB_APP_INSTALLATION_ID`
 - `GITHUB_APP_PRIVATE_KEY`
+- `GITHUB_TOKEN`
 - `GITHUB_OWNER`
 - `GITHUB_REPOSITORY`
 
-The app installation token is minted on the server and is not stored. For local development, a personal access token in `GITHUB_TOKEN` is enough, together with the owner and repository name.
+A GitHub App configured in the environment is used before a token saved in Settings. The app installation token is minted on the server and is not stored. The presence of an environment variable is not treated as a connection until validation succeeds.
 
 `GITHUB_MINIMUM_HUMAN_APPROVALS` defaults to 1. `GITHUB_SERVICE_ACCOUNT` names a login that must not count as a human reviewer.
 
-The browser cannot set these values. Settings shows owner, repository, default branch, and connection status. It never shows a token. A connection is **CONNECTED** only after **Validate Connection** succeeds. The presence of an environment variable is not treated as success.
-
-Status is **CONNECTED**, **MISCONFIGURED**, or **UNAVAILABLE**. Authentication failure, rate limit, and GitHub being down are unavailable. A missing repository, a push permission failure, or a local `origin` that does not match `owner/repository` is misconfigured.
+Settings states are Not configured, Saved, Connected, Invalid credentials, and Insufficient permissions. Each state names the next action.
 
 ## Provider
 
@@ -34,7 +37,9 @@ There is no merge method. No agent receives one.
 
 Each product still has one `Repository` row. Provider is `LOCAL` or `GITHUB`. The row stores owner, repository name, URL, default branch, remote name, and an optional installation id. It does not store a token.
 
-The browser cannot point the factory at an arbitrary GitHub repository. Publication uses the owner and repository from the validated connection.
+A person chooses that repository on the product Build page from the GitHub App installation. The list comes from `GET /installation/repositories` using the installation access token, and it is requested again whenever the page loads or the person refreshes it. A personal access token is not used for that list. Associating a repository checks that the installation can access it and can push. The AI Product Builder repository cannot be selected as a product destination. If the remote already contains commits that are not in the local product history, the mapping is kept and publishing will not overwrite that history. Nothing is created, pushed, or merged by the association itself. Before a branch is published, the installation's access to the mapped repository is checked again.
+
+Publication uses the product repository when it is connected. The builder connection supplies the credential, not a single shared repository.
 
 ## Safe publication
 

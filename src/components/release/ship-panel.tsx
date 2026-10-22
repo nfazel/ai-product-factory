@@ -1,6 +1,8 @@
+import { ClarificationAnswer } from "@/components/clarification/answer-card";
+import { ClarificationHold } from "@/components/clarification/keep-version";
+import { loadClarificationPresentation } from "@/modules/clarification/service";
 import {
   AcceptRiskForm,
-  AnswerQuestionForm,
   ApprovePlanButton,
   ApproveReleaseButton,
   AreaForm,
@@ -20,9 +22,9 @@ import type { getShipView } from "@/modules/release/service";
 
 type View = NonNullable<Awaited<ReturnType<typeof getShipView>>>;
 
-function Section({ kicker, title, children }: { kicker: string; title: string; children: React.ReactNode }) {
+function Section({ id, kicker, title, children }: { id?: string; kicker: string; title: string; children: React.ReactNode }) {
   return (
-    <section className="rounded-2xl border bg-card p-5">
+    <section id={id} tabIndex={id ? -1 : undefined} className="scroll-mt-20 rounded-2xl border bg-card p-5 focus:outline-none target:ring-2 target:ring-indigo-500">
       <p className="text-xs font-medium tracking-wide text-indigo-700">{kicker}</p>
       <h2 className="mt-1 text-lg font-semibold">{title}</h2>
       <div className="mt-3 space-y-3 text-sm">{children}</div>
@@ -30,9 +32,21 @@ function Section({ kicker, title, children }: { kicker: string; title: string; c
   );
 }
 
-export function ShipPanel({ productId, view }: { productId: string; view: View }) {
+export async function ShipPanel({ productId, view }: { productId: string; view: View }) {
   const candidate = view.candidate;
   const realCandidate = candidate && !candidate.demo ? candidate : null;
+  const clarification = candidate
+    ? await loadClarificationPresentation(
+        productId,
+        candidate.questions.map((question) => ({
+          id: question.id,
+          kind: "RELEASE" as const,
+          answer: question.answer,
+          answeredAt: question.resolvedAt,
+          releaseCandidateId: question.releaseCandidateId,
+        })),
+      )
+    : {};
   return (
     <div className="space-y-4">
       <Section kicker="RELEASE STATUS" title={candidate ? `${candidate.version} · ${candidate.status}` : "No release candidate"}>
@@ -118,7 +132,7 @@ export function ShipPanel({ productId, view }: { productId: string; view: View }
             </ul>
           </Section>
 
-          <Section kicker="RISK" title={candidate.risk?.overall ?? "Not assessed"}>
+          <Section id="risk" kicker="RISK" title={candidate.risk?.overall ?? "Not assessed"}>
             {candidate.risk?.narrative ? <p className="whitespace-pre-wrap text-muted-foreground">{candidate.risk.narrative}</p> : <p className="text-muted-foreground">No narrative is stored. Deterministic factors still apply.</p>}
             <ul className="space-y-3">
               {candidate.risk?.factors.map((factor) => (
@@ -137,13 +151,24 @@ export function ShipPanel({ productId, view }: { productId: string; view: View }
           </Section>
 
           <Section kicker="QUESTIONS" title="Release questions">
+            {candidate.reviewRequired ? <ClarificationHold productId={productId} target="RELEASE" reason={candidate.reviewReason} /> : null}
             {candidate.questions.length === 0 ? <p className="text-muted-foreground">No release questions.</p> : null}
             {candidate.questions.map((question) => (
               <div key={question.id} className="rounded-xl border p-3">
                 <p className="font-medium">{question.status}{question.blocking ? " · blocking" : ""}</p>
                 <p>{question.question}</p>
-                {question.answer ? <p>Answer: {question.answer} — {question.answeredBy}</p> : null}
-                {realCandidate && question.status === "OPEN" ? <AnswerQuestionForm productId={productId} questionId={question.id} /> : null}
+                <ClarificationAnswer
+                  productId={productId}
+                  kind="RELEASE"
+                  questionId={question.id}
+                  question={question.question}
+                  answer={question.answer}
+                  answeredAt={question.resolvedAt?.toISOString() ?? null}
+                  revisions={clarification[question.id]?.revisions ?? []}
+                  impacts={clarification[question.id]?.impacts ?? []}
+                  editable={Boolean(realCandidate)}
+                  showQuestion={false}
+                />
               </div>
             ))}
             {realCandidate ? <QuestionForm productId={productId} candidateId={candidate.id} /> : null}
@@ -161,7 +186,7 @@ export function ShipPanel({ productId, view }: { productId: string; view: View }
             </ul>
           </Section>
 
-          <Section kicker="DEPLOYMENT PLAN" title={candidate.plan ? `Version ${candidate.plan.version} · ${candidate.plan.status}` : "No plan"}>
+          <Section id="checks" kicker="DEPLOYMENT PLAN" title={candidate.plan ? `Version ${candidate.plan.version} · ${candidate.plan.status}` : "No plan"}>
             {candidate.plan ? (
               <>
                 <p>{candidate.plan.strategy} · {candidate.plan.summary}</p>
@@ -189,7 +214,7 @@ export function ShipPanel({ productId, view }: { productId: string; view: View }
             {realCandidate ? <DeploymentPlanForm productId={productId} candidateId={candidate.id} /> : null}
           </Section>
 
-          <Section kicker="APPROVAL" title={candidate.blockers.length === 0 && !candidate.demo ? "No deterministic release blocker" : "Not ready for release approval"}>
+          <Section id="approval" kicker="APPROVAL" title={candidate.blockers.length === 0 && !candidate.demo ? "No deterministic release blocker" : "Not ready for release approval"}>
             <ul className="list-disc space-y-1 pl-5">
               {candidate.blockers.map((blocker) => (
                 <li key={blocker}>{blocker}</li>
@@ -211,7 +236,7 @@ export function ShipPanel({ productId, view }: { productId: string; view: View }
             {realCandidate ? <NotesForm productId={productId} candidateId={candidate.id} notes={candidate.releaseNotes} /> : null}
           </Section>
 
-          <Section kicker="DEPLOYMENT RECORD" title={candidate.deployments[0]?.status ?? "Not deployed"}>
+          <Section id="deployment" kicker="DEPLOYMENT RECORD" title={candidate.deployments[0]?.status ?? "Not deployed"}>
             {candidate.deployments.length === 0 ? <p>Not deployed. A person deploys outside AI Product Builder and records what happened.</p> : null}
             <ul className="space-y-2">
               {candidate.deployments.map((record) => (

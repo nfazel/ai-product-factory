@@ -1,4 +1,4 @@
-const TOKEN_PATTERN = /ghp_[A-Za-z0-9]+|github_pat_[A-Za-z0-9_]+|gho_[A-Za-z0-9]+/g;
+const TOKEN_PATTERN = /ghp_[A-Za-z0-9]+|github_pat_[A-Za-z0-9_]+|gho_[A-Za-z0-9]+|ghs_[A-Za-z0-9._-]+/g;
 
 export function redactSecrets(value: string) {
   let text = value;

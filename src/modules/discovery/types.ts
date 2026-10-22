@@ -56,6 +56,8 @@ export type ProductBriefRecord = {
   riskClarity: SignalLevel;
   readyForReview: boolean;
   readinessReason: string;
+  reviewRequired?: boolean;
+  reviewReason?: string;
   status: ProductBriefStatus;
   fromRequirements: boolean;
 };

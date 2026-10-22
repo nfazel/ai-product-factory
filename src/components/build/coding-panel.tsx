@@ -1,10 +1,16 @@
 import {
-  ApprovePlanButton,
   ApproveTaskButton,
+  ApprovedCommit,
   ReviewActions,
   StartCodingButton,
   WorkspaceRecovery,
 } from "@/components/build/coding-controls";
+import { CodingProgressPanel } from "@/components/build/coding-progress-panel";
+import { ExecutionPlanReview } from "@/components/build/execution-plan-review";
+import { approvedPlanWindows, codeReviewGuidance, evaluatePlanChecks, type CheckEvidenceInput } from "@/modules/coding/check-identity";
+import { parsePlannedCommands } from "@/modules/coding/commands";
+import { asStrings } from "@/modules/coding/strings";
+import { approvedPlanWasExecuted } from "@/modules/coding/progress";
 import { CODING_EXECUTION_LABEL, CODING_RISK_LABEL, type CodingExecutionModeName, type CodingRiskLevelName } from "@/domain/constants";
 import type { getCodingView } from "@/modules/coding/service";
 
@@ -37,8 +43,8 @@ export function CodingPanel({
       <p className="text-sm leading-6 text-muted-foreground">
         The Coding Agent executes one approved implementation task in an isolated Git worktree. It does not push, merge, or approve its own changes.
         {coding.repositoryConfigured
-          ? " A local repository is configured."
-          : " Set PRODUCT_REPOSITORY_ROOT to a separate Git repository before starting a task."}
+          ? " This product repository is ready."
+          : " This product does not have a repository yet. Set up the product repository before starting Coding."}
       </p>
       {coding.readiness.blockers.length > 0 ? (
         <ul className="list-disc space-y-1 pl-5 text-sm text-amber-950">
@@ -48,6 +54,46 @@ export function CodingPanel({
         </ul>
       ) : null}
       <div className="space-y-4">
+        {coding.tasks.filter((task) => task.workspace?.plan).map((task) => {
+          const latestRun = task.workspace!.implementRuns?.at(-1) ?? null;
+          const planExecuted = approvedPlanWasExecuted(
+            task.workspace!.plan,
+            latestRun ? { startedAt: latestRun.startedAt, input: task.workspace!.agentRun?.input ?? { phase: "implement" } } : null,
+          );
+          return (
+          <ExecutionPlanReview
+            key={task.workspace!.id}
+            productId={productId}
+            workspaceId={task.workspace!.id}
+            workspaceStatus={task.workspace!.status}
+            plan={task.workspace!.plan!}
+            objective={task.workspace!.contract?.objective || task.objective}
+            allowedPaths={asList(task.workspace!.contract?.allowedPaths)}
+            restrictedPaths={asList(task.workspace!.contract?.restrictedPaths)}
+            dependencies={asList(task.workspace!.contract?.dependencies)}
+            architectureConstraints={task.workspace!.contract?.architectureConstraints || "Not recorded at planning time."}
+            maxFiles={task.workspace!.contract?.maxFiles ?? 8}
+            hasCodeChanges={Array.isArray(task.workspace!.diff?.files) && task.workspace!.diff.files.length > 0}
+            planExecuted={planExecuted}
+            contractReady={task.workspace!.contractFlight?.ready ?? true}
+            contractMessage={task.workspace!.contractFlight?.blockers[0]?.message ?? "Execution Plan cannot be approved because a required operation is not permitted by the current coding contract."}
+            revisedPlanReady={Boolean(task.workspace!.revisedPlanReady)}
+            stale={task.workspace!.stale}
+            staleReason={task.workspace!.staleReason}
+            setupCommands={asList(task.workspace!.plan?.setupCommands)}
+            validationCommands={parsePlannedCommands(task.workspace!.plan?.validationCommands)}
+            trace={[
+              ["Outcome", task.trace.outcome],
+              ["Capability", task.trace.capability],
+              ["Epic", task.trace.epic],
+              ["Feature", task.trace.feature],
+              ["Story", task.trace.story],
+              ["Product acceptance criteria", task.trace.acceptanceCriteria.join("; ") || "Not linked"],
+              ["Implementation task", task.trace.task],
+            ]}
+          />
+          );
+        })}
         {coding.tasks.map((task) => (
           <article key={task.id} className="rounded-xl border p-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
@@ -170,17 +216,14 @@ function WorkspaceDetail({
         <Fact label="Head commit" value={workspace.headCommit || "Not committed"} />
         <Fact label="Plan" value={workspace.plan?.status ?? "Not created"} />
       </div>
-      {workspace.plan ? (
-        <div className="text-sm">
-          <p className="font-medium">Execution plan</p>
-          <p className="mt-1 text-muted-foreground">{workspace.plan.summary}</p>
-          <p className="mt-2 text-muted-foreground">Files: {asList(workspace.plan.filesExpectedToChange).join(", ") || "None"}</p>
-          <p className="mt-1 text-muted-foreground">Steps: {asList(workspace.plan.steps).join(" ")}</p>
-        </div>
-      ) : null}
-      {workspace.plan?.status === "PROPOSED" && !workspace.stale ? (
-        <ApprovePlanButton productId={productId} workspaceId={workspace.id} />
-      ) : null}
+      <p className="text-sm text-muted-foreground">Plan {workspace.plan?.status ?? "Not created"} · version {workspace.plan?.version ?? "—"}</p>
+      <CodingProgressPanel
+        productId={productId}
+        workspaceId={workspace.id}
+        workspace={workspace}
+        contractBlocked={Boolean(workspace.contractFlight && !workspace.contractFlight.ready && workspace.plan?.status === "APPROVED")}
+        implementRuns={workspace.implementRuns ?? []}
+      />
       <div>
         <p className="text-sm font-medium">Files changed</p>
         <p className="text-sm text-muted-foreground">
@@ -188,10 +231,16 @@ function WorkspaceDetail({
           {workspace.diff?.truncated ? " Diff truncated." : ""}
         </p>
         <ul className="mt-1 text-sm text-muted-foreground">
-          {files.map((file) => {
+          {files.map((file, index) => {
             const item = file as { path?: string; status?: string; additions?: number; deletions?: number };
+            const identity = `${item.status ?? "changed"}:${item.path ?? "unknown"}`;
+            const identities = files.map((entry) => {
+              const record = entry as { path?: string; status?: string };
+              return `${record.status ?? "changed"}:${record.path ?? "unknown"}`;
+            });
+            const earlier = identities.slice(0, index).filter((value) => value === identity).length;
             return (
-              <li key={`${item.path}-${item.status}`}>
+              <li key={earlier === 0 ? identity : `${identity}:${earlier + 1}`}>
                 {item.status} {item.path} +{item.additions ?? 0} -{item.deletions ?? 0}
               </li>
             );
@@ -201,18 +250,7 @@ function WorkspaceDetail({
           <pre className="mt-2 max-h-80 overflow-auto rounded-lg bg-stone-950 p-3 text-xs text-stone-100">{workspace.diff.patch}</pre>
         ) : null}
       </div>
-      <div>
-        <p className="text-sm font-medium">Checks and evidence</p>
-        <ul className="mt-1 space-y-1 text-sm text-muted-foreground">
-          {workspace.evidence.map((item) => (
-            <li key={item.id}>
-              {item.type} · {item.source} · {item.result}
-              {item.command ? ` · ${item.command}` : ""}
-              {item.exitCode != null ? ` · exit ${item.exitCode}` : ""}
-            </li>
-          ))}
-        </ul>
-      </div>
+      <ChecksAndEvidence workspace={workspace} />
       {workspace.selfReview ? (
         <div className="text-sm">
           <p className="font-medium">Self review</p>
@@ -235,16 +273,46 @@ function WorkspaceDetail({
       <div>
         <p className="text-sm font-medium">Code review</p>
         <p className="text-sm text-muted-foreground">
-          {taskTitle}. Approvals stay on record. A later edit makes a code approval stale. Nothing is merged from this screen.
+          {taskTitle}. {codeReviewGuidance({
+            status: workspace.status,
+            commitOffer: workspace.commitOffer,
+            headCommit: workspace.headCommit,
+            baseCommit: workspace.baseCommit,
+          })}
         </p>
-        {workspace.status === "READY_FOR_REVIEW" ? (
+        {workspace.status === "COMPLETED" && workspace.headCommit && workspace.headCommit !== workspace.baseCommit ? (
           <div className="mt-3">
-            <ReviewActions productId={productId} workspaceId={workspace.id} />
+            <ApprovedCommit productId={productId} workspaceId={workspace.id} reviewed={0} outOfScope={0} committedSha={workspace.headCommit} />
+          </div>
+        ) : null}
+        {workspace.status === "READY_FOR_REVIEW" ? (
+          <div className="mt-3 space-y-3">
+            {workspace.codeReview && !workspace.codeReview.approvable ? (
+              <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-950">{workspace.codeReview.reason}</p>
+            ) : null}
+            {workspace.commitOffer && workspace.codeReview ? (
+              <ApprovedCommit
+                productId={productId}
+                workspaceId={workspace.id}
+                reviewed={workspace.codeReview.approved.length + workspace.codeReview.derived.length}
+                outOfScope={workspace.codeReview.outOfScope.length}
+              />
+            ) : null}
+            <ReviewActions productId={productId} workspaceId={workspace.id} allowApprove={!workspace.commitOffer && workspace.codeReview?.approvable !== false} hideApprove={Boolean(workspace.commitOffer)} />
           </div>
         ) : null}
       </div>
       {workspace.status !== "COMPLETED" && workspace.status !== "ABANDONED" ? (
-        <WorkspaceRecovery productId={productId} workspaceId={workspace.id} stale={workspace.stale} />
+        <div className="space-y-2">
+          <p className="text-sm text-muted-foreground">{workspace.planIncomplete ? "Coding stays closed until the execution plan is revised and the next version is approved. Revising does not start coding." : "Resume starts another implementation pass in this workspace. A failed validation is repaired inside the approved plan. These actions do not approve the code or start verification."}</p>
+        <WorkspaceRecovery
+          productId={productId}
+          workspaceId={workspace.id}
+          stale={workspace.stale}
+          allowRetry={Boolean(workspace.retryOffer)}
+          allowResume={!workspace.planIncomplete && !workspace.repairOffer && !workspace.recordRepairOffer && !workspace.retryOffer && workspace.plan?.status === "APPROVED" && (workspace.status === "FAILED" || workspace.status === "ACTIVE")}
+        />
+        </div>
       ) : null}
     </div>
   );
@@ -264,6 +332,125 @@ function FindingList({ findings }: { findings: unknown }) {
       ))}
     </ul>
   );
+}
+
+export function ChecksAndEvidence({
+  workspace,
+}: {
+  workspace: {
+    status: string;
+    headCommit: string;
+    baseCommit: string;
+    plan: {
+      version: number;
+      status: string;
+      approvedAt: Date | null;
+      history: unknown;
+      setupCommands: unknown;
+      validationCommands: unknown;
+    } | null;
+    evidence: {
+      id: string;
+      type: string;
+      source: string;
+      result: string;
+      command: string;
+      description: string;
+      exitCode: number | null;
+      createdAt: Date;
+      completedAt: Date | null;
+    }[];
+    approvals: { stale: boolean; headCommit: string }[];
+  };
+}) {
+  const evidence = checkEvidence(workspace.evidence);
+  const windows = workspace.plan
+    ? approvedPlanWindows({
+        version: workspace.plan.version,
+        status: workspace.plan.status,
+        approvedAt: workspace.plan.approvedAt,
+        history: workspace.plan.history,
+      })
+    : [];
+  const planVersion = workspace.plan?.version ?? 0;
+  const setup = workspace.plan
+    ? evaluatePlanChecks({
+        planVersion,
+        windows,
+        checks: asStrings(workspace.plan.setupCommands).map((command) => ({ command, applicability: "REQUIRED" })),
+        evidence,
+      }).required
+    : [];
+  const validation = workspace.plan
+    ? evaluatePlanChecks({
+        planVersion,
+        windows,
+        checks: parsePlannedCommands(workspace.plan.validationCommands),
+        evidence,
+      })
+    : { required: [], notApplicable: [] };
+  const approval = workspace.approvals.find((item) => !item.stale);
+  const committed = Boolean(approval && approval.headCommit === workspace.headCommit && workspace.headCommit !== workspace.baseCommit);
+  return (
+    <div>
+      <p className="text-sm font-medium">Current result</p>
+      <p className="text-sm text-muted-foreground">Execution plan v{workspace.plan?.version ?? "—"}.</p>
+      <CheckGroup title="Setup" rows={setup.map((item) => ({ key: item.command, mark: item.passed ? "✓" : "✗", text: item.command }))} />
+      <CheckGroup title="Required checks" rows={validation.required.map((item) => ({ key: item.checkId ?? item.command, mark: item.passed ? "✓" : "✗", text: `${item.label} · ${item.command}` }))} />
+      <CheckGroup title="Not applicable" rows={validation.notApplicable.map((item) => ({ key: item.checkId ?? item.command, mark: "—", text: item.label }))} />
+      <CheckGroup
+        title="Human governance"
+        rows={[
+          { key: "approved", mark: approval ? "✓" : "✗", text: "Code changes approved" },
+          { key: "committed", mark: committed ? "✓" : "✗", text: "Approved snapshot committed" },
+        ]}
+      />
+      <details className="mt-3 text-sm text-muted-foreground">
+        <summary>View full audit history</summary>
+        <ul className="mt-1 space-y-1">
+          {workspace.evidence.map((item) => (
+            <li key={item.id}>
+              {item.type} · {item.source} · {item.result}
+              {item.command ? ` · ${item.command}` : ""}
+              {item.description && item.description !== item.command ? ` · ${item.description}` : ""}
+              {item.exitCode != null ? ` · exit ${item.exitCode}` : ""}
+            </li>
+          ))}
+        </ul>
+      </details>
+    </div>
+  );
+}
+
+function CheckGroup({ title, rows }: { title: string; rows: { key: string; mark: string; text: string }[] }) {
+  if (rows.length === 0) return null;
+  return (
+    <div className="mt-2">
+      <p className="text-sm font-medium">{title}</p>
+      <ul className="mt-1 text-sm text-muted-foreground">
+        {rows.map((row) => (
+          <li key={row.key}>{row.mark} {row.text}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function checkEvidence(evidence: {
+  command: string;
+  description: string;
+  result: string;
+  exitCode: number | null;
+  createdAt: Date;
+  completedAt: Date | null;
+}[]): CheckEvidenceInput[] {
+  return evidence.map((item) => ({
+    command: item.command,
+    description: item.description,
+    result: item.result,
+    exitCode: item.exitCode,
+    at: item.completedAt ?? item.createdAt,
+  }));
 }
 
 function Fact({ label, value }: { label: string; value: string }) {

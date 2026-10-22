@@ -11,6 +11,7 @@ import {
   rejectVerification,
   requestMoreTesting,
   rerunFailedTests,
+  retryVerification,
   startVerification,
 } from "@/modules/verification/service";
 import { actionFailure, formValues, refreshWorkspace } from "@/server/action-helpers";
@@ -30,8 +31,21 @@ export async function startVerificationAction(_prev: ActionState, formData: Form
   if (!parsed.success) return invalidState(parsed.error.issues);
   try {
     await startVerification(parsed.data.productId, parsed.data.taskId);
-    return done(parsed.data.productId, "Verification finished and is ready for a person to review.");
+    return done(parsed.data.productId, "Verification finished. The new attempt is the current session.");
   } catch (error) {
+    refreshWorkspace(parsed.data.productId);
+    return actionFailure(error);
+  }
+}
+
+export async function retryVerificationAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const parsed = ids.safeParse(formValues(formData));
+  if (!parsed.success) return invalidState(parsed.error.issues);
+  try {
+    await retryVerification(parsed.data.productId, parsed.data.taskId);
+    return done(parsed.data.productId, "Independent Verification ran again for the approved commit. The new attempt is the current session. Earlier attempts were kept.");
+  } catch (error) {
+    refreshWorkspace(parsed.data.productId);
     return actionFailure(error);
   }
 }
@@ -121,7 +135,7 @@ export async function integratedAction(_prev: ActionState, formData: FormData): 
   if (!parsed.success) return invalidState(parsed.error.issues);
   try {
     await createIntegratedVerification(parsed.data.productId, parsed.data.sliceId);
-    return done(parsed.data.productId, "Integrated verification plan recorded. End-to-end execution was not claimed.");
+    return done(parsed.data.productId, "Integrated verification plan recorded. Execution has not started, and slice verification remains blocked.");
   } catch (error) {
     return actionFailure(error);
   }

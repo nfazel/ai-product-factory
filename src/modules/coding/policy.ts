@@ -44,8 +44,13 @@ export function toPosix(value: string) {
 }
 
 export function matchGlob(pattern: string, relativePath: string) {
-  const normalized = toPosix(pattern).replace(/^\.\//, "").replace(/\/+$/, "");
+  const raw = toPosix(pattern).replace(/^\.\//, "");
   const target = toPosix(relativePath).replace(/^\.\//, "");
+  if (raw.endsWith("/")) {
+    const prefix = raw.replace(/\/+$/, "");
+    return Boolean(prefix) && (target === prefix || target.startsWith(`${prefix}/`));
+  }
+  const normalized = raw.replace(/\/+$/, "");
   if (!normalized || normalized === "**") return target.length > 0;
   const expression = globToRegExp(normalized);
   if (expression.test(target)) return true;
@@ -129,6 +134,14 @@ export function classifyWrite(relativePath: string, allowed: string[], restricte
   return { ok: true as const, kind: "allowed" as const, reason: "" };
 }
 
+export function filesOutsideContract(files: string[], allowed: string[], restricted: string[]) {
+  return files.filter((file) => !classifyWrite(file, allowed, restricted).ok);
+}
+
+export function outsideApprovedPlan(file: string, expected: string[]) {
+  return expected.length > 0 && !expected.includes(file);
+}
+
 export function classifyRead(relativePath: string, allowed: string[], restricted: string[]) {
   if (isSecretPath(relativePath)) {
     return { ok: false as const, kind: "secret" as const, reason: "Secret files cannot be read or modified." };
@@ -147,7 +160,7 @@ function isInside(root: string, candidate: string) {
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
-export function resolveInside(root: string, requested: string): PathDecision {
+export function resolveInside(root: string, requested: string, options?: { allowMissingParents?: boolean }): PathDecision {
   if (!requested || requested.includes("\0")) {
     return { ok: false, reason: "The path is not permitted." };
   }
@@ -171,15 +184,25 @@ export function resolveInside(root: string, requested: string): PathDecision {
   }
 
   let current = rootReal;
+  const allowMissingParents = options?.allowMissingParents === true;
+  let pending: string[] = [];
   for (let index = 0; index < segments.length; index += 1) {
     const segment = segments[index] ?? "";
     if (segment.includes("\0") || segment === "..") {
       return { ok: false, reason: "Path traversal is not permitted." };
     }
+    if (pending.length > 0) {
+      pending.push(segment);
+      continue;
+    }
     const next = path.join(current, segment);
     if (!fs.existsSync(next)) {
-      if (index !== segments.length - 1) {
+      if (!allowMissingParents && index !== segments.length - 1) {
         return { ok: false, reason: "The directory does not exist inside the workspace." };
+      }
+      if (allowMissingParents && index !== segments.length - 1) {
+        pending = segments.slice(index);
+        break;
       }
       current = next;
       break;
@@ -207,6 +230,18 @@ export function resolveInside(root: string, requested: string): PathDecision {
     }
   }
 
+  if (pending.length > 0) {
+    const absolute = path.resolve(current, ...pending);
+    if (!isInside(rootReal, absolute)) {
+      return { ok: false, reason: "The path is outside the workspace." };
+    }
+    const relative = toPosix(path.relative(rootReal, absolute));
+    if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
+      return { ok: false, reason: "The path is outside the workspace." };
+    }
+    return { ok: true, absolute, relative };
+  }
+
   const parent = fs.existsSync(current) ? path.dirname(fs.realpathSync(current)) : path.dirname(current);
   let parentReal: string;
   try {
@@ -228,7 +263,29 @@ export function resolveInside(root: string, requested: string): PathDecision {
   return { ok: true, absolute: finalPath, relative };
 }
 
-export function approveCommand(raw: string, policyCommands: string[]) {
+export function ensureParentDirectory(root: string, relativePath: string, allowed: string[], restricted: string[]) {
+  const normalised = toPosix(relativePath).replace(/^\.\//, "");
+  const decision = classifyWrite(normalised, allowed, restricted);
+  if (!decision.ok) return { ok: false as const, reason: decision.reason, kind: decision.kind };
+  const located = resolveInside(root, normalised, { allowMissingParents: true });
+  if (!located.ok) return { ok: false as const, reason: located.reason, kind: "scope" as const };
+  const parent = path.dirname(located.absolute);
+  fs.mkdirSync(parent, { recursive: true });
+  let parentReal: string;
+  let rootReal: string;
+  try {
+    parentReal = fs.realpathSync(parent);
+    rootReal = fs.realpathSync(root);
+  } catch {
+    return { ok: false as const, reason: "The path is outside the workspace.", kind: "restricted" as const };
+  }
+  if (!isInside(rootReal, parentReal) || !fs.statSync(parentReal).isDirectory()) {
+    return { ok: false as const, reason: "The path is outside the workspace.", kind: "restricted" as const };
+  }
+  return { ok: true as const, absolute: located.absolute, relative: located.relative };
+}
+
+export function approveCommand(raw: string, authorisedCommands: string[]) {
   const trimmed = raw.trim().replace(/\s+/g, " ");
   if (!trimmed) return { ok: false as const, reason: "An empty command is not permitted." };
   if (/[;&|`$<>\\\n\r]/.test(trimmed) || trimmed.includes("$(")) {
@@ -252,9 +309,13 @@ export function approveCommand(raw: string, policyCommands: string[]) {
   if (argv.some((token) => token.startsWith("-") || !/^[A-Za-z0-9._:@/=+]+$/.test(token))) {
     return { ok: false as const, reason: "That command is not permitted." };
   }
-  const extras = policyCommands.map((command) => command.trim().replace(/\s+/g, " ")).filter(Boolean);
-  if (!BASE_COMMANDS.includes(trimmed as (typeof BASE_COMMANDS)[number]) && !extras.includes(trimmed)) {
-    return { ok: false as const, reason: "That command is not an approved check." };
+  const authorised = authorisedCommands.map((command) => command.trim().replace(/\s+/g, " ")).filter(Boolean);
+  if (!authorised.includes(trimmed)) {
+    return { ok: false as const, reason: "That command is not in the approved execution contract." };
+  }
+  const catalog = new Set<string>([...BASE_COMMANDS, "npm install", "npx prisma generate", "npx prisma validate"]);
+  if (!catalog.has(trimmed)) {
+    return { ok: false as const, reason: "That command is not permitted." };
   }
   return { ok: true as const, argv, command: trimmed };
 }

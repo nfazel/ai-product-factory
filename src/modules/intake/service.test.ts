@@ -345,7 +345,8 @@ describe("requirement extraction", () => {
     expect(rows.find((row) => row.identifier === "R-01")?.pageNumber).toBeNull();
     expect(seen.request?.systemPrompt).toContain("untrusted_requirements");
     expect(seen.request?.messages[0]?.content).toContain("<untrusted_requirements");
-    expect(JSON.stringify(seen.request)).not.toContain(process.env.OPENAI_API_KEY ?? "sk-live");
+    const openAiKey = process.env.OPENAI_API_KEY?.trim() || "sk-live";
+    expect(JSON.stringify(seen.request)).not.toContain(openAiKey);
     const run = await db.agentRun.findFirst({ where: { productId: product.id, agentType: "REQUIREMENTS" } });
     expect(run?.status).toBe("COMPLETED");
     expect(run?.output).toMatchObject({

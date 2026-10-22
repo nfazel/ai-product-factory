@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { CodingExecutionModeName, CodingRiskLevelName, FindingStatusName, GovernanceSection } from "@/domain/constants";
+import { codingRiskDecisionError, codingRiskStillBlocks } from "@/modules/governance/coding-risk-decision";
 import { AGENT_CATALOG } from "@/domain/constants";
 import { recordActivity } from "@/modules/activity/service";
 import { executeAgent } from "@/modules/agent/service";
@@ -289,12 +290,19 @@ export async function overrideCodingRisk(input: {
   if (!rationale) {
     throw new DomainError("A rationale is required to override an AI coding risk.");
   }
+  if (rationale.length < 12) {
+    throw new DomainError("A rationale is required to override an AI coding risk.");
+  }
   const assessment = await db.codingRiskAssessment.findFirst({
     where: { id: input.assessmentId, review: { productId: input.productId } },
-    include: { task: true },
+    include: { task: true, review: { select: { id: true, version: true, solutionArchitectureId: true } } },
   });
   if (!assessment) throw new DomainError("Coding risk assessment not found.", "NOT_FOUND");
   const actor = getCurrentActor().name;
+  const architecture = await db.solutionArchitecture.findUnique({
+    where: { id: assessment.review.solutionArchitectureId },
+    select: { version: true },
+  });
   const updated = await db.codingRiskAssessment.update({
     where: { id: assessment.id },
     data: {
@@ -305,10 +313,74 @@ export async function overrideCodingRisk(input: {
       overriddenAt: new Date(),
     },
   });
+  const description = `${actor} overrode the coding recommendation for "${assessment.task.title}" to ${input.riskLevel} / ${input.executionMode}. Governance review v${assessment.review.version}. Design v${architecture?.version ?? "unknown"}. The risk remains ${updated.disposition}. ${rationale}`;
+  await db.governanceEvidence.create({
+    data: {
+      reviewId: assessment.reviewId,
+      type: "HUMAN_CONFIRMATION",
+      source: actor,
+      description,
+      result: rationale,
+    },
+  });
   await recordActivity({
     productId: input.productId,
     type: "CODING_RISK_OVERRIDDEN",
-    description: `${actor} overrode the coding risk for "${assessment.task.title}" to ${input.riskLevel} / ${input.executionMode}. ${rationale}`,
+    description,
+    actor,
+  });
+  return updated;
+}
+
+export async function acceptCodingRisk(input: { productId: string; assessmentId: string; rationale: string }) {
+  return decideCodingRisk(input, "RISK_ACCEPTED");
+}
+
+export async function resolveCodingRisk(input: { productId: string; assessmentId: string; rationale: string }) {
+  return decideCodingRisk(input, "RESOLVED");
+}
+
+async function decideCodingRisk(
+  input: { productId: string; assessmentId: string; rationale: string },
+  disposition: "RISK_ACCEPTED" | "RESOLVED",
+) {
+  const assessment = await db.codingRiskAssessment.findFirst({
+    where: { id: input.assessmentId, review: { productId: input.productId } },
+    include: { task: true, review: { select: { version: true, solutionArchitectureId: true } } },
+  });
+  if (!assessment) throw new DomainError("Coding risk assessment not found.", "NOT_FOUND");
+  const rationale = input.rationale.trim();
+  const rejected = codingRiskDecisionError(assessment.disposition, rationale);
+  if (rejected) throw new DomainError(rejected);
+  const actor = getCurrentActor().name;
+  const architecture = await db.solutionArchitecture.findUnique({
+    where: { id: assessment.review.solutionArchitectureId },
+    select: { version: true },
+  });
+  const updated = await db.codingRiskAssessment.update({
+    where: { id: assessment.id },
+    data: {
+      disposition,
+      decisionRationale: rationale,
+      decidedBy: actor,
+      decidedAt: new Date(),
+    },
+  });
+  const verb = disposition === "RESOLVED" ? "resolved" : "accepted the residual risk for";
+  const description = `${actor} ${verb} coding risk "${assessment.task.title}". Governance review v${assessment.review.version}. Design v${architecture?.version ?? "unknown"}. ${rationale}`;
+  await db.governanceEvidence.create({
+    data: {
+      reviewId: assessment.reviewId,
+      type: "HUMAN_CONFIRMATION",
+      source: actor,
+      description,
+      result: rationale,
+    },
+  });
+  await recordActivity({
+    productId: input.productId,
+    type: disposition === "RESOLVED" ? "CODING_RISK_RESOLVED" : "CODING_RISK_ACCEPTED",
+    description,
     actor,
   });
   return updated;
@@ -391,27 +463,17 @@ export async function answerGovernanceQuestion(input: {
   questionId: string;
   answer: string;
 }) {
-  const question = await db.governanceQuestion.findFirst({
+  const { saveClarificationAnswer } = await import("@/modules/clarification/service");
+  await saveClarificationAnswer({
+    productId: input.productId,
+    kind: "GOVERNANCE",
+    questionId: input.questionId,
+    answer: input.answer,
+  });
+  const updated = await db.governanceQuestion.findFirst({
     where: { id: input.questionId, review: { productId: input.productId } },
   });
-  if (!question) throw new DomainError("Governance question not found.", "NOT_FOUND");
-  const actor = getCurrentActor().name;
-  const updated = await db.governanceQuestion.update({
-    where: { id: question.id },
-    data: {
-      answer: input.answer,
-      status: "ANSWERED",
-      answeredBy: actor,
-      resolvedAt: new Date(),
-      humanLocked: true,
-    },
-  });
-  await recordActivity({
-    productId: input.productId,
-    type: "GOVERNANCE_QUESTION_ANSWERED",
-    description: "Answered a governance question.",
-    actor,
-  });
+  if (!updated) throw new DomainError("Governance question not found.", "NOT_FOUND");
   return updated;
 }
 
@@ -426,11 +488,7 @@ export async function getGovernanceWorkspace(productId: string) {
       include: { tasks: { select: { id: true } } },
     }),
   ]);
-  const unresolvedProhibited =
-    review?.codingRisks.filter((risk) => {
-      const level = risk.overrideRiskLevel ?? risk.riskLevel;
-      return level === "PROHIBITED" && risk.overriddenBy.trim().length === 0;
-    }).length ?? 0;
+  const unresolvedProhibited = review?.codingRisks.filter((risk) => codingRiskStillBlocks(risk)).length ?? 0;
   const readiness = assessGovernanceReadiness({
     securityAssessment: review?.securityAssessment ?? "",
     privacyAssessment: review?.privacyAssessment ?? "",

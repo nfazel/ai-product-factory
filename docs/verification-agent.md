@@ -30,12 +30,13 @@ Verification starts only when all of these are true:
 
 - the implementation task status is `COMPLETED`
 - a human `CODE_CHANGE` approval exists and is not stale
-- the coding workspace has a 40-character commit SHA
+- that approval records the local commit created from the approved snapshot, and the coding workspace head is that same commit
+- the commit exists in the product repository and is not merely the baseline while reviewed files remain uncommitted
 - that repository workspace still exists
 - the coding execution contract is not stale
-- every required coding check has evidence with result `PASS` and exit code 0
+- every check the approved execution plan marks required has a `PASS` with exit code 0 for that plan version. A check the plan marks not applicable does not need a pass, and evidence from another plan version does not satisfy the current plan.
 
-An empty required-check list fails closed. If any condition fails, the page lists every blocker and no `AgentRun` is created. A missing model key or a missing `PRODUCT_REPOSITORY_ROOT` also stops before a run.
+An approved plan with no required checks fails closed. If any condition fails, the page lists every blocker and no `AgentRun` is created. A missing model key or a product with no repository also stops before a run.
 
 The agent is the existing `TESTING` type, registered on the same `AgentRunner` and `AIProvider` as the other agents. On `/agents` it is **CONFIGURED** only when the model is configured and a repository is configured. The control centre shows runs, completed runs, failed runs, blocked sessions, and average duration from stored rows. Blocked is the count of non-demo verification sessions in status `BLOCKED`.
 

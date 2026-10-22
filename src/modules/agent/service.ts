@@ -1,7 +1,6 @@
 import "server-only";
 
 import { AGENT_CATALOG, AGENT_TYPES } from "@/domain/constants";
-import { codingConfigurationGap } from "@/modules/coding/config";
 import { describeAIConfiguration } from "@/modules/ai/config";
 import { aiNotConfiguredMessage, safeErrorMessage } from "@/modules/ai/errors";
 import { AIFailure, validationActivity } from "@/modules/ai/failures";
@@ -40,13 +39,9 @@ export class AgentNotConfiguredError extends DomainError {
             : agentType === "SECURITY"
               ? aiNotConfiguredMessage("engineering governance", "No governance review was generated.")
               : agentType === "CODING"
-                ? codingConfigurationGap() === "repository"
-                  ? "The Coding Agent is not configured. Set PRODUCT_REPOSITORY_ROOT to a Git repository that is not this application. No code was changed."
-                  : aiNotConfiguredMessage("coding", "No code was changed.")
+                ? aiNotConfiguredMessage("coding", "No code was changed.")
                 : agentType === "TESTING"
-                  ? codingConfigurationGap() === "repository"
-                    ? "The Testing & Verification Agent is not configured. Set PRODUCT_REPOSITORY_ROOT to a Git repository that is not this application. No verification was started."
-                    : aiNotConfiguredMessage("verification", "No verification was started.")
+                  ? aiNotConfiguredMessage("verification", "No verification was started.")
                 : aiNotConfiguredMessage(agentType, "Nothing was generated."),
       "INVALID",
     );

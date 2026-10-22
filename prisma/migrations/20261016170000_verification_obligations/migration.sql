@@ -1,0 +1,3 @@
+ALTER TABLE "VerificationContract" ADD COLUMN IF NOT EXISTS "obligations" JSONB NOT NULL DEFAULT '[]';
+ALTER TABLE "VerificationContract" ADD COLUMN IF NOT EXISTS "definitionConcerns" JSONB NOT NULL DEFAULT '[]';
+ALTER TABLE "VerificationContract" ADD COLUMN IF NOT EXISTS "planVersion" INTEGER NOT NULL DEFAULT 0;

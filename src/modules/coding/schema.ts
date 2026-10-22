@@ -78,6 +78,24 @@ export const selfReviewSchema = z
   })
   .strict();
 
+export const repairRequestSchema = z
+  .object({
+    summary: z.string().trim().min(1).max(2000),
+    operations: z
+      .array(
+        z
+          .object({
+            action: z.enum(["CREATE_FILE", "WRITE_FILE", "DELETE_FILE"]),
+            path: z.string().trim().min(1).max(240),
+            content: z.string().max(80_000),
+          })
+          .strict(),
+      )
+      .max(30),
+    escalation: escalationSchema.nullable(),
+  })
+  .strict();
+
 export const completionAssessmentSchema = z
   .object({
     proposal: z.enum(COMPLETION_PROPOSALS),
@@ -90,3 +108,4 @@ export type ExecutionPlanDraft = z.infer<typeof executionPlanSchema>;
 export type ChangeRequest = z.infer<typeof changeRequestSchema>;
 export type SelfReviewDraft = z.infer<typeof selfReviewSchema>;
 export type CompletionAssessment = z.infer<typeof completionAssessmentSchema>;
+export type RepairRequest = z.infer<typeof repairRequestSchema>;

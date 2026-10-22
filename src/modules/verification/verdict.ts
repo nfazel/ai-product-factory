@@ -1,3 +1,5 @@
+import type { VerificationObligation } from "@/modules/verification/obligations";
+
 export const VERIFICATION_AREAS = [
   "Acceptance criteria",
   "Functional behaviour",
@@ -15,58 +17,103 @@ export type VerdictInput = {
   executions: { kind: string; status: string }[];
   defects: { severity: string; status: string }[];
   blockingEscalation: boolean;
+  obligations?: VerificationObligation[];
 };
 
 export function decideVerdict(input: VerdictInput): { verdict: VerdictName; reason: string } {
+  return judgeObligations({
+    obligations: input.obligations ?? obligationsFromEvidence(input),
+    defects: input.defects,
+    blockingEscalation: input.blockingEscalation,
+  });
+}
+
+export function judgeObligations(input: {
+  obligations: VerificationObligation[];
+  defects: { severity: string; status: string }[];
+  blockingEscalation: boolean;
+}): { verdict: VerdictName; reason: string } {
   const openDefects = input.defects.filter((item) => item.status !== "DONE");
   const high = openDefects.some((item) => item.severity === "CRITICAL" || item.severity === "HIGH");
   const lowConcern = openDefects.some((item) => item.severity === "LOW" || item.severity === "MEDIUM");
-  const failedCriterion = input.coverages.some((item) => item.status === "FAILED");
-  const requiredFailed = input.executions.some(
-    (item) => item.kind === "NEW_VERIFICATION" && item.status === "FAILED",
-  );
-  const regressionFailed = input.executions.some(
-    (item) => item.kind === "EXISTING_REGRESSION" && item.status === "FAILED",
-  );
-  const regressionPassed = input.executions.some(
-    (item) => item.kind === "EXISTING_REGRESSION" && item.status === "PASSED",
-  );
-  const accounted = input.coverages.every(
-    (item) => item.status === "VERIFIED" || (item.status === "NOT_APPLICABLE" && item.humanConfirmed),
-  );
-  const anyVerified = input.coverages.some((item) => item.status === "VERIFIED");
-
-  if (input.coverages.length === 0) {
-    return { verdict: "INCONCLUSIVE", reason: "No acceptance criteria were available to verify." };
+  const functional = input.obligations.filter((item) => item.kind === "FUNCTIONAL_ACCEPTANCE");
+  const mandatory = input.obligations.filter((item) => item.mandatory && item.status !== "NOT_APPLICABLE");
+  if (functional.length > 0 && functional.every((item) => item.status === "NOT_APPLICABLE")) {
+    return { verdict: "INCONCLUSIVE", reason: "Functional acceptance criteria were marked not applicable. That is not a pass." };
   }
-  if (failedCriterion || requiredFailed || regressionFailed || high || input.blockingEscalation) {
+  if (mandatory.length === 0) {
+    return { verdict: "INCONCLUSIVE", reason: "No approved verification obligations apply to this task." };
+  }
+  const failed = mandatory.filter((item) => item.status === "FAILED");
+  if (failed.length > 0 || high || input.blockingEscalation) {
     return {
       verdict: "FAIL",
       reason: high
         ? "A critical or high defect is unresolved."
-        : regressionFailed
-          ? "Existing regression tests failed."
-          : "A required verification test or acceptance criterion failed.",
+        : input.blockingEscalation
+          ? "Verification is blocked by an unresolved escalation."
+          : `An approved obligation failed: ${failed[0]?.title ?? "a required check"}.`,
     };
   }
-  if (!regressionPassed || !accounted || !anyVerified) {
-    return {
-      verdict: "INCONCLUSIVE",
-      reason: !regressionPassed
-        ? "Existing regression tests did not produce a passing result."
-        : "One or more acceptance criteria are not verified.",
-    };
+  const blocked = mandatory.filter((item) => item.status === "BLOCKED");
+  if (blocked.length > 0) {
+    return { verdict: "INCONCLUSIVE", reason: "A required check could not be executed. That is not a product failure." };
   }
-  if (lowConcern) {
-    return {
-      verdict: "PASS_WITH_CONCERNS",
-      reason: "Acceptance criteria are verified. Non-blocking concerns remain.",
-    };
+  const missing = mandatory.filter((item) => item.status === "NOT_TESTED");
+  if (missing.length > 0) {
+    return { verdict: "INCONCLUSIVE", reason: "Required verification evidence is missing." };
   }
-  return {
-    verdict: "PASS",
-    reason: "Acceptance criteria are verified, regression passed, and no blocking defect is open.",
-  };
+  const concerns = input.obligations.filter((item) => !item.mandatory && item.status === "FAILED");
+  if (lowConcern || concerns.length > 0) {
+    return { verdict: "PASS_WITH_CONCERNS", reason: "Mandatory obligations passed. Non-blocking concerns remain." };
+  }
+  return { verdict: "PASS", reason: "Mandatory obligations passed, and no blocking defect is open." };
+}
+
+function obligationsFromEvidence(input: VerdictInput): VerificationObligation[] {
+  const obligations: VerificationObligation[] = [];
+  input.coverages.forEach((coverage, index) => {
+    const status = coverage.status === "VERIFIED"
+      ? "VERIFIED"
+      : coverage.status === "FAILED"
+        ? "FAILED"
+        : coverage.status === "NOT_APPLICABLE" && coverage.humanConfirmed
+          ? "NOT_APPLICABLE"
+          : coverage.status === "BLOCKED"
+            ? "BLOCKED"
+            : "NOT_TESTED";
+    obligations.push({
+      id: `coverage:${index}`,
+      title: "Functional acceptance criterion",
+      kind: "FUNCTIONAL_ACCEPTANCE",
+      source: "FUNCTIONAL_ACCEPTANCE_CRITERION",
+      mandatory: status !== "NOT_APPLICABLE",
+      status,
+      evidence: "Coverage recorded for an acceptance criterion on this task.",
+    });
+  });
+  for (const execution of input.executions) {
+    if (execution.kind !== "PLAN_CHECK" && execution.kind !== "EXISTING_REGRESSION" && execution.kind !== "NEW_VERIFICATION") continue;
+    const status = execution.status === "PASSED"
+      ? "VERIFIED"
+      : execution.status === "FAILED"
+        ? "FAILED"
+        : execution.status === "BLOCKED"
+          ? "BLOCKED"
+          : execution.status === "NOT_RUN"
+            ? "NOT_APPLICABLE"
+            : "NOT_TESTED";
+    obligations.push({
+      id: `execution:${execution.kind}:${obligations.length}`,
+      title: execution.kind,
+      kind: "PLAN_CHECK",
+      source: "EXECUTION_PLAN",
+      mandatory: status !== "NOT_APPLICABLE",
+      status,
+      evidence: "Command evidence.",
+    });
+  }
+  return obligations;
 }
 
 export function sessionStatusFor(verdict: VerdictName) {

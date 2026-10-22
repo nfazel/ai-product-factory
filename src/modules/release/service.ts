@@ -151,7 +151,13 @@ export async function loadReleaseFacts(productId: string): Promise<ReleaseFacts>
             mergedBy: pull.mergedBy,
             mergedAt: pull.mergedAt?.toISOString() ?? null,
             requiredChecks: requiredChecks(pull.protection),
-            checks: pull.checks.map((check) => ({ name: check.name, status: check.status, conclusion: check.conclusion })),
+            checks: pull.checks.map((check) => ({
+              name: check.name,
+              status: check.status,
+              conclusion: check.conclusion,
+              startedAt: check.startedAt?.toISOString() ?? null,
+              completedAt: check.completedAt?.toISOString() ?? null,
+            })),
             reviews: pull.reviews.map((review) => ({ reviewer: review.reviewer, state: review.state })),
           }
         : null,
@@ -384,6 +390,8 @@ function present(candidate: CandidateRecord, facts: ReleaseFacts) {
     description: candidate.description,
     status: candidate.status,
     demo: candidate.demo,
+    reviewRequired: candidate.reviewRequired,
+    reviewReason: candidate.reviewReason,
     createdBy: candidate.createdBy,
     sourceCommits: Array.isArray(candidate.sourceCommitSummary)
       ? (candidate.sourceCommitSummary as { number: number; headSha: string; mergeSha: string; mergedBy: string; mergedAt: string | null }[])
@@ -575,12 +583,12 @@ export async function addReleaseQuestion(productId: string, candidateId: string,
 export async function answerReleaseQuestion(productId: string, questionId: string, answer: string, actorInput?: string) {
   const actor = actorName(actorInput);
   assertHuman(actor);
-  const question = await db.releaseQuestion.findFirst({ where: { id: questionId, releaseCandidate: { productId } } });
-  if (!question) throw new DomainError("The release question was not found.", "NOT_FOUND");
-  if (answer.trim().length < 2) throw new DomainError("Write an answer before closing the question.");
-  await db.releaseQuestion.update({
-    where: { id: question.id },
-    data: { answer: redactSecrets(answer.trim()), answeredBy: actor, status: "ANSWERED", resolvedAt: new Date() },
+  const { saveClarificationAnswer } = await import("@/modules/clarification/service");
+  await saveClarificationAnswer({
+    productId,
+    kind: "RELEASE",
+    questionId,
+    answer: redactSecrets(answer.trim()),
   });
   return getShipView(productId);
 }

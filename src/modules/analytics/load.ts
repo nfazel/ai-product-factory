@@ -90,6 +90,7 @@ export async function loadAnalyticsInputs(productId?: string): Promise<Analytics
             overrideRiskLevel: true,
             overrideExecutionMode: true,
             overriddenAt: true,
+            disposition: true,
             task: { select: { title: true } },
           },
         },
@@ -263,6 +264,7 @@ export async function loadAnalyticsInputs(productId?: string): Promise<Analytics
             overrideRiskLevel: risk.overrideRiskLevel,
             overrideExecutionMode: risk.overrideExecutionMode,
             overriddenAt: iso(risk.overriddenAt),
+            disposition: risk.disposition,
           })),
         ),
         policies: policies

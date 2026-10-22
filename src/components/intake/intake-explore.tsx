@@ -5,11 +5,12 @@ import {
 } from "@/components/discovery/composer";
 import { BriefPanel } from "@/components/discovery/brief-panel";
 import { NextActionPanel } from "@/components/guidance/guidance-ui";
+import { ClarificationAnswer } from "@/components/clarification/answer-card";
+import { ClarificationHold } from "@/components/clarification/keep-version";
 import {
   AcknowledgeChangeForm,
   AddressFindingForm,
   AnalyseButton,
-  AnswerForm,
   ConfirmRequirementForm,
   DispositionForm,
   DraftBriefButton,
@@ -19,6 +20,7 @@ import {
 } from "@/components/intake/intake-forms";
 import { STAGE_META } from "@/domain/constants";
 import type { ProductGuidance } from "@/modules/guidance/types";
+import { loadClarificationPresentation } from "@/modules/clarification/service";
 import { getIntakeWorkspace } from "@/modules/intake/service";
 import type { ProductBriefRecord } from "@/modules/discovery/types";
 
@@ -74,6 +76,15 @@ export async function IntakeExplore({
 }) {
   const workspace = await getIntakeWorkspace(productId);
   if (!workspace) return null;
+  const clarification = await loadClarificationPresentation(
+    productId,
+    workspace.questions.map((question) => ({
+      id: question.id,
+      kind: "INTAKE" as const,
+      answer: question.answer,
+      answeredAt: question.answeredAt,
+    })),
+  );
   const historical = Boolean(workspace.analysis) && !workspace.current;
   const openFindings = workspace.findings.filter((finding) => finding.status === "OPEN");
 
@@ -87,6 +98,9 @@ export async function IntakeExplore({
         </p>
       </header>
       {guidance.stage === "EXPLORE" || guidance.action?.stage === "EXPLORE" ? <NextActionPanel guidance={guidance} /> : null}
+      {brief?.reviewRequired && brief.reviewReason ? (
+        <ClarificationHold productId={productId} target="BRIEF" reason={brief.reviewReason} />
+      ) : null}
 
       {workspace.product.requirementsReviewRequired ? (
         <section id="sources" className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm leading-6 text-amber-950">
@@ -232,11 +246,18 @@ export async function IntakeExplore({
                   <p className="text-xs text-muted-foreground">{question.priority} · {question.status === "ANSWERED" ? "Answered" : "Open"}</p>
                   <p className="mt-1 text-sm font-medium">{question.question}</p>
                   <p className="mt-1 text-sm leading-6 text-muted-foreground">{question.reason}</p>
-                  {question.answer ? (
-                    <p className="mt-2 text-sm leading-6">Answer: {question.answer}{question.answeredBy ? ` · ${question.answeredBy}` : ""}</p>
-                  ) : workspace.current ? (
-                    <AnswerForm productId={productId} questionId={question.id} />
-                  ) : null}
+                  <ClarificationAnswer
+                    productId={productId}
+                    kind="INTAKE"
+                    questionId={question.id}
+                    question={question.question}
+                    answer={question.answer}
+                    answeredAt={question.answeredAt?.toISOString() ?? null}
+                    revisions={clarification[question.id]?.revisions ?? []}
+                    impacts={clarification[question.id]?.impacts ?? []}
+                    editable={workspace.current}
+                    showQuestion={false}
+                  />
                 </li>
               ))}
             </ul>
@@ -309,7 +330,7 @@ export async function IntakeExplore({
             </div>
           ) : null}
           {sessionStatus === "READY_FOR_REVIEW" && brief?.status === "READY_FOR_REVIEW" ? (
-            <div className="mt-4">
+            <div id="approve" tabIndex={-1} className="mt-4 scroll-mt-20 rounded-xl focus:outline-none target:ring-2 target:ring-indigo-500">
               <ApproveBriefButton productId={productId} />
             </div>
           ) : null}

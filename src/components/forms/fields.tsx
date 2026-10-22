@@ -135,7 +135,7 @@ export function FormMessage({ state }: { state: ActionState }) {
   if (state.status === "idle" || !state.message) return null;
   return (
     <p
-      role="status"
+      role={state.status === "error" ? "alert" : "status"}
       className={
         state.status === "success"
           ? "text-sm text-emerald-700"

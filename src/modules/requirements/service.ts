@@ -19,7 +19,6 @@ import { updateProduct } from "@/modules/product/service";
 import { buildProgressionBlockers, definitionEntryBlockers } from "@/modules/requirements/gates";
 import { acceptAll, editProposalItem, setReviewStatus } from "@/modules/requirements/proposal";
 import {
-  answerQuestion,
   approveSlice,
   commitAcceptedProposal,
   confirmOutcome,
@@ -254,17 +253,17 @@ export async function answerRequirementQuestion(input: {
   entityId: string;
   answer: string;
 }) {
-  const saved = await answerQuestion({
-    id: input.entityId,
+  const { saveClarificationAnswer } = await import("@/modules/clarification/service");
+  await saveClarificationAnswer({
     productId: input.productId,
+    kind: "REQUIREMENT",
+    questionId: input.entityId,
     answer: input.answer,
-    answeredBy: getCurrentActor().name,
   });
-  await recordActivity({
-    productId: input.productId,
-    type: "QUESTION_ANSWERED",
-    description: `Answered requirement question: ${saved.question}`,
+  const saved = await db.requirementQuestion.findFirst({
+    where: { id: input.entityId, productId: input.productId },
   });
+  if (!saved) throw new DomainError("Question not found.", "NOT_FOUND");
   return saved;
 }
 

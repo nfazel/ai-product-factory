@@ -1242,7 +1242,7 @@ function buildBottlenecks(input: AnalyticsInput, metrics: MetricValue[], rework:
   if (verificationRework >= 2) {
     signals.push(signal("VERIFICATION_REWORK", verificationRework >= 3 ? "CRITICAL" : "WARNING", input.product.name, "rework_rate_verification", String(verificationRework), "Two repeat verifications is a warning.", "Verification ran again because the implementation changed."));
   }
-  const openCritical = input.findings.some((finding) => finding.status === "OPEN" && finding.severity === "CRITICAL") || input.codingRisks.some((risk) => (risk.overrideRiskLevel ?? risk.riskLevel) === "PROHIBITED");
+  const openCritical = input.findings.some((finding) => finding.status === "OPEN" && finding.severity === "CRITICAL") || input.codingRisks.some((risk) => risk.disposition === "OPEN" && risk.riskLevel === "PROHIBITED");
   const openHigh = input.findings.some((finding) => finding.status === "OPEN" && finding.severity === "HIGH") || input.governanceReviews.some((review) => review.reviewRequired);
   if (openCritical || openHigh) {
     signals.push(signal("GOVERNANCE_BLOCKER", openCritical ? "CRITICAL" : "WARNING", input.product.name, "governance_findings", openCritical ? "Critical finding or prohibited risk" : "High finding or review required", "Open governance state.", openCritical ? "A critical finding is open or a coding risk is prohibited." : "Governance still has an open high finding or a review flag."));

@@ -155,7 +155,7 @@ export type ReviewCheckInput = {
   findings: FindingDecisionInput[];
   threats: { status: string }[];
   questions: { status: string; blocking: boolean }[];
-  codingRisks: { riskLevel: string; overrideRiskLevel: string | null; overriddenBy: string }[];
+  codingRisks: { riskLevel: string; disposition: string; overrideRiskLevel?: string | null; overriddenBy?: string }[];
 };
 
 export function summarizeGovernanceChecks(input: ReviewCheckInput) {
@@ -177,9 +177,10 @@ export function summarizeGovernanceChecks(input: ReviewCheckInput) {
     else outcomes.push("open");
   }
   for (const risk of input.codingRisks) {
-    const level = risk.overrideRiskLevel ?? risk.riskLevel;
-    if (level === "PROHIBITED" && risk.overriddenBy.trim().length === 0) outcomes.push("blocking");
-    else outcomes.push("passed");
+    if (risk.disposition === "RESOLVED") outcomes.push("passed");
+    else if (risk.disposition === "RISK_ACCEPTED") outcomes.push("risk-accepted");
+    else if (risk.disposition === "OPEN" && risk.riskLevel === "PROHIBITED") outcomes.push("blocking");
+    else outcomes.push("open");
   }
   const count = (outcome: GovernanceCheckOutcome) => outcomes.filter((item) => item === outcome).length;
   const blocking = count("blocking");

@@ -4,10 +4,12 @@ import Link from "next/link";
 import { useActionState, useEffect, useState } from "react";
 
 import { FormMessage, SubmitButton } from "@/components/forms/fields";
+import { RetryVerificationButton, StartVerificationButton } from "@/components/prove/prove-controls";
 import { STAGE_META, type ProductStage } from "@/domain/constants";
 import { idleState } from "@/lib/action-state";
 import { formatRelative } from "@/lib/format";
-import type { BlockerView, EvidenceItem, ProductGuidance, StageMark } from "@/modules/guidance/types";
+import { nextActionDestination } from "@/modules/guidance/next-action-registry";
+import type { BlockerView, EvidenceItem, NextAction, ProductGuidance, StageMark } from "@/modules/guidance/types";
 import { generateDefinitionAction } from "@/server/actions/requirements";
 import { moveStageAction } from "@/server/actions/products";
 
@@ -118,7 +120,7 @@ export function NextActionPanel({ guidance }: { guidance: ProductGuidance }) {
     return () => window.clearInterval(timer);
   }, []);
 
-  if (guidance.blocker) return <BlockerCard blocker={guidance.blocker} />;
+  if (guidance.blocker && !guidance.action) return <BlockerCard blocker={guidance.blocker} />;
   if (!guidance.action) {
     return (
       <section className="rounded-2xl border bg-card p-4">
@@ -130,6 +132,8 @@ export function NextActionPanel({ guidance }: { guidance: ProductGuidance }) {
   const action = guidance.action;
   const moveTo = MOVE_TARGET[action.key];
   return (
+    <div className="space-y-4">
+    {guidance.blocker ? <BlockerCard blocker={guidance.blocker} /> : null}
     <section className="rounded-2xl border border-indigo-200 bg-indigo-50 p-4 text-indigo-950" aria-label="Next action">
       <p className="text-xs font-medium uppercase tracking-wide">Next action</p>
       <h2 className="mt-1 text-lg font-semibold">{action.label}</h2>
@@ -139,11 +143,40 @@ export function NextActionPanel({ guidance }: { guidance: ProductGuidance }) {
         {moveTo ? <MoveButton productId={guidance.productId} stage={moveTo} label={action.label} /> : action.key === "draft-definition" ? (
           <DraftDefinitionButton productId={guidance.productId} />
         ) : (
-          <NextActionLink href={action.href} label={action.label} />
+          <NextActionControl productId={guidance.productId} action={action} />
         )}
       </div>
     </section>
+    </div>
   );
+}
+
+function NextActionControl({ productId, action }: { productId: string; action: NextAction }) {
+  const execution = action.execution || nextActionDestination(action.key).execution || "navigate";
+  if (execution === "command") {
+    if (action.key === "retry-verification" && action.subjectId) {
+      return <RetryVerificationButton productId={productId} taskId={action.subjectId} />;
+    }
+    if (action.key === "start-check" && action.subjectId) {
+      return <StartVerificationButton productId={productId} taskId={action.subjectId} />;
+    }
+    return (
+      <p role="alert" className="text-sm leading-6">
+        {action.label} cannot run because the task is not identified.
+      </p>
+    );
+  }
+  if (execution === "confirm") {
+    return (
+      <div className="space-y-2">
+        <NextActionLink href={action.href} label={`Open ${action.label}`} />
+        <p className="text-sm leading-6">
+          Opening this section does not perform {action.label}. The confirmation there is a separate step.
+        </p>
+      </div>
+    );
+  }
+  return <NextActionLink href={action.href} label={action.label} />;
 }
 
 function DraftDefinitionButton({ productId }: { productId: string }) {

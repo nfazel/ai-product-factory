@@ -1,7 +1,7 @@
 import "server-only";
 
 import { assessCodingReadiness } from "@/modules/governance/coding-readiness";
-import { repositoryRootConfigured } from "@/modules/coding/config";
+import { productRepositoryReady, REPOSITORY_NOT_CONFIGURED } from "@/modules/source-control/product-repository";
 import { findOccupyingWorkspace, latestPolicy, loadTaskGraph } from "@/modules/coding/repository";
 import { DomainError } from "@/modules/shared/errors";
 
@@ -31,8 +31,8 @@ export async function codingEntryBlockers(productId: string, taskId: string) {
   for (const dependency of blocked) {
     reasons.push(`Task is blocked by unresolved dependency ${dependency.dependsOn.title}.`);
   }
-  if (!repositoryRootConfigured()) {
-    reasons.push("No repository is configured. Set PRODUCT_REPOSITORY_ROOT to a local Git repository.");
+  if (!(await productRepositoryReady(productId))) {
+    reasons.push(REPOSITORY_NOT_CONFIGURED);
   }
   const occupying = await findOccupyingWorkspace(productId);
   if (occupying) {

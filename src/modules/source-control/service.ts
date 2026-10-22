@@ -7,14 +7,22 @@ import { asStrings } from "@/modules/coding/strings";
 import { getCurrentActor } from "@/modules/identity/actor";
 import { db } from "@/lib/db";
 import { buildPullRequestBody } from "@/modules/source-control/description";
+import { runGit } from "@/modules/coding/git";
 import { commitIsDescendant, githubRemoteMatches, localRemoteUrl, pushBlockers } from "@/modules/source-control/eligibility";
 import { SourceControlFailure } from "@/modules/source-control/errors";
 import { credentialPresence } from "@/modules/source-control/github";
+import { checkInstallationRepository } from "@/modules/source-control/github-account";
+import { decideRemoteMain, type RemoteMainDecision } from "@/modules/source-control/remote-main";
 import { buildReviewPrompt, pullRequestSuggestionSchema, REVIEW_SYSTEM_PROMPT, reviewAnalysisSchema } from "@/modules/source-control/prompt";
+import { resolvePublicationSource } from "@/modules/source-control/publication";
+import { describePublication, type PublicationEvidenceRecord } from "@/modules/source-control/publication-state";
 import { buildPublishArguments } from "@/modules/source-control/push";
+import { decideCiState, type Access } from "@/modules/source-control/ci-state";
+import { classifyMergeability } from "@/modules/source-control/pull-request-gate";
 import { decidePullRequestReadiness, decideReleaseCandidate } from "@/modules/source-control/readiness";
 import { redactSecrets } from "@/modules/source-control/redact";
 import { getSourceControlProvider } from "@/modules/source-control/registry";
+import type { ProtectionLookup } from "@/modules/source-control/types";
 import { DomainError } from "@/modules/shared/errors";
 
 const AGENT_ACTORS = new Set([
@@ -36,6 +44,18 @@ function assertHuman(actor: string) {
 function minimumApprovals() {
   const parsed = Number(process.env.GITHUB_MINIMUM_HUMAN_APPROVALS ?? "1");
   return Number.isInteger(parsed) && parsed >= 1 ? parsed : 1;
+}
+
+async function providerForProduct(productId: string) {
+  const repository = await db.repository.findUnique({
+    where: { productId },
+    select: { owner: true, repositoryName: true },
+  });
+  const connection = await db.sourceControlConnection.findUnique({ where: { id: "factory" } });
+  const owner = repository?.owner || connection?.owner || "";
+  const repositoryName = repository?.repositoryName || connection?.repositoryName || "";
+  if (!owner || !repositoryName) return getSourceControlProvider();
+  return getSourceControlProvider({ owner, repository: repositoryName });
 }
 
 export async function getConnectionSummary() {
@@ -78,7 +98,10 @@ export async function validateGitHubConnection(productId?: string) {
       status = "MISCONFIGURED";
       message = "The default branch was not found.";
     } else {
-      const localRoot = process.env.PRODUCT_REPOSITORY_ROOT?.trim() ?? "";
+      const productRepository = productId
+        ? await db.repository.findUnique({ where: { productId } })
+        : null;
+      const localRoot = productRepository?.localPath || process.env.PRODUCT_REPOSITORY_ROOT?.trim() || "";
       if (localRoot) {
         const remote = await localRemoteUrl(localRoot);
         if (!remote || !githubRemoteMatches(remote, owner, repositoryName)) {
@@ -173,9 +196,15 @@ export async function validateGitHubConnection(productId?: string) {
   return saved;
 }
 
-export async function publishTaskBranch(productId: string, taskId: string, actorName?: string) {
+export async function publishTaskBranch(
+  productId: string,
+  taskId: string,
+  actorName?: string,
+  options?: { confirmed?: boolean },
+) {
   const actor = actorName ?? getCurrentActor().name;
   assertHuman(actor);
+  if (!options?.confirmed) throw new DomainError("Publication requires explicit confirmation.");
   const blockers = await pushBlockers(productId, taskId);
   if (blockers.length > 0) throw new DomainError(blockers.join(" "));
   return publishWorkspace(productId, taskId, actor, "BRANCH_PUBLISHED");
@@ -184,12 +213,12 @@ export async function publishTaskBranch(productId: string, taskId: string, actor
 export async function updatePublishedBranch(productId: string, taskId: string, actorName?: string) {
   const actor = actorName ?? getCurrentActor().name;
   assertHuman(actor);
-  const blockers = await pushBlockers(productId, taskId);
-  if (blockers.length > 0) throw new DomainError(blockers.join(" "));
   const task = await loadTask(productId, taskId);
   const workspace = task.workspaces[0];
   const verified = await currentVerification(productId, taskId, workspace?.headCommit ?? "");
   if (!verified) throw new DomainError("Re-verification of the current commit is required before the published branch can be updated.");
+  const blockers = await pushBlockers(productId, taskId);
+  if (blockers.length > 0) throw new DomainError(blockers.join(" "));
   return publishWorkspace(productId, taskId, actor, "BRANCH_UPDATED");
 }
 
@@ -197,13 +226,12 @@ async function publishWorkspace(productId: string, taskId: string, actor: string
   const task = await loadTask(productId, taskId);
   const workspace = task.workspaces[0];
   if (!workspace) throw new DomainError("The coding workspace for this task was not found.");
-  const connection = await db.sourceControlConnection.findUnique({ where: { id: "factory" } });
-  if (!connection || connection.status !== "CONNECTED") throw new DomainError("The GitHub connection is not valid.");
+  const source = await resolvePublicationSource(productId, taskId);
   const repository = await db.repository.findUnique({ where: { productId } });
   if (!repository) throw new DomainError("The product repository is not configured.");
-  const provider = await getSourceControlProvider();
-  const branch = workspace.branchName;
-  const sha = workspace.headCommit;
+  const provider = await providerForProduct(productId);
+  const branch = source.branch;
+  const sha = source.sha;
   let tip: string | null = null;
   try {
     tip = await provider.getBranchTip(branch);
@@ -212,7 +240,7 @@ async function publishWorkspace(productId: string, taskId: string, actor: string
     throw error;
   }
   if (tip && tip !== sha) {
-    const safe = await commitIsDescendant(workspace.workspacePath, tip, sha);
+    const safe = await commitIsDescendant(source.directory, tip, sha);
     if (!safe) {
       await db.publishedChange.create({
         data: {
@@ -234,11 +262,10 @@ async function publishWorkspace(productId: string, taskId: string, actor: string
       );
     }
   }
-  const remoteUrl = `https://github.com/${connection.owner}/${connection.repositoryName}.git`;
-  const args = buildPublishArguments({ remoteUrl, localBranch: branch, remoteBranch: branch });
+  const args = buildPublishArguments({ remoteUrl: source.remoteUrl, localBranch: branch, remoteBranch: branch });
   let remoteSha = sha;
   try {
-    const published = await provider.publishBranch({ branch, sha, args, cwd: workspace.workspacePath });
+    const published = await provider.publishBranch({ branch, sha, args, cwd: source.directory });
     remoteSha = published.remoteSha;
   } catch (error) {
     await markPublicationFailed(productId, taskId, repository.id, workspace.id, branch, sha, error);
@@ -282,6 +309,145 @@ async function publishWorkspace(productId: string, taskId: string, actor: string
   return change;
 }
 
+const hiddenRemoteMain: RemoteMainDecision = {
+  status: "hidden",
+  message: "",
+  repository: "",
+  baselineSha: "",
+  remoteSha: "",
+  defaultBranch: "",
+};
+
+async function commitSha(directory: string, ref: string) {
+  const result = await runGit(directory, ["rev-parse", "--verify", ref]);
+  const sha = result.code === 0 ? result.stdout.trim() : "";
+  return /^[0-9a-f]{40}$/i.test(sha) ? sha : "";
+}
+
+export async function remoteMainDecision(productId: string): Promise<RemoteMainDecision> {
+  const published = await db.publishedChange.findMany({
+    where: { productId, status: "PUBLISHED", demo: false },
+    orderBy: { createdAt: "asc" },
+    include: { workspace: true },
+  });
+  const repository = await db.repository.findUnique({ where: { productId } });
+  const configuredRepository = repository?.owner && repository.repositoryName ? `${repository.owner}/${repository.repositoryName}` : "";
+  if (published.length === 0 || !repository) return { ...hiddenRemoteMain, repository: configuredRepository };
+  let observedRepository = configuredRepository;
+  let githubDefaultBranch = "main";
+  let remoteMainSha: string | null = null;
+  const remoteTips = new Map<string, string | null>();
+  try {
+    const provider = await providerForProduct(productId);
+    const remote = await provider.getRepository();
+    observedRepository = `${remote.owner}/${remote.name}`;
+    githubDefaultBranch = remote.defaultBranch || "";
+    remoteMainSha = await provider.getBranchTip("main");
+    for (const change of published) {
+      if (!remoteTips.has(change.remoteBranch)) remoteTips.set(change.remoteBranch, await provider.getBranchTip(change.remoteBranch));
+    }
+  } catch (error) {
+    return {
+      ...hiddenRemoteMain,
+      status: "blocked",
+      repository: configuredRepository,
+      defaultBranch: githubDefaultBranch,
+      message: error instanceof Error ? error.message : "GitHub could not be read.",
+    };
+  }
+  const localMainSha = await commitSha(repository.localPath, "refs/heads/main");
+  const facts = [];
+  for (const change of published) {
+    const localSha = change.localBranch ? await commitSha(repository.localPath, `refs/heads/${change.localBranch}`) : "";
+    const recordedBaselineSha = change.workspace?.baseCommit ?? "";
+    facts.push({
+      branch: change.remoteBranch,
+      approvedSha: change.localCommitSha,
+      localSha,
+      remoteSha: remoteTips.get(change.remoteBranch) ?? null,
+      recordedBaselineSha,
+      baselineIsAncestor: Boolean(localMainSha && change.localCommitSha && await commitIsDescendant(repository.localPath, localMainSha, change.localCommitSha)),
+    });
+  }
+  return decideRemoteMain({
+    configuredRepository,
+    observedRepository,
+    githubDefaultBranch,
+    remoteMainSha,
+    localMainSha,
+    published: facts,
+  });
+}
+
+export async function initializeRemoteMain(productId: string, actorName?: string, options?: { confirmed?: boolean }) {
+  const actor = actorName ?? getCurrentActor().name;
+  assertHuman(actor);
+  if (!options?.confirmed) throw new DomainError("Initializing the remote main branch requires explicit confirmation.");
+  const before = await db.publishedChange.findMany({
+    where: { productId, status: "PUBLISHED", demo: false },
+    orderBy: { createdAt: "asc" },
+  });
+  const decision = await remoteMainDecision(productId);
+  if (decision.status !== "offer") throw new DomainError(decision.message || "The remote main branch cannot be initialized.");
+  const repository = await db.repository.findUnique({ where: { productId } });
+  if (!repository?.owner || !repository.repositoryName) throw new DomainError("The product GitHub repository is not configured.");
+  const access = await checkInstallationRepository(repository.owner, repository.repositoryName);
+  if (!access.ok) throw new DomainError(access.message);
+  const provider = await providerForProduct(productId);
+  const existing = await provider.getBranchTip("main");
+  if (existing) throw new DomainError("Remote main already exists. It was not overwritten.");
+  let remoteSha = decision.baselineSha;
+  try {
+    const pushed = await provider.publishCommit({ sha: decision.baselineSha, remoteBranch: "main", cwd: repository.localPath });
+    remoteSha = pushed.remoteSha;
+  } catch (error) {
+    const after = await provider.getBranchTip("main").catch(() => null);
+    if (after && after.toLowerCase() !== decision.baselineSha.toLowerCase()) {
+      throw new DomainError("Remote main was created before the bootstrap finished. That branch was not overwritten.");
+    }
+    if (after && after.toLowerCase() === decision.baselineSha.toLowerCase()) remoteSha = after;
+    else if (error instanceof SourceControlFailure && error.kind === "AUTH") throw new DomainError("GitHub authentication failed. Nothing was published.");
+    else throw error instanceof DomainError ? error : new DomainError(error instanceof Error ? error.message : "The remote main branch was not initialized.");
+  }
+  const confirmed = await provider.getBranchTip("main");
+  if (!confirmed || confirmed.toLowerCase() !== decision.baselineSha.toLowerCase()) {
+    throw new DomainError("Remote main does not match the baseline commit. It was not overwritten.");
+  }
+  let settingsNote = "";
+  try {
+    const observed = await provider.getRepository();
+    if (observed.defaultBranch.toLowerCase() !== "main") {
+      settingsNote = ` GitHub's default branch remains ${observed.defaultBranch || "unset"}. Repository settings were not changed.`;
+    }
+  } catch {
+    settingsNote = " GitHub's default branch could not be re-read. Repository settings were not changed.";
+  }
+  const saved = await db.remoteMainBootstrap.create({
+    data: {
+      productId,
+      repositoryId: repository.id,
+      repository: `${repository.owner}/${repository.repositoryName}`,
+      branch: "main",
+      baselineSha: decision.baselineSha,
+      remoteSha,
+      actor,
+    },
+  });
+  await recordActivity({
+    productId,
+    type: "REMOTE_MAIN_BOOTSTRAPPED",
+    description: `${actor} initialized remote main for ${saved.repository} at ${remoteSha}. Baseline ${decision.baselineSha}.${settingsNote}`,
+    actor,
+  });
+  for (const change of before) {
+    const tip = await provider.getBranchTip(change.remoteBranch);
+    if ((tip ?? "").toLowerCase() !== change.remoteCommitSha.toLowerCase()) {
+      throw new DomainError("The published task branch changed. The baseline was published as main and the task branch was not modified by this action.");
+    }
+  }
+  return saved;
+}
+
 export async function createTaskPullRequest(productId: string, taskId: string, titleInput?: string, actorName?: string) {
   const actor = actorName ?? getCurrentActor().name;
   assertHuman(actor);
@@ -312,7 +478,7 @@ export async function createTaskPullRequest(productId: string, taskId: string, t
     summary = parsed.data.summary;
   }
   const body = buildPullRequestBody({ ...trace, summary, commitSha: change.localCommitSha });
-  const provider = await getSourceControlProvider();
+  const provider = await providerForProduct(productId);
   const remote = await provider.createPullRequest({
     title: redactSecrets(title),
     body,
@@ -361,31 +527,73 @@ export async function refreshPullRequest(productId: string, pullRequestId: strin
   });
   if (!record) throw new DomainError("The pull request was not found.", "NOT_FOUND");
   if (record.demo) throw new DomainError("Demo pull request data is not refreshed from GitHub.");
-  const provider = await getSourceControlProvider();
+  const provider = await providerForProduct(productId);
   const remote = await provider.getPullRequest(record.number);
-  const [reviews, comments, checks, protection] = await Promise.all([
+  const [reviews, comments, checks, statuses, protection, workflows] = await Promise.all([
     provider.getPullRequestReviews(record.number),
     provider.getPullRequestComments(record.number),
-    provider.getCheckRuns(remote.headSha),
+    readAccess(() => provider.getCheckRuns(remote.headSha)),
+    readAccess(() => provider.getCommitStatus(remote.headSha).then((status) => status.statuses)),
     provider.getBranchProtection(remote.baseBranch),
+    provider.getWorkflowCount(),
   ]);
+  const ci = decideCiState({
+    headSha: remote.headSha,
+    protection: protection.access === "readable"
+      ? { access: "readable", value: protection.protection ? { requiredChecks: protection.protection.requiredChecks } : null }
+      : protection,
+    checks: checks.access === "readable"
+      ? {
+          access: "readable",
+          value: checks.value.map((check) => ({
+            name: check.name,
+            status: check.status,
+            conclusion: check.conclusion,
+            startedAt: check.startedAt,
+            completedAt: check.completedAt,
+            headSha: check.headSha,
+            app: check.app,
+            workflow: check.workflow,
+          })),
+        }
+      : checks,
+    statuses: statuses.access === "readable"
+      ? {
+          access: "readable",
+          value: statuses.value.map((status) => ({
+            context: status.context,
+            state: status.state,
+            createdAt: status.createdAt,
+            updatedAt: status.updatedAt,
+            headSha: status.headSha,
+          })),
+        }
+      : statuses,
+    workflows: workflows.access === "readable" ? { access: "readable", value: workflows.count } : workflows,
+  });
+  const actuallyMerged = remote.merged === true && /^[0-9a-f]{40}$/i.test(remote.mergeCommitSha);
   const previousConclusions = new Map(record.checks.map((check) => [check.providerCheckId, check.conclusion]));
   await db.pullRequestRecord.update({
     where: { id: record.id },
     data: {
-      state: remote.state,
+      state: actuallyMerged ? "MERGED" : remote.state === "MERGED" ? "OPEN" : remote.state,
       title: remote.title,
       headSha: remote.headSha,
       baseBranch: remote.baseBranch,
       headBranch: remote.headBranch,
-      mergeCommitSha: remote.mergeCommitSha,
-      mergedAt: remote.mergedAt ? new Date(remote.mergedAt) : null,
-      mergedBy: remote.mergedBy,
-      protection: protection ?? {},
+      mergeable: remote.mergeable,
+      mergeableState: remote.mergeableState,
+      mergeCommitSha: actuallyMerged ? remote.mergeCommitSha : "",
+      mergedAt: actuallyMerged && remote.mergedAt ? new Date(remote.mergedAt) : null,
+      mergedBy: actuallyMerged ? remote.mergedBy : "",
+      ciState: ci.state,
+      ciDetail: ci.detail,
+      protectionAccess: protectionAccessOf(protection),
+      protection: storedProtection(protection),
     },
   });
   let ciChanged = false;
-  for (const check of checks) {
+  for (const check of checks.access === "readable" ? checks.value : []) {
     const existing = previousConclusions.get(check.id);
     if (existing && existing !== check.conclusion) ciChanged = true;
     await db.pullRequestCheck.upsert({
@@ -426,10 +634,11 @@ export async function refreshPullRequest(productId: string, pullRequestId: strin
         providerReviewId: review.id,
         reviewer: review.reviewer,
         state: review.state,
+        commitSha: review.commitSha ?? "",
         body: redactSecrets(review.body),
         submittedAt: review.submittedAt ? new Date(review.submittedAt) : null,
       },
-      update: { state: review.state, body: redactSecrets(review.body) },
+      update: { state: review.state, commitSha: review.commitSha ?? "", body: redactSecrets(review.body) },
     });
     if (!known) {
       await recordActivity({
@@ -462,22 +671,23 @@ export async function refreshPullRequest(productId: string, pullRequestId: strin
       update: { body: redactSecrets(comment.body), path: comment.path, line: comment.line },
     });
   }
-  if (remote.state === "MERGED") {
+  if (actuallyMerged) {
     const already = await db.sourceControlEvidence.findFirst({
       where: { pullRequestRecordId: record.id, type: "PULL_REQUEST_MERGED" },
     });
     if (!already) {
       await recordEvidence({
         productId,
+        publishedChangeId: record.publishedChangeId,
         pullRequestRecordId: record.id,
         type: "PULL_REQUEST_MERGED",
-        description: `GitHub reports pull request #${record.number} merged${remote.mergedBy ? ` by ${remote.mergedBy}` : ""}.`,
+        description: `GitHub reports pull request #${record.number} merged${remote.mergedBy ? ` by ${remote.mergedBy}` : ""} at ${remote.mergedAt ?? "an unstated time"}. The approved head remains ${record.headSha}.`,
         result: remote.mergeCommitSha,
       });
       await recordActivity({
         productId,
         type: "PULL_REQUEST_MERGED",
-        description: `GitHub reports pull request #${record.number} merged. AI Product Builder did not merge it.`,
+        description: `GitHub reports pull request #${record.number} merged by ${remote.mergedBy || "an unstated actor"} as ${remote.mergeCommitSha}. AI Product Builder did not merge it.`,
       });
     }
   }
@@ -486,10 +696,26 @@ export async function refreshPullRequest(productId: string, pullRequestId: strin
   }
   const tip = await provider.getBranchTip(remote.headBranch);
   if (tip === null) {
-    await db.publishedChange.update({
-      where: { id: record.publishedChangeId },
-      data: { status: "FAILED", failureMessage: "The remote branch was deleted." },
+    const noted = await db.sourceControlEvidence.findFirst({
+      where: { pullRequestRecordId: record.id, type: "REMOTE_BRANCH_ABSENT" },
     });
+    if (!noted) {
+      await recordEvidence({
+        productId,
+        publishedChangeId: record.publishedChangeId,
+        pullRequestRecordId: record.id,
+        type: "REMOTE_BRANCH_ABSENT",
+        description: actuallyMerged
+          ? `Remote head ${remote.headBranch} is absent after the merge. The publication was not revoked or marked failed.`
+          : `Remote head ${remote.headBranch} is absent. The publication was not marked failed.`,
+        result: remote.headBranch,
+      });
+      await recordActivity({
+        productId,
+        type: "REMOTE_HEAD_ABSENT",
+        description: `Remote head ${remote.headBranch} is absent. The earlier publication remains published.`,
+      });
+    }
   }
   await recordActivity({ productId, type: "PULL_REQUEST_REFRESHED", description: `Refreshed pull request #${record.number}.` });
   const view = await getSourceControlView(productId);
@@ -599,10 +825,35 @@ export async function sendCommentToCoding(productId: string, commentId: string) 
   return getSourceControlView(productId);
 }
 
+export async function recordCiException(productId: string, rationale: string, confirmed: boolean) {
+  const actor = getCurrentActor().name;
+  assertHuman(actor);
+  if (!confirmed) throw new DomainError("A person must confirm the CI exception.");
+  const text = rationale.trim();
+  if (text.length < 10) throw new DomainError("Record why CI is not required.");
+  const product = await db.product.findUnique({ where: { id: productId } });
+  if (!product) throw new DomainError("The product was not found.", "NOT_FOUND");
+  await db.ciRequirementDecision.upsert({
+    where: { productId },
+    create: { productId, requirement: "EXCEPTION", rationale: text, actor },
+    update: { requirement: "EXCEPTION", rationale: text, actor },
+  });
+  await recordActivity({
+    productId,
+    type: "CI_EXCEPTION_RECORDED",
+    description: `${actor} recorded a CI exception. The absence of CI remains visible and is not a pass. Rationale: ${text}`,
+    actor,
+  });
+}
+
 export async function getSourceControlView(productId: string) {
   const product = await db.product.findUnique({ where: { id: productId } });
   if (!product) return null;
   const connection = await getConnectionSummary();
+  const productRepository = await db.repository.findUnique({
+    where: { productId },
+    select: { owner: true, repositoryName: true, repositoryUrl: true, connectionStatus: true, connectionMessage: true },
+  });
   const slice = await db.productSlice.findFirst({
     where: { productId, status: "APPROVED" },
     orderBy: { createdAt: "asc" },
@@ -620,7 +871,14 @@ export async function getSourceControlView(productId: string) {
       });
   const governanceCurrent = await governanceIsCurrent(productId);
   const policyCurrent = await policyIsCurrent(productId);
-  const presented = await Promise.all(tasks.map(async (task) => presentTask(productId, task, connection.minimumHumanApprovals ?? 1, governanceCurrent, policyCurrent)));
+  const evidence = await db.sourceControlEvidence.findMany({
+    where: { productId, type: { in: ["BRANCH_PUBLISHED", "REMOTE_COMMIT"] } },
+    orderBy: { createdAt: "desc" },
+    select: { id: true, publishedChangeId: true, type: true, description: true, result: true },
+  });
+  const ciDecision = await db.ciRequirementDecision.findUnique({ where: { productId } });
+  const ciRequirement = ciDecision?.requirement === "EXCEPTION" ? "EXCEPTION" as const : "REQUIRED" as const;
+  const presented = await Promise.all(tasks.map(async (task) => presentTask(productId, task, connection.minimumHumanApprovals ?? 1, governanceCurrent, policyCurrent, evidence, ciRequirement)));
   const integrated = await db.integratedVerificationSession.findFirst({ where: { productId } });
   const release = decideReleaseCandidate({
     hasApprovedSlice: Boolean(slice),
@@ -632,7 +890,17 @@ export async function getSourceControlView(productId: string) {
     blockingDefect: presented.some((task) => task.blockingDefect),
     integratedRecorded: Boolean(integrated),
   });
-  return { connection, release, tasks: presented };
+  const bootstrap = await remoteMainDecision(productId);
+  return {
+    connection,
+    productRepository,
+    release,
+    tasks: presented,
+    bootstrap,
+    ciRequirement: ciDecision
+      ? { requirement: ciDecision.requirement, rationale: ciDecision.rationale, actor: ciDecision.actor, updatedAt: ciDecision.updatedAt.toISOString() }
+      : { requirement: "REQUIRED" as const, rationale: "", actor: "", updatedAt: "" },
+  };
 }
 
 export { pushBlockers };
@@ -657,9 +925,22 @@ async function presentTask(
   minimum: number,
   governanceCurrent: boolean,
   policyCurrent: boolean,
+  evidence: PublicationEvidenceRecord[],
+  ciRequirement: "REQUIRED" | "EXCEPTION" = "REQUIRED",
 ) {
   const blockers = await pushBlockers(productId, task.id);
-  const published = task.publishedChanges[0] ?? null;
+  const branch = task.workspaces[0]?.branchName ?? "";
+  const commit = task.workspaces[0]?.headCommit ?? "";
+  const publication = describePublication({
+    branch,
+    commit,
+    eligible: blockers.length === 0,
+    records: task.publishedChanges,
+    evidence,
+  });
+  const published = publication.successfulId
+    ? task.publishedChanges.find((item) => item.id === publication.successfulId) ?? null
+    : null;
   const pull = published?.pullRequest ?? null;
   const session = task.verificationSessions.find((item) => !item.demo) ?? task.verificationSessions[0] ?? null;
   const approval = task.workspaces[0]?.codeApprovals.find((item) => !item.stale);
@@ -675,9 +956,9 @@ async function presentTask(
       session.approvals.some((item) => !item.stale),
   );
   const readiness = !pull
-    ? { label: "NOT READY" as const, ready: false, reasons: ["No pull request has been created."] }
+    ? { label: "NOT READY" as const, ready: false, reasons: ["No pull request has been created."], approvals: undefined }
     : pull.demo
-      ? { label: "NOT READY" as const, ready: false, reasons: ["DEMO DATA. This pull request was not retrieved from GitHub."] }
+      ? { label: "NOT READY" as const, ready: false, reasons: ["DEMO DATA. This pull request was not retrieved from GitHub."], approvals: undefined }
       : decidePullRequestReadiness({
           state: pull.state,
           headSha: pull.headSha,
@@ -688,23 +969,31 @@ async function presentTask(
           verificationStale: Boolean(session?.stale) || session?.commitSha !== pull.headSha,
           checks: pull.checks.map((check) => ({ name: check.name, status: check.status, conclusion: check.conclusion })),
           requiredChecks: protection ? protection.requiredChecks : null,
-          reviews: pull.reviews.map((review) => ({ reviewer: review.reviewer, state: review.state, submittedAt: review.submittedAt })),
+          ci: { state: pull.ciState, detail: pull.ciDetail, requirement: ciRequirement },
+          mergeability: pull.protectionAccess ? classifyMergeability(pull.mergeable, pull.mergeableState) : "UNREAD",
+          reviews: pull.reviews.map((review) => ({ reviewer: review.reviewer, state: review.state, submittedAt: review.submittedAt, commitSha: review.commitSha })),
           minimumHumanApprovals: minimum,
           protectionApprovals: protection?.requiredApprovals ?? 0,
           governanceCurrent,
           policyCurrent,
           blockingDefect,
           serviceAccount: process.env.GITHUB_SERVICE_ACCOUNT,
+          mergeCommitSha: pull.mergeCommitSha,
+          mergedAt: pull.mergedAt,
+          mergedBy: pull.mergedBy,
         });
   return {
     id: task.id,
     title: task.title,
     status: task.status,
     commitSha: task.workspaces[0]?.headCommit ?? "",
+    branchName: task.workspaces[0]?.branchName ?? "",
+    codeApprovalLabel: !approval ? "Missing" : approval.stale ? "Stale" : approval.headCommit === (task.workspaces[0]?.headCommit ?? "") ? "Current" : "Does not match the commit",
+    verificationLabel: verified ? "Approved for this commit" : "Missing",
     blockers,
     verified,
     blockingDefect,
-    published,
+    publication,
     pullRequest: pull,
     readiness,
     trace: {
@@ -816,11 +1105,34 @@ async function markPublicationFailed(productId: string, taskId: string, reposito
   });
 }
 
+async function readAccess<T>(read: () => Promise<T>): Promise<Access<T>> {
+  try {
+    return { access: "readable", value: await read() };
+  } catch (error) {
+    if (error instanceof SourceControlFailure && error.kind === "PERMISSION") return { access: "forbidden" };
+    return { access: "unavailable" };
+  }
+}
+
+function protectionAccessOf(lookup: ProtectionLookup) {
+  if (lookup.access === "forbidden") return "FORBIDDEN";
+  if (lookup.access === "unavailable") return "UNAVAILABLE";
+  return lookup.protection ? "READABLE" : "NOT_PROTECTED";
+}
+
+function storedProtection(lookup: ProtectionLookup) {
+  if (lookup.access === "readable" && lookup.protection) return { access: "READABLE", ...lookup.protection };
+  if (lookup.access === "readable") {
+    return { access: "NOT_PROTECTED", requiredApprovals: 0, requiredChecks: [], conversationResolution: false, restrictions: "" };
+  }
+  return { access: lookup.access === "forbidden" ? "FORBIDDEN" : "UNAVAILABLE" };
+}
+
 async function recordEvidence(input: {
   productId: string;
   publishedChangeId?: string;
   pullRequestRecordId?: string;
-  type: "BRANCH_PUBLISHED" | "REMOTE_COMMIT" | "PULL_REQUEST_CREATED" | "CI_CHECK" | "HUMAN_REVIEW" | "PULL_REQUEST_MERGED";
+  type: "BRANCH_PUBLISHED" | "REMOTE_COMMIT" | "PULL_REQUEST_CREATED" | "CI_CHECK" | "HUMAN_REVIEW" | "PULL_REQUEST_MERGED" | "REMOTE_BRANCH_ABSENT";
   description: string;
   result: string;
 }) {

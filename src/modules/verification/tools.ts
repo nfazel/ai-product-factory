@@ -4,8 +4,11 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { recordActivity } from "@/modules/activity/service";
+import { commandFailureIsEnvironment, validationProcessEnvironment } from "@/modules/coding/bootstrap";
+import { safeCommandOutput } from "@/modules/coding/command-output";
 import { runProcess } from "@/modules/coding/git";
 import { db } from "@/lib/db";
+import { commandUnavailable } from "@/modules/verification/commands";
 import {
   approveVerificationCommand,
   classifyVerificationRead,
@@ -28,14 +31,17 @@ export async function executeVerificationTool(
       return { allowed: false, reason: approved.reason, exitCode: null as number | null, output: "" };
     }
     const started = new Date();
-    const result = await runProcess(approved.argv, input.workspacePath, 60_000);
+    const environment = validationProcessEnvironment(approved.command, process.env.DATABASE_URL, input.workspacePath);
+    const result = await runProcess(approved.argv, input.workspacePath, 120_000, environment.env);
+    const output = [environment.note, safeCommandOutput(result.stdout, result.stderr)].filter(Boolean).join("\n\n");
+    const unavailable = commandUnavailable(output, result.code) || (result.code !== 0 && commandFailureIsEnvironment(output));
     await db.verificationEvidence.create({
       data: {
         sessionId: input.sessionId,
         type: commandEvidenceType(approved.command),
         source: "COMMAND_RUNNER",
         description: approved.command,
-        result: result.code === 0 ? "EXECUTED" : "FAILED",
+        result: result.code === 0 ? "EXECUTED" : unavailable ? "UNAVAILABLE" : "FAILED",
         command: approved.command,
         exitCode: result.code,
       },
@@ -50,7 +56,7 @@ export async function executeVerificationTool(
       allowed: true,
       reason: "",
       exitCode: result.code,
-      output: `${result.stdout}\n${result.stderr}`.trim().slice(0, 2000),
+      output,
       started,
       completed: new Date(),
       command: approved.command,
