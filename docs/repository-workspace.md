@@ -22,11 +22,14 @@ The stored `Repository` row uses provider `LOCAL` until a person validates GitHu
 
 For each task the service:
 
-1. reads the configured base branch and base commit
-2. creates a branch named `ai-factory/task-<task id>-<slug>`
-3. adds a Git worktree at a unique path
-4. checks that the worktree toplevel is not the main working tree
-5. records a `RepositoryWorkspace`
+1. resolves the product integration branch (usually `main`)
+2. when the product repository is connected to GitHub, fetches that branch with the installation token and fast-forwards the local branch only when the working tree is clean and the update is a fast-forward
+3. creates a branch named `ai-factory/task-<task id>-<slug>` from the verified integration-branch commit, not from an arbitrary local `HEAD`
+4. adds a Git worktree at a unique path
+5. checks that the worktree toplevel is not the main working tree
+6. records a `RepositoryWorkspace`
+
+If the local integration branch is ahead, diverged, dirty, missing, or cannot be authenticated against GitHub, coding does not start and the local history is left unchanged. Force push, `reset --hard`, rebase, and non-fast-forward merges are not used.
 
 If worktree creation fails, the workspace is marked `FAILED` and execution stops. There is no fallback that edits the main tree.
 

@@ -51,6 +51,7 @@ import {
 import { codingRetryDecision } from "@/modules/coding/retry";
 import { isAIConfigured, prepareAI } from "@/modules/ai/provider";
 import { assertAIReady } from "@/modules/ai/surface";
+import { describeCodingBase, prepareCodingBase } from "@/modules/source-control/ensure-coding-base";
 import { resolveProductRepository, productRepositoryReady, REPOSITORY_NOT_CONFIGURED } from "@/modules/source-control/product-repository";
 import { assertCodingEntry, codingEntryBlockers } from "@/modules/coding/gates";
 import {
@@ -151,6 +152,7 @@ export async function startCodingTask(productId: string, taskId: string) {
   await prepareAI();
   if (!isAIConfigured()) throw new AgentNotConfiguredError("CODING");
   await assertAIReady("coding", "No code was changed.");
+  const base = await prepareCodingBase(productId);
   const configured = await resolveProductRepository(productId);
   const repository =
     configured.record ??
@@ -161,6 +163,7 @@ export async function startCodingTask(productId: string, taskId: string) {
       defaultBranch: configured.defaultBranch,
       status: "CONFIGURED",
     }));
+  const baseCommit = base.baseCommit;
   const draft = draftFor(gate.task, gate.policy);
   const created = await insertWorkspace({
     repositoryId: repository.id,
@@ -177,7 +180,7 @@ export async function startCodingTask(productId: string, taskId: string) {
       repositoryPath: configured.localPath,
       workspacePath: directory,
       branchName: branch,
-      baseCommit: configured.head,
+      baseCommit,
     });
     branch = worktree.branchName;
     await assertWorktreeIsolated(directory, configured.localPath);
@@ -186,8 +189,8 @@ export async function startCodingTask(productId: string, taskId: string) {
       status: "FAILED",
       workspacePath: directory,
       branchName: branch,
-      baseCommit: configured.head,
-      headCommit: configured.head,
+      baseCommit,
+      headCommit: baseCommit,
     });
     throw new DomainError(
       `The isolated workspace could not be created. The main working tree was not modified. ${messageOf(error)}`,
@@ -197,8 +200,8 @@ export async function startCodingTask(productId: string, taskId: string) {
     status: "ACTIVE",
     workspacePath: directory,
     branchName: branch,
-    baseCommit: configured.head,
-    headCommit: configured.head,
+    baseCommit,
+    headCommit: baseCommit,
   });
   await insertContract({
     implementationTaskId: taskId,
@@ -209,7 +212,9 @@ export async function startCodingTask(productId: string, taskId: string) {
   await recordActivity({
     productId,
     type: "CODING_WORKSPACE_CREATED",
-    description: `Created isolated workspace ${branch} from ${configured.head.slice(0, 12)}.`,
+    description: base.synchronised
+      ? `Synchronised ${base.integrationBranch} to ${baseCommit.slice(0, 12)}, then created isolated workspace ${branch}.`
+      : `Created isolated workspace ${branch} from ${base.integrationBranch} at ${baseCommit.slice(0, 12)}. ${base.message}`,
   });
   try {
     const planRun = await executeAgent({
@@ -1522,15 +1527,23 @@ export async function getCodingView(productId: string) {
     await recordOutOfScopeFindings(productId, workspace);
   }
   const repositoryConfigured = await productRepositoryReady(productId);
+  const integrationBase = repositoryConfigured ? await describeCodingBase(productId) : null;
   return {
     readiness,
     repositoryConfigured,
+    integrationBase,
     occupyingWorkspaceId: occupying?.id ?? null,
     tasks: tasks.map((task) => {
       const workspace = workspaces.find((item) => item.implementationTaskId === task.id) ?? null;
       const agentRun = agentRuns.find((run) => run.id === workspace?.agentRunId) ?? null;
       const risk = [...task.codingRisks].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0];
-      const blockers = taskBlockers(task, readiness.blockers, occupying?.implementationTaskId ?? null, repositoryConfigured);
+      const blockers = taskBlockers(
+        task,
+        readiness.blockers,
+        occupying?.implementationTaskId ?? null,
+        repositoryConfigured,
+        integrationBase,
+      );
       const preview = policy
         ? buildContractDraft({
             taskTitle: task.title,
@@ -1885,14 +1898,27 @@ function workspaceRetryOffer(
   }).offer;
 }
 
+const BLOCKING_INTEGRATION_STATUSES = new Set([
+  "ahead",
+  "diverged",
+  "dirty",
+  "missing-local",
+  "missing-remote",
+  "auth-failed",
+]);
+
 function taskBlockers(
   task: Awaited<ReturnType<typeof listProductTasks>>[number],
   readiness: string[],
   occupyingTaskId: string | null,
   repositoryConfigured: boolean,
+  integrationBase: Awaited<ReturnType<typeof describeCodingBase>>,
 ) {
   const reasons = [...readiness];
   if (!repositoryConfigured) reasons.push(REPOSITORY_NOT_CONFIGURED);
+  if (integrationBase && BLOCKING_INTEGRATION_STATUSES.has(integrationBase.status)) {
+    reasons.push(integrationBase.message);
+  }
   if (task.status !== "APPROVED" && task.status !== "IN_PROGRESS" && task.status !== "CODE_REVIEW" && task.status !== "COMPLETED") {
     reasons.push(`The implementation task is ${task.status}. Approve the task before coding.`);
   } else if (task.status !== "APPROVED" && !occupyingTaskId) {

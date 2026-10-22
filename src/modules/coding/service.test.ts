@@ -435,6 +435,23 @@ describe("coding entry", () => {
 });
 
 describe("coding execution", () => {
+  it("bases a new workspace on the integration branch tip when HEAD is elsewhere", async () => {
+    const repo = useRepo();
+    const main = execFileSync("git", ["rev-parse", "main"], { cwd: repo, encoding: "utf8" }).trim();
+    execFileSync("git", ["-c", "commit.gpgsign=false", "checkout", "-b", "ai-factory/task-stale", main], { cwd: repo });
+    expect(execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: repo, encoding: "utf8" }).trim()).toBe(
+      "ai-factory/task-stale",
+    );
+    const setup = await readyProduct({ mode: "SUPERVISED", risk: "MEDIUM" });
+    setAIProviderForTests(provider(writeChange));
+    const workspace = await startCodingTask(setup.product.id, setup.task.id);
+    expect(workspace?.baseCommit).toBe(main);
+    expect(execFileSync("git", ["rev-parse", "HEAD"], { cwd: workspace!.workspacePath, encoding: "utf8" }).trim()).toBe(main);
+    expect(execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: repo, encoding: "utf8" }).trim()).toBe(
+      "ai-factory/task-stale",
+    );
+  });
+
   it("creates an isolated worktree and a contract from approved artifacts", async () => {
     const repo = useRepo();
     const base = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf8" }).trim();

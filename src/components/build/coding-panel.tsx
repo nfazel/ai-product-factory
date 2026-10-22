@@ -46,6 +46,7 @@ export function CodingPanel({
           ? " This product repository is ready."
           : " This product does not have a repository yet. Set up the product repository before starting Coding."}
       </p>
+      {coding.integrationBase ? <IntegrationBaseStatus base={coding.integrationBase} /> : null}
       {coding.readiness.blockers.length > 0 ? (
         <ul className="list-disc space-y-1 pl-5 text-sm text-amber-950">
           {coding.readiness.blockers.map((reason) => (
@@ -143,6 +144,37 @@ export function CodingPanel({
   );
 }
 
+function IntegrationBaseStatus({
+  base,
+}: {
+  base: NonNullable<CodingView["integrationBase"]>;
+}) {
+  const blocking = ["ahead", "diverged", "dirty", "missing-local", "missing-remote", "auth-failed"].includes(base.status);
+  return (
+    <div className={`rounded-xl border px-4 py-3 text-sm leading-6 ${blocking ? "border-amber-300 bg-amber-50 text-amber-950" : "bg-stone-50 text-stone-800"}`}>
+      <p className="font-medium">Coding base · {base.integrationBranch}</p>
+      <p className="mt-1">{base.message}</p>
+      <dl className="mt-3 grid gap-2 sm:grid-cols-2">
+        <div>
+          <dt className="text-xs text-muted-foreground">Local tip</dt>
+          <dd className="font-mono text-xs">{base.localCommit || "Missing"}</dd>
+        </div>
+        <div>
+          <dt className="text-xs text-muted-foreground">GitHub tip</dt>
+          <dd className="font-mono text-xs">{base.githubConfigured ? base.remoteCommit || "Unavailable" : "Not connected"}</dd>
+        </div>
+      </dl>
+      {blocking ? (
+        <p className="mt-2 text-xs">Starting Coding is blocked until the integration branch can be synchronised safely.</p>
+      ) : (
+        <p className="mt-2 text-xs text-muted-foreground">
+          Starting Coding uses this integration branch tip as the worktree base commit.
+        </p>
+      )}
+    </div>
+  );
+}
+
 function Trace({ trace }: { trace: CodingView["tasks"][number]["trace"] }) {
   const steps = [
     ["Product outcome", trace.outcome],
@@ -212,10 +244,13 @@ function WorkspaceDetail({
       ) : null}
       <div className="grid gap-3 text-sm md:grid-cols-2">
         <Fact label="Branch" value={workspace.branchName} />
-        <Fact label="Base commit" value={workspace.baseCommit || "Not captured"} />
+        <Fact label="Coding base commit" value={workspace.baseCommit || "Not captured"} />
         <Fact label="Head commit" value={workspace.headCommit || "Not committed"} />
         <Fact label="Plan" value={workspace.plan?.status ?? "Not created"} />
       </div>
+      <p className="text-sm text-muted-foreground">
+        New coding worktrees start from the product integration branch tip after a safe GitHub synchronisation check. They do not start from an arbitrary local HEAD.
+      </p>
       <p className="text-sm text-muted-foreground">Plan {workspace.plan?.status ?? "Not created"} · version {workspace.plan?.version ?? "—"}</p>
       <CodingProgressPanel
         productId={productId}
