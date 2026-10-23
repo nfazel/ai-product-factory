@@ -36,6 +36,36 @@ describe("coding progress", () => {
     expect(view.checks.map((check) => check.state)).toEqual(["NOT_RUN", "NOT_RUN", "NOT_RUN"]);
   });
 
+  it("does not mark missing planned files FAILED before an implement attempt", () => {
+    const view = describeCodingProgress(input({
+      planStatus: "PROPOSED",
+      currentPlanExecuted: false,
+      agentPhase: "plan",
+      agentRunStatus: "COMPLETED",
+      implementationGaps: [
+        { path: "src/app/api/discovery/feed/route.ts" },
+        { path: "src/app/api/discovery/action/route.ts" },
+        { path: "src/app/discovery/page.tsx" },
+      ],
+      planSteps: [
+        "Create src/app/api/discovery/feed/route.ts.",
+        "Create src/app/api/discovery/action/route.ts.",
+        "Create src/app/discovery/page.tsx.",
+        "Install dependencies with npm install.",
+        "Run the Next.js production build with npm run build.",
+      ],
+    }));
+    expect(view.lifecycle).toBe("NONE");
+    expect(view.steps.map((step) => step.state)).toEqual([
+      "PENDING",
+      "PENDING",
+      "PENDING",
+      "PENDING",
+      "PENDING",
+    ]);
+    expect(view.log).toEqual([]);
+  });
+
   it("keeps a failed run failed when the plan was left executing", () => {
     const view = describeCodingProgress(input({
       workspaceStatus: "FAILED",

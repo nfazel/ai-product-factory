@@ -23,9 +23,11 @@ import {
   assessBootstrapCompleteness,
   designFactsFromSources,
   executionPlanRevisionText,
+  healPlanCommandSteps,
   NEXT_ENTRY_CANDIDATES,
   planScopeDelta,
   recoveryForFailures,
+  trimRedundantSchemaScope,
   validationFailureDisposition,
 } from "@/modules/coding/bootstrap";
 import { commandOutputFromMetadata } from "@/modules/coding/command-output";
@@ -266,6 +268,15 @@ export async function approveExecutionPlan(productId: string, workspaceId: strin
       `This execution plan names more than ${maxFiles} files. Request changes before it can be approved. Coding has not started.`,
     );
   }
+  const planSteps = asStrings(workspace.plan.steps);
+  const healedSteps = healPlanCommandSteps(planSteps);
+  if (healedSteps.some((step, index) => step !== planSteps[index])) {
+    await db.codingExecutionPlan.update({
+      where: { workspaceId },
+      data: { steps: healedSteps },
+    });
+    workspace.plan = { ...workspace.plan, steps: healedSteps };
+  }
   const flight = compileExecutionContract({
     planVersion: workspace.plan.version,
     files: workspace.plan.filesExpectedToChange,
@@ -377,11 +388,15 @@ export async function proposeCoherentExecutionPlan(productId: string, workspaceI
       throw new DomainError(`Adding the required application entry point would exceed the file limit of ${maxFiles}. The execution plan was not changed.`);
     }
     const delta = planScopeDelta(currentFiles, nextFiles);
+    const existingOnDisk = nextFiles.filter((file) =>
+      fs.existsSync(/*turbopackIgnore: true*/ path.join(/*turbopackIgnore: true*/ workspace.workspacePath, file)),
+    );
     const aligned = alignExecutionPlan({
       files: nextFiles,
       steps: asStrings(plan.steps),
       validationCommands: parsePlannedCommands(plan.validationCommands),
       validationPlan: plan.validationPlan,
+      existingFiles: existingOnDisk,
     });
     const validation = completenessRequiredCommands(plan.validationCommands);
     const history = Array.isArray(plan.history) ? plan.history : [];
@@ -502,15 +517,24 @@ export async function reviseExecutionPlan(productId: string, workspaceId: string
   }
   const files = asStrings(plan.filesExpectedToChange);
   const commands = parsePlannedCommands(plan.validationCommands);
+  const schemaPath = path.join(workspace.workspacePath, "prisma", "schema.prisma");
+  const schemaContent = fs.existsSync(/*turbopackIgnore: true*/ schemaPath)
+    ? fs.readFileSync(/*turbopackIgnore: true*/ schemaPath, "utf8")
+    : null;
+  const trimmed = trimRedundantSchemaScope({ files, steps: asStrings(plan.steps), schemaContent });
+  const existingOnDisk = trimmed.files.filter((file) =>
+    fs.existsSync(/*turbopackIgnore: true*/ path.join(/*turbopackIgnore: true*/ workspace.workspacePath, file)),
+  );
   const before = await assessmentForWorkspace(productId, workspace);
   const aligned = alignExecutionPlan({
-    files,
-    steps: asStrings(plan.steps),
+    files: trimmed.files,
+    steps: trimmed.steps,
     validationCommands: commands,
     validationPlan: plan.validationPlan,
+    existingFiles: existingOnDisk,
   });
   const after = await assessmentForWorkspace(productId, workspace, {
-    files,
+    files: trimmed.files,
     steps: aligned.steps,
     validationPlan: aligned.validationPlan,
   });
@@ -524,13 +548,16 @@ export async function reviseExecutionPlan(productId: string, workspaceId: string
         status: "PROPOSED",
         approvedBy: "",
         approvedAt: null,
+        filesExpectedToChange: trimmed.files,
         steps: aligned.steps,
         validationPlan: aligned.validationPlan,
         changeRequest: executionPlanRevisionText({
-          reason: `Execution Plan v${plan.version} authorised files that no work item creates. This version adds that work and keeps the verification commands consistent. It is not approved.`,
+          reason: trimmed.removedSchema
+            ? `Execution Plan v${plan.version} named prisma/schema.prisma although existing models already satisfy the task, and/or used install wording that blocked approval. This version corrects that. It is not approved.`
+            : `Execution Plan v${plan.version} authorised files that no work item creates. This version adds that work and keeps the verification commands consistent. It is not approved.`,
           added: [],
-          removed: [],
-          unchanged: files,
+          removed: trimmed.removedSchema ? ["prisma/schema.prisma"] : [],
+          unchanged: trimmed.files,
           addedWork,
           validation: commands.filter((item) => item.applicability !== "NOT_APPLICABLE").map((item) => item.command),
         }),

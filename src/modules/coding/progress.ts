@@ -151,8 +151,11 @@ function stepViews(
     );
     const command = ["npm install", "npx prisma generate", "npx prisma validate", "npm run build", "npm test"].find((item) => text.includes(item));
     const check = command ? latestCommand.get(command) : undefined;
+    // Gaps only mean failure after an implement/repair attempt. Before that, missing
+    // planned files are expected and must stay PENDING (not synthetic FAILED).
+    const applyGaps = lifecycle === "FAILED" || lifecycle === "COMPLETED" || lifecycle === "WAITING_FOR_HUMAN";
     let state: StepState = "PENDING";
-    if (gaps.some((gap) => text.includes(gap.path))) state = "FAILED";
+    if (applyGaps && gaps.some((gap) => text.includes(gap.path))) state = "FAILED";
     else if (writes.some((event) => !event.allowed)) state = "FAILED";
     else if (writes.some((event) => event.allowed)) state = "COMPLETED";
     else if (check && (check.result === "FAIL" || (check.exitCode != null && check.exitCode !== 0))) state = "FAILED";
