@@ -257,7 +257,7 @@ export function stepsWithCommands(steps: string[], commands: PlannedCommand[]) {
   const next = [...steps];
   for (const command of commands.filter((item) => item.applicability === "REQUIRED")) {
     if (next.some((step) => step.includes(command.command))) continue;
-    if (command.command === "npm install") next.push("Install dependencies from package.json with npm install.");
+    if (command.command === "npm install") next.push("Install dependencies with npm install.");
     if (command.command === "npx prisma generate") next.push("Generate the Prisma client with npx prisma generate.");
     if (command.command === "npx prisma validate") next.push("Validate the Prisma schema with npx prisma validate.");
     if (command.command === "npm run build") next.push("Run the Next.js production build with npm run build.");

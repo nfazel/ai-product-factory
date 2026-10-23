@@ -8,12 +8,16 @@ import {
   alignExecutionPlan,
   assessBootstrapCompleteness,
   assessPlanConsistency,
+  existingSchemaPlanningNote,
   executionPlanRevisionText,
+  healPlanCommandSteps,
+  INSTALL_DEPENDENCIES_STEP,
   planScopeDelta,
   planVerificationSummary,
   PRISMA_VALIDATE_PLACEHOLDER,
   recoveryForFailures,
   technicalCompletionCriteria,
+  trimRedundantSchemaScope,
   validationFailureDisposition,
   validationProcessEnvironment,
 } from "@/modules/coding/bootstrap";
@@ -197,7 +201,7 @@ describe("repair or revise", () => {
       "Create tsconfig.json",
       "Create prisma/schema.prisma",
       "Create src/lib/db.ts",
-      "Install dependencies from package.json with npm install.",
+      "Install dependencies with npm install.",
       "Generate the Prisma client with npx prisma generate.",
       "Validate the Prisma schema with npx prisma validate.",
     ];
@@ -225,7 +229,7 @@ describe("repair or revise", () => {
         "Create tsconfig.json",
         "Create prisma/schema.prisma",
         "Create src/lib/db.ts",
-        "Install dependencies from package.json with npm install.",
+        "Install dependencies with npm install.",
         "Generate the Prisma client with npx prisma generate.",
         "Validate the Prisma schema with npx prisma validate.",
       ],
@@ -313,5 +317,119 @@ describe("repair or revise", () => {
     expect(text).toContain("prisma/schema.prisma");
     expect(text).toContain("VALIDATION");
     expect(text).not.toContain("REMOVED");
+  });
+
+  it("does not treat the npm install step as naming package.json outside plan scope", () => {
+    const discoveryFiles = [
+      "src/app/api/discovery/feed/route.ts",
+      "src/app/api/discovery/action/route.ts",
+      "src/app/discovery/page.tsx",
+    ];
+    const aligned = alignExecutionPlan({
+      files: discoveryFiles,
+      steps: discoveryFiles.map((file) => `Create ${file}.`),
+      validationCommands: [
+        { command: "npm install", applicability: "REQUIRED" },
+        { command: "npm run build", applicability: "REQUIRED" },
+      ],
+      validationPlan: "Run npm run build.",
+    });
+    expect(aligned.steps).toContain(INSTALL_DEPENDENCIES_STEP);
+    expect(aligned.steps.some((step) => /package\.json/i.test(step))).toBe(false);
+    const withLegacy = assessPlanConsistency({
+      files: discoveryFiles,
+      steps: [
+        ...discoveryFiles.map((file) => `Create ${file}.`),
+        "Install dependencies from package.json with npm install.",
+      ],
+      validationCommands: [{ command: "npm run build", applicability: "REQUIRED" }],
+      validationPlan: "Required:\nnpm run build",
+    });
+    expect(withLegacy.ready).toBe(false);
+    expect(withLegacy.blockers[0]?.message).toMatch(/package\.json/);
+    const healedSteps = healPlanCommandSteps([
+      ...discoveryFiles.map((file) => `Create ${file}.`),
+      "Install dependencies from package.json with npm install.",
+    ]);
+    expect(healedSteps).toContain(INSTALL_DEPENDENCIES_STEP);
+    expect(assessPlanConsistency({
+      files: discoveryFiles,
+      steps: healedSteps,
+      validationCommands: [{ command: "npm run build", applicability: "REQUIRED" }],
+      validationPlan: "Required:\nnpm run build",
+    }).ready).toBe(true);
+  });
+
+  it("uses Update work items for files that already exist on disk", () => {
+    const aligned = alignExecutionPlan({
+      files: ["prisma/schema.prisma", "src/app/discovery/page.tsx"],
+      steps: [],
+      validationCommands: [],
+      validationPlan: "",
+      existingFiles: ["prisma/schema.prisma"],
+    });
+    expect(aligned.steps).toContain("Update prisma/schema.prisma.");
+    expect(aligned.steps).toContain("Create src/app/discovery/page.tsx as the initial application route.");
+    expect(aligned.steps).not.toContain("Create prisma/schema.prisma.");
+  });
+
+  it("drops prisma/schema.prisma from scope when existing models already satisfy the task", () => {
+    const schema = `
+datasource db { provider = "postgresql" url = env("DATABASE_URL") }
+generator client { provider = "prisma-client-js" }
+model Profile { id String @id }
+model Swipe { id String @id }
+`;
+    const trimmed = trimRedundantSchemaScope({
+      files: [
+        "prisma/schema.prisma",
+        "src/app/api/discovery/feed/route.ts",
+        "src/app/discovery/page.tsx",
+      ],
+      steps: [
+        "Create prisma/schema.prisma.",
+        "Create src/app/api/discovery/feed/route.ts.",
+        "Create src/app/discovery/page.tsx.",
+      ],
+      schemaContent: schema,
+    });
+    expect(trimmed.removedSchema).toBe(true);
+    expect(trimmed.files).toEqual([
+      "src/app/api/discovery/feed/route.ts",
+      "src/app/discovery/page.tsx",
+    ]);
+    expect(trimmed.steps).not.toContain("Create prisma/schema.prisma.");
+    expect(existingSchemaPlanningNote(schema)).toMatch(/Profile/);
+    expect(existingSchemaPlanningNote(schema)).toMatch(/Do not list prisma\/schema\.prisma/);
+
+    const withNarrative = trimRedundantSchemaScope({
+      files: ["prisma/schema.prisma", "src/app/discovery/page.tsx"],
+      steps: [
+        "Update Prisma schema to support user connection status and profile fields for discovery.",
+        "Create prisma/schema.prisma.",
+        "Create src/app/discovery/page.tsx.",
+      ],
+      schemaContent: schema,
+    });
+    expect(withNarrative.removedSchema).toBe(true);
+    expect(withNarrative.files).toEqual(["src/app/discovery/page.tsx"]);
+    expect(withNarrative.steps).toEqual(["Create src/app/discovery/page.tsx."]);
+  });
+
+  it("keeps prisma/schema.prisma when the plan requires a new model", () => {
+    const schema = `
+model Profile { id String @id }
+model Swipe { id String @id }
+`;
+    const trimmed = trimRedundantSchemaScope({
+      files: ["prisma/schema.prisma", "src/app/discovery/page.tsx"],
+      steps: [
+        "Update prisma/schema.prisma to add model DiscoveryCard.",
+        "Create src/app/discovery/page.tsx.",
+      ],
+      schemaContent: schema,
+    });
+    expect(trimmed.removedSchema).toBe(false);
+    expect(trimmed.files).toContain("prisma/schema.prisma");
   });
 });
