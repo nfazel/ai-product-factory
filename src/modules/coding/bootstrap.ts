@@ -310,7 +310,14 @@ export function trimRedundantSchemaScope(input: {
   if (needsSchemaWork) {
     return { files: input.files.map(normalise), steps: [...input.steps], removedSchema: false };
   }
-  const withoutSchemaSteps = input.steps.filter((step) => !/\bprisma\/schema\.prisma\b/i.test(step));
+  const withoutSchemaSteps = input.steps.filter((step) => {
+    if (/\bprisma\/schema\.prisma\b/i.test(step)) return false;
+    // Drop narrative-only schema work once existing models already satisfy the task.
+    if (/\bprisma\b/i.test(step) && /\bschema\b/i.test(step) && !/\b(route|page|endpoint|api|ui|component|feed|action)\b/i.test(step)) {
+      return false;
+    }
+    return true;
+  });
   if (withoutSchemaSteps.some((step) => /\bschema\.prisma\b/i.test(step))) {
     return { files: input.files.map(normalise), steps: [...input.steps], removedSchema: false };
   }

@@ -401,6 +401,19 @@ model Swipe { id String @id }
     expect(trimmed.steps).not.toContain("Create prisma/schema.prisma.");
     expect(existingSchemaPlanningNote(schema)).toMatch(/Profile/);
     expect(existingSchemaPlanningNote(schema)).toMatch(/Do not list prisma\/schema\.prisma/);
+
+    const withNarrative = trimRedundantSchemaScope({
+      files: ["prisma/schema.prisma", "src/app/discovery/page.tsx"],
+      steps: [
+        "Update Prisma schema to support user connection status and profile fields for discovery.",
+        "Create prisma/schema.prisma.",
+        "Create src/app/discovery/page.tsx.",
+      ],
+      schemaContent: schema,
+    });
+    expect(withNarrative.removedSchema).toBe(true);
+    expect(withNarrative.files).toEqual(["src/app/discovery/page.tsx"]);
+    expect(withNarrative.steps).toEqual(["Create src/app/discovery/page.tsx."]);
   });
 
   it("keeps prisma/schema.prisma when the plan requires a new model", () => {
