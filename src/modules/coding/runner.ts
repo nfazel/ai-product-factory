@@ -13,7 +13,15 @@ import { productRepositoryReady, REPOSITORY_NOT_CONFIGURED } from "@/modules/sou
 import { persistenceEvidenceOutput, persistenceUserMessage } from "@/modules/coding/diff";
 import { storeWorkspaceResult } from "@/modules/coding/diff-store";
 import { captureWorkspaceDiff } from "@/modules/coding/git";
-import { alignExecutionPlan, assessBootstrapCompleteness, designFactsFromSources, planningBootstrapNote, type DesignFacts } from "@/modules/coding/bootstrap";
+import {
+  alignExecutionPlan,
+  assessBootstrapCompleteness,
+  designFactsFromSources,
+  existingSchemaPlanningNote,
+  planningBootstrapNote,
+  trimRedundantSchemaScope,
+  type DesignFacts,
+} from "@/modules/coding/bootstrap";
 import {
   assessImplementationCompleteness,
   commandsAfterImplementationRepair,
@@ -294,6 +302,11 @@ async function runPlan(workspace: NonNullable<Awaited<ReturnType<typeof findWork
     design,
     greenfield: true,
   }));
+  const schemaPath = path.join(workspace.workspacePath, "prisma", "schema.prisma");
+  const schemaContent = fs.existsSync(/*turbopackIgnore: true*/ schemaPath)
+    ? fs.readFileSync(/*turbopackIgnore: true*/ schemaPath, "utf8")
+    : null;
+  const schemaNote = existingSchemaPlanningNote(schemaContent);
   const analysis = await ask(repositoryAnalysisSchema, "coding_repository_analysis", {
     phase: "analysis",
     objective,
@@ -304,7 +317,7 @@ async function runPlan(workspace: NonNullable<Awaited<ReturnType<typeof findWork
     phase: "plan",
     objective,
     contract,
-    context: [inspected, `Analysis: ${analysis.data.summary}`, bootstrapNote].filter(Boolean).join("\n\n"),
+    context: [inspected, `Analysis: ${analysis.data.summary}`, bootstrapNote, schemaNote].filter(Boolean).join("\n\n"),
   });
   const outside = plan.data.filesExpectedToChange.filter(
     (file) => !classifyWrite(file, context.allowedPaths, context.restrictedPaths).ok,
@@ -340,6 +353,7 @@ async function runPlan(workspace: NonNullable<Awaited<ReturnType<typeof findWork
   const prepared = await preparePlanContract(workspace, plan.data.filesExpectedToChange, plan.data.steps, plan.data.validationPlan, design);
   const enriched = {
     ...plan.data,
+    filesExpectedToChange: prepared.files,
     steps: prepared.steps,
     validationPlan: prepared.validationPlan,
     setupCommands: prepared.commands.setupCommands,
@@ -445,25 +459,34 @@ async function preparePlanContract(
   });
   const inspected = inspectWorkspacePackage(workspace.workspacePath);
   const greenfield = product?.developmentContext === "GREENFIELD";
+  const schemaPath = path.join(workspace.workspacePath, "prisma", "schema.prisma");
+  const schemaContent = fs.existsSync(/*turbopackIgnore: true*/ schemaPath)
+    ? fs.readFileSync(/*turbopackIgnore: true*/ schemaPath, "utf8")
+    : null;
+  const trimmed = trimRedundantSchemaScope({ files, steps, schemaContent });
+  const existingOnDisk = trimmed.files.filter((file) =>
+    fs.existsSync(/*turbopackIgnore: true*/ path.join(/*turbopackIgnore: true*/ workspace.workspacePath, file)),
+  );
   const derived = deriveExecutionCommands({
     greenfield,
-    filesExpected: files,
+    filesExpected: trimmed.files,
     packageJson: inspected.packageJson,
     nodeModulesPresent: inspected.nodeModulesPresent,
     requiredChecks: asStrings(workspace.contract?.requiredChecks),
     validationPlan,
   });
   const commands = executionCommandsForPlan(derived);
-  const draftedSteps = stepsWithCommands(steps, derived);
+  const draftedSteps = stepsWithCommands(trimmed.steps, derived);
   const draftedValidation = validationPlanText(derived, validationPlan);
   const aligned = alignExecutionPlan({
-    files,
+    files: trimmed.files,
     steps: draftedSteps,
     validationCommands: commands.validationCommands,
     validationPlan: draftedValidation,
+    existingFiles: existingOnDisk,
   });
   const flight = preflightExecutionPlan({
-    files,
+    files: trimmed.files,
     steps: aligned.steps,
     allowedPaths: asStrings(workspace.contract?.allowedPaths),
     restrictedPaths: asStrings(workspace.contract?.restrictedPaths),
@@ -472,7 +495,7 @@ async function preparePlanContract(
     derived,
   });
   const completeness = assessBootstrapCompleteness({
-    files,
+    files: trimmed.files,
     steps: aligned.steps,
     validationCommands: commands.validationCommands,
     validationPlan: aligned.validationPlan,
@@ -486,6 +509,7 @@ async function preparePlanContract(
       blockers: [...completeness.blockers, ...flight.blockers],
     },
     commands,
+    files: trimmed.files,
     steps: aligned.steps,
     validationPlan: aligned.validationPlan,
     completeness,

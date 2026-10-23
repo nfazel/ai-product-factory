@@ -258,8 +258,9 @@ export function workItemProduces(steps: string[], file: string) {
   return steps.some((step) => step.toLowerCase().replaceAll("\\", "/").includes(needle));
 }
 
-export function creationStepFor(file: string) {
+export function creationStepFor(file: string, mode: "create" | "update" = "create") {
   const target = normalise(file);
+  if (mode === "update") return `Update ${target}.`;
   if (/\/layout\.tsx$/.test(target) && target.includes("/app/")) {
     return `Create ${target} as the root Next.js App Router layout.`;
   }
@@ -270,6 +271,65 @@ export function creationStepFor(file: string) {
     return `Create ${target} as the initial Pages Router page.`;
   }
   return `Create ${target}.`;
+}
+
+/** Install step text must not name package.json — fileMentions would treat it as out-of-scope. */
+export const INSTALL_DEPENDENCIES_STEP = "Install dependencies with npm install.";
+
+const LEGACY_INSTALL_STEP = /^Install dependencies from package\.json with npm install\.?$/i;
+
+export function healPlanCommandSteps(steps: string[]) {
+  return steps.map((step) => (LEGACY_INSTALL_STEP.test(step.trim()) ? INSTALL_DEPENDENCIES_STEP : step));
+}
+
+const SCHEMA_FILE = "prisma/schema.prisma";
+const PRISMA_MODEL = /^\s*model\s+([A-Za-z_][A-Za-z0-9_]*)\s*\{/gm;
+const DUMMY_MODEL = /^\s*model\s+(Example|Test|Placeholder)\b/m;
+
+export function trimRedundantSchemaScope(input: {
+  files: string[];
+  steps: string[];
+  schemaContent: string | null;
+}) {
+  const files = input.files.map(normalise);
+  if (!files.includes(SCHEMA_FILE) || !input.schemaContent || DUMMY_MODEL.test(input.schemaContent)) {
+    return { files: input.files.map(normalise), steps: [...input.steps], removedSchema: false };
+  }
+  const models = [...input.schemaContent.matchAll(PRISMA_MODEL)].map((match) => match[1]!);
+  if (models.length === 0) {
+    return { files: input.files.map(normalise), steps: [...input.steps], removedSchema: false };
+  }
+  const modelSet = new Set(models.map((name) => name.toLowerCase()));
+  const needsSchemaWork = input.steps.some((step) => {
+    const named = [...step.matchAll(/\bmodel\s+([A-Za-z_][A-Za-z0-9_]*)\b/gi)].map((match) => match[1]!);
+    if (named.some((name) => !modelSet.has(name.toLowerCase()))) return true;
+    if (!/schema\.prisma/i.test(step) && !/\bprisma\b/i.test(step)) return false;
+    if (/^(create|update)\s+prisma\/schema\.prisma\.?$/i.test(step.trim())) return false;
+    return /\b(add|create|define|introduce|extend|migrate|field|relation)\b/i.test(step);
+  });
+  if (needsSchemaWork) {
+    return { files: input.files.map(normalise), steps: [...input.steps], removedSchema: false };
+  }
+  const withoutSchemaSteps = input.steps.filter((step) => !/\bprisma\/schema\.prisma\b/i.test(step));
+  if (withoutSchemaSteps.some((step) => /\bschema\.prisma\b/i.test(step))) {
+    return { files: input.files.map(normalise), steps: [...input.steps], removedSchema: false };
+  }
+  return {
+    files: files.filter((file) => file !== SCHEMA_FILE),
+    steps: withoutSchemaSteps,
+    removedSchema: true,
+  };
+}
+
+export function existingSchemaPlanningNote(schemaContent: string | null) {
+  if (!schemaContent || DUMMY_MODEL.test(schemaContent)) return "";
+  const models = [...schemaContent.matchAll(PRISMA_MODEL)].map((match) => match[1]!);
+  if (models.length === 0) return "";
+  return [
+    `Existing prisma/schema.prisma already defines models: ${models.join(", ")}.`,
+    "Do not list prisma/schema.prisma in filesExpectedToChange unless this task requires new or changed models.",
+    "Prefer leaving the schema out of scope when the existing models already satisfy the task.",
+  ].join(" ");
 }
 
 const PLAN_COMMANDS = ["npm install", "npx prisma generate", "npx prisma validate", "npm run build", "npm test", "npm run lint", "npm run typecheck"];
@@ -283,10 +343,14 @@ export function alignExecutionPlan(input: {
   steps: string[];
   validationCommands: { command: string; applicability?: string; reason?: string; kind?: string }[];
   validationPlan: string;
+  existingFiles?: string[];
 }) {
   const files = input.files.map(normalise);
-  const steps = [...input.steps];
-  const created = files.filter((file) => !workItemProduces(steps, file)).map(creationStepFor);
+  const existing = new Set((input.existingFiles ?? []).map(normalise));
+  const steps = healPlanCommandSteps(input.steps);
+  const created = files
+    .filter((file) => !workItemProduces(steps, file))
+    .map((file) => creationStepFor(file, existing.has(file) ? "update" : "create"));
   const commandIndex = steps.findIndex(isCommandStep);
   const withFiles = created.length === 0
     ? steps
@@ -296,7 +360,7 @@ export function alignExecutionPlan(input: {
   const withCommands = [...withFiles];
   for (const command of input.validationCommands) {
     if (command.applicability === "NOT_APPLICABLE" || withCommands.some((step) => step.includes(command.command))) continue;
-    if (command.command === "npm install") withCommands.push("Install dependencies from package.json with npm install.");
+    if (command.command === "npm install") withCommands.push(INSTALL_DEPENDENCIES_STEP);
     if (command.command === "npx prisma generate") withCommands.push("Generate the Prisma client with npx prisma generate.");
     if (command.command === "npx prisma validate") withCommands.push("Validate the Prisma schema with npx prisma validate.");
     if (command.command === "npm run build") withCommands.push("Run the Next.js production build with npm run build.");

@@ -1294,7 +1294,7 @@ describe("coding execution", () => {
           "Create tsconfig.json.",
           "Create prisma/schema.prisma.",
           "Create src/lib/db.ts.",
-          "Install dependencies from package.json with npm install.",
+          "Install dependencies with npm install.",
           "Generate the Prisma client with npx prisma generate.",
           "Validate the Prisma schema with npx prisma validate.",
         ],
