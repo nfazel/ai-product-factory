@@ -61,6 +61,8 @@ docs/metrics-catalogue.md       Definition, formula, source, and data-quality ru
 
 PostgreSQL 16 is required.
 
+After a Mac restart, follow [docs/LOCAL_DEVELOPMENT.md](docs/LOCAL_DEVELOPMENT.md) (Builder Docker Postgres on host port **5433**; Find-a-Friend / Postgres.app stays on **5432**).
+
 With Docker:
 
 ```bash

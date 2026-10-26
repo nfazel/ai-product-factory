@@ -6,7 +6,7 @@ services:
       POSTGRES_PASSWORD: apf_dev_password
       POSTGRES_DB: ai_product_factory
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - apf_postgres:/var/lib/postgresql/data
 
