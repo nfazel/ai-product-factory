@@ -8,6 +8,7 @@ import {
   alignExecutionPlan,
   assessBootstrapCompleteness,
   assessPlanConsistency,
+  authorisationStepFor,
   existingSchemaPlanningNote,
   executionPlanRevisionText,
   healPlanCommandSteps,
@@ -16,10 +17,12 @@ import {
   planVerificationSummary,
   PRISMA_VALIDATE_PLACEHOLDER,
   recoveryForFailures,
+  repairPlanWorkItemCoverage,
   technicalCompletionCriteria,
   trimRedundantSchemaScope,
   validationFailureDisposition,
   validationProcessEnvironment,
+  workItemProduces,
 } from "@/modules/coding/bootstrap";
 
 const nextDesign = {
@@ -248,6 +251,58 @@ describe("repair or revise", () => {
       greenfield: true,
     });
     expect(assessment.ready).toBe(true);
+  });
+
+  it("rejects an authorised file that has no covering work item", () => {
+    const files = [...v2Files, ".gitignore"];
+    const steps = v2Files.map((file) => `Create ${file}.`);
+    const result = assessPlanConsistency({
+      files,
+      steps,
+      validationCommands: requiredValidation,
+      validationPlan: "Required:\nnpx prisma validate\nnpm run build\n\nNot applicable:\nnpm test",
+    });
+    expect(result.ready).toBe(false);
+    expect(result.unproducedFiles).toEqual([".gitignore"]);
+    expect(result.blockers[0]?.message).toMatch(/no work item creates/);
+  });
+
+  it("repairs missing work-item coverage for a modified file without dropping prior work", () => {
+    const prior = [
+      "Create src/app/api/discovery/feed/route.ts.",
+      "Create src/app/api/discovery/action/route.ts.",
+      "Create src/app/discovery/page.tsx.",
+    ];
+    const files = [
+      "src/app/api/discovery/feed/route.ts",
+      "src/app/api/discovery/action/route.ts",
+      "src/app/discovery/page.tsx",
+      ".gitignore",
+    ];
+    const repaired = repairPlanWorkItemCoverage({
+      files,
+      steps: prior,
+      fileStatus: { ".gitignore": "modified" },
+    });
+    expect(repaired.steps.slice(0, 3)).toEqual(prior);
+    expect(repaired.added).toEqual([
+      "Modify .gitignore to exclude generated files from version control.",
+    ]);
+    expect(workItemProduces(repaired.steps, ".gitignore")).toBe(true);
+    const result = assessPlanConsistency({
+      files,
+      steps: repaired.steps,
+      validationCommands: requiredValidation,
+      validationPlan: "Required:\nnpx prisma validate\nnpm run build\n\nNot applicable:\nnpm test",
+    });
+    expect(result.ready).toBe(true);
+    expect(result.unproducedFiles).toEqual([]);
+  });
+
+  it("names create, modify, and delete authorisation work items from the change verb", () => {
+    expect(authorisationStepFor("src/app/page.tsx", "created")).toContain("Create src/app/page.tsx");
+    expect(authorisationStepFor("src/lib/db.ts", "modified")).toBe("Update src/lib/db.ts.");
+    expect(authorisationStepFor("README.md", "deleted")).toBe("Delete README.md.");
   });
 
   it("fails when npm test is not applicable and unit tests are also required", () => {

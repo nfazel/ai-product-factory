@@ -1,10 +1,14 @@
+import { ViewChangesButton } from "@/components/build/code-changes-viewer";
 import {
   ApproveTaskButton,
   ApprovedCommit,
   ReviewActions,
+  ScopeResolution,
   StartCodingButton,
+  ValidateExistingImplementationButton,
   WorkspaceRecovery,
 } from "@/components/build/coding-controls";
+import { VALIDATE_EXISTING_HELP, VALIDATE_EXISTING_LABEL } from "@/modules/coding/validate-existing";
 import { CodingProgressPanel } from "@/components/build/coding-progress-panel";
 import { ExecutionPlanReview } from "@/components/build/execution-plan-review";
 import { approvedPlanWindows, codeReviewGuidance, evaluatePlanChecks, type CheckEvidenceInput } from "@/modules/coding/check-identity";
@@ -24,123 +28,167 @@ function asList(value: unknown) {
 export function CodingPanel({
   productId,
   coding,
+  taskId,
+  embedded = false,
 }: {
   productId: string;
   coding: CodingView | null;
+  taskId?: string;
+  embedded?: boolean;
 }) {
   if (!coding) return null;
+  const tasks = taskId ? coding.tasks.filter((task) => task.id === taskId) : coding.tasks;
+  if (taskId && tasks.length === 0) return null;
   return (
-    <section className="space-y-4 rounded-2xl border bg-card p-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <p className="text-xs font-medium tracking-wide text-indigo-700">CODING EXECUTION</p>
-          <h2 className="text-lg font-semibold">Coding Agent</h2>
-        </div>
-        <span className="rounded-full bg-stone-100 px-2.5 py-1 text-xs font-medium text-stone-700">
-          {coding.readiness.label}
-        </span>
-      </div>
-      <p className="text-sm leading-6 text-muted-foreground">
-        The Coding Agent executes one approved implementation task in an isolated Git worktree. It does not push, merge, or approve its own changes.
-        {coding.repositoryConfigured
-          ? " This product repository is ready."
-          : " This product does not have a repository yet. Set up the product repository before starting Coding."}
-      </p>
-      {coding.integrationBase ? <IntegrationBaseStatus base={coding.integrationBase} /> : null}
-      {coding.readiness.blockers.length > 0 ? (
-        <ul className="list-disc space-y-1 pl-5 text-sm text-amber-950">
-          {coding.readiness.blockers.map((reason) => (
-            <li key={reason}>{reason}</li>
-          ))}
-        </ul>
-      ) : null}
+    <section className={embedded ? "space-y-4" : "space-y-4 rounded-2xl border bg-card p-5"}>
+      {embedded ? null : (
+        <>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-medium tracking-wide text-indigo-700">CODING EXECUTION</p>
+              <h2 className="text-lg font-semibold">Coding Agent</h2>
+            </div>
+            <span className="rounded-full bg-stone-100 px-2.5 py-1 text-xs font-medium text-stone-700">
+              {coding.readiness.label}
+            </span>
+          </div>
+          <p className="text-sm leading-6 text-muted-foreground">
+            The Coding Agent executes one approved implementation task in an isolated Git worktree. It does not push, merge, or approve its own changes.
+            {coding.repositoryConfigured
+              ? " This product repository is ready."
+              : " This product does not have a repository yet. Set up the product repository before starting Coding."}
+          </p>
+          {coding.integrationBase ? <IntegrationBaseStatus base={coding.integrationBase} /> : null}
+          {coding.readiness.blockers.length > 0 ? (
+            <ul className="list-disc space-y-1 pl-5 text-sm text-amber-950">
+              {coding.readiness.blockers.map((reason) => (
+                <li key={reason}>{reason}</li>
+              ))}
+            </ul>
+          ) : null}
+        </>
+      )}
       <div className="space-y-4">
-        {coding.tasks.filter((task) => task.workspace?.plan).map((task) => {
-          const latestRun = task.workspace!.implementRuns?.at(-1) ?? null;
-          const planExecuted = approvedPlanWasExecuted(
-            task.workspace!.plan,
-            latestRun ? { startedAt: latestRun.startedAt, input: task.workspace!.agentRun?.input ?? { phase: "implement" } } : null,
-          );
-          return (
-          <ExecutionPlanReview
-            key={task.workspace!.id}
-            productId={productId}
-            workspaceId={task.workspace!.id}
-            workspaceStatus={task.workspace!.status}
-            plan={task.workspace!.plan!}
-            objective={task.workspace!.contract?.objective || task.objective}
-            allowedPaths={asList(task.workspace!.contract?.allowedPaths)}
-            restrictedPaths={asList(task.workspace!.contract?.restrictedPaths)}
-            dependencies={asList(task.workspace!.contract?.dependencies)}
-            architectureConstraints={task.workspace!.contract?.architectureConstraints || "Not recorded at planning time."}
-            maxFiles={task.workspace!.contract?.maxFiles ?? 8}
-            hasCodeChanges={Array.isArray(task.workspace!.diff?.files) && task.workspace!.diff.files.length > 0}
-            planExecuted={planExecuted}
-            contractReady={task.workspace!.contractFlight?.ready ?? true}
-            contractMessage={task.workspace!.contractFlight?.blockers[0]?.message ?? "Execution Plan cannot be approved because a required operation is not permitted by the current coding contract."}
-            revisedPlanReady={Boolean(task.workspace!.revisedPlanReady)}
-            stale={task.workspace!.stale}
-            staleReason={task.workspace!.staleReason}
-            setupCommands={asList(task.workspace!.plan?.setupCommands)}
-            validationCommands={parsePlannedCommands(task.workspace!.plan?.validationCommands)}
-            trace={[
-              ["Outcome", task.trace.outcome],
-              ["Capability", task.trace.capability],
-              ["Epic", task.trace.epic],
-              ["Feature", task.trace.feature],
-              ["Story", task.trace.story],
-              ["Product acceptance criteria", task.trace.acceptanceCriteria.join("; ") || "Not linked"],
-              ["Implementation task", task.trace.task],
-            ]}
-          />
-          );
-        })}
-        {coding.tasks.map((task) => (
-          <article key={task.id} className="rounded-xl border p-4">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <h3 className="font-medium">{task.title}</h3>
-                <p className="mt-1 text-sm text-muted-foreground">{task.objective}</p>
-              </div>
-              <div className="text-right text-xs text-muted-foreground">
-                <p>Task {task.status}</p>
-                <p>
-                  Risk {task.riskLevel ? CODING_RISK_LABEL[task.riskLevel as CodingRiskLevelName] : "Not assessed"}
-                </p>
-                <p>
-                  Mode{" "}
-                  {task.executionMode
-                    ? CODING_EXECUTION_LABEL[task.executionMode as CodingExecutionModeName]
-                    : "Not assessed"}
-                </p>
-                <p>Workspace {task.workspace?.status ?? "None"}</p>
-              </div>
-            </div>
-            {task.blockers.length > 0 ? (
-              <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-muted-foreground">
-                {task.blockers.map((reason) => (
-                  <li key={reason}>{reason}</li>
-                ))}
-              </ul>
-            ) : null}
-            <details className="mt-3">
-              <summary className="cursor-pointer text-sm font-medium">Evidence</summary>
-              <div className="mt-3 space-y-3">
-                <Trace trace={task.trace} />
-                {task.preview ? <ContractPreview preview={task.preview} story={task.trace.story} /> : null}
-              </div>
-            </details>
-            <div className="mt-4 flex flex-wrap gap-3">
-              {task.status === "PROPOSED" || task.status === "BLOCKED" ? (
-                <ApproveTaskButton productId={productId} taskId={task.id} />
-              ) : null}
-              {task.canStart ? <StartCodingButton productId={productId} taskId={task.id} /> : null}
-            </div>
-            {task.workspace ? <WorkspaceDetail productId={productId} taskTitle={task.title} workspace={task.workspace} /> : null}
-          </article>
+        {tasks.filter((task) => task.workspace?.plan).map((task) => (
+          <TaskExecutionPlan key={task.workspace!.id} productId={productId} task={task} />
+        ))}
+        {tasks.map((task) => (
+          <CodingTaskCard key={task.id} productId={productId} task={task} compact={embedded} />
         ))}
       </div>
     </section>
+  );
+}
+
+export function TaskExecutionPlan({
+  productId,
+  task,
+}: {
+  productId: string;
+  task: CodingView["tasks"][number];
+}) {
+  if (!task.workspace?.plan) {
+    return <p className="text-sm text-muted-foreground">No execution plan has been generated for this task yet.</p>;
+  }
+  const latestRun = task.workspace.implementRuns?.at(-1) ?? null;
+  const planExecuted = approvedPlanWasExecuted(
+    task.workspace.plan,
+    latestRun ? { startedAt: latestRun.startedAt, input: task.workspace.agentRun?.input ?? { phase: "implement" } } : null,
+  );
+  return (
+    <ExecutionPlanReview
+      productId={productId}
+      workspaceId={task.workspace.id}
+      workspaceStatus={task.workspace.status}
+      plan={task.workspace.plan}
+      objective={task.workspace.contract?.objective || task.objective}
+      allowedPaths={asList(task.workspace.contract?.allowedPaths)}
+      restrictedPaths={asList(task.workspace.contract?.restrictedPaths)}
+      dependencies={asList(task.workspace.contract?.dependencies)}
+      architectureConstraints={task.workspace.contract?.architectureConstraints || "Not recorded at planning time."}
+      maxFiles={task.workspace.contract?.maxFiles ?? 8}
+      hasCodeChanges={Array.isArray(task.workspace.diff?.files) && task.workspace.diff.files.length > 0}
+      planExecuted={planExecuted}
+      contractReady={task.workspace.contractFlight?.ready ?? true}
+      contractMessage={task.workspace.contractFlight?.blockers[0]?.message ?? "Execution Plan cannot be approved because a required operation is not permitted by the current coding contract."}
+      revisedPlanReady={Boolean(task.workspace.revisedPlanReady)}
+      stale={task.workspace.stale}
+      staleReason={task.workspace.staleReason}
+      setupCommands={asList(task.workspace.plan.setupCommands)}
+      validationCommands={parsePlannedCommands(task.workspace.plan.validationCommands)}
+      trace={[
+        ["Outcome", task.trace.outcome],
+        ["Capability", task.trace.capability],
+        ["Epic", task.trace.epic],
+        ["Feature", task.trace.feature],
+        ["Story", task.trace.story],
+        ["Product acceptance criteria", task.trace.acceptanceCriteria.join("; ") || "Not linked"],
+        ["Implementation task", task.trace.task],
+      ]}
+    />
+  );
+}
+
+export function CodingTaskCard({
+  productId,
+  task,
+  compact = false,
+}: {
+  productId: string;
+  task: CodingView["tasks"][number];
+  compact?: boolean;
+}) {
+  return (
+    <article className={compact ? "space-y-4" : "rounded-xl border p-4"}>
+      {compact ? null : (
+        <>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 className="font-medium">{task.title}</h3>
+              <p className="mt-1 text-sm text-muted-foreground">{task.objective}</p>
+            </div>
+            <div className="text-right text-xs text-muted-foreground">
+              <p>Task {task.status}</p>
+              <p>
+                Risk {task.riskLevel ? CODING_RISK_LABEL[task.riskLevel as CodingRiskLevelName] : "Not assessed"}
+              </p>
+              <p>
+                Mode{" "}
+                {task.executionMode
+                  ? CODING_EXECUTION_LABEL[task.executionMode as CodingExecutionModeName]
+                  : "Not assessed"}
+              </p>
+              <p>Workspace {task.workspace?.status ?? "None"}</p>
+            </div>
+          </div>
+          {task.blockers.length > 0 ? (
+            <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-muted-foreground">
+              {task.blockers.map((reason) => (
+                <li key={reason}>{reason}</li>
+              ))}
+            </ul>
+          ) : null}
+          <details className="mt-3">
+            <summary className="cursor-pointer text-sm font-medium">Evidence</summary>
+            <div className="mt-3 space-y-3">
+              <Trace trace={task.trace} />
+              {task.preview ? <ContractPreview preview={task.preview} story={task.trace.story} /> : null}
+            </div>
+          </details>
+          <div className="mt-4 flex flex-wrap gap-3">
+            {task.status === "PROPOSED" || task.status === "BLOCKED" ? (
+              <ApproveTaskButton productId={productId} taskId={task.id} />
+            ) : null}
+            {task.canStart ? <StartCodingButton productId={productId} taskId={task.id} /> : null}
+          </div>
+        </>
+      )}
+      {task.workspace ? (
+        <CodingWorkspaceDetail productId={productId} taskTitle={task.title} workspace={task.workspace} />
+      ) : compact ? (
+        <p className="text-sm text-muted-foreground">Coding has not started for this task.</p>
+      ) : null}
+    </article>
   );
 }
 
@@ -224,131 +272,168 @@ function ContractPreview({
   );
 }
 
-function WorkspaceDetail({
+export function CodingWorkspaceDetail({
   productId,
   taskTitle,
   workspace,
+  sections = ["summary", "progress", "files", "validation", "review", "recovery"],
 }: {
   productId: string;
   taskTitle: string;
   workspace: NonNullable<CodingView["tasks"][number]["workspace"]>;
+  sections?: Array<"summary" | "progress" | "files" | "validation" | "review" | "recovery" | "history">;
 }) {
   const files = Array.isArray(workspace.diff?.files) ? workspace.diff.files : [];
   const findings = workspace.selfReview?.findings;
+  const show = (section: (typeof sections)[number]) => sections.includes(section);
   return (
-    <div className="mt-4 space-y-4 border-t pt-4">
-      {workspace.stale ? (
+    <div className={sections.length === 6 ? "mt-4 space-y-4 border-t pt-4" : "space-y-4"}>
+      {workspace.stale && show("summary") ? (
         <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-950">
           The approved coding instructions are out of date. {workspace.staleReason} Review them, then resume or abandon this workspace.
         </p>
       ) : null}
-      <div className="grid gap-3 text-sm md:grid-cols-2">
-        <Fact label="Branch" value={workspace.branchName} />
-        <Fact label="Coding base commit" value={workspace.baseCommit || "Not captured"} />
-        <Fact label="Head commit" value={workspace.headCommit || "Not committed"} />
-        <Fact label="Plan" value={workspace.plan?.status ?? "Not created"} />
-      </div>
-      <p className="text-sm text-muted-foreground">
-        New coding worktrees start from the product integration branch tip after a safe GitHub synchronisation check. They do not start from an arbitrary local HEAD.
-      </p>
-      <p className="text-sm text-muted-foreground">Plan {workspace.plan?.status ?? "Not created"} · version {workspace.plan?.version ?? "—"}</p>
-      <CodingProgressPanel
-        productId={productId}
-        workspaceId={workspace.id}
-        workspace={workspace}
-        contractBlocked={Boolean(workspace.contractFlight && !workspace.contractFlight.ready && workspace.plan?.status === "APPROVED")}
-        implementRuns={workspace.implementRuns ?? []}
-      />
-      <div>
-        <p className="text-sm font-medium">Files changed</p>
-        <p className="text-sm text-muted-foreground">
-          {files.length} files, +{workspace.diff?.additions ?? 0} / -{workspace.diff?.deletions ?? 0}
-          {workspace.diff?.truncated ? " Diff truncated." : ""}
-        </p>
-        <ul className="mt-1 text-sm text-muted-foreground">
-          {files.map((file, index) => {
-            const item = file as { path?: string; status?: string; additions?: number; deletions?: number };
-            const identity = `${item.status ?? "changed"}:${item.path ?? "unknown"}`;
-            const identities = files.map((entry) => {
-              const record = entry as { path?: string; status?: string };
-              return `${record.status ?? "changed"}:${record.path ?? "unknown"}`;
-            });
-            const earlier = identities.slice(0, index).filter((value) => value === identity).length;
-            return (
-              <li key={earlier === 0 ? identity : `${identity}:${earlier + 1}`}>
-                {item.status} {item.path} +{item.additions ?? 0} -{item.deletions ?? 0}
-              </li>
-            );
-          })}
-        </ul>
-        {workspace.diff?.patch ? (
-          <pre className="mt-2 max-h-80 overflow-auto rounded-lg bg-stone-950 p-3 text-xs text-stone-100">{workspace.diff.patch}</pre>
-        ) : null}
-      </div>
-      <ChecksAndEvidence workspace={workspace} />
-      {workspace.selfReview ? (
-        <div className="text-sm">
-          <p className="font-medium">Self review</p>
-          <p className="text-muted-foreground">AI analysis, not independent verification. {workspace.selfReview.summary}</p>
-          <FindingList findings={findings} />
+      {show("summary") ? (
+        <>
+          <div className="grid gap-3 text-sm md:grid-cols-2">
+            <Fact label="Branch" value={workspace.branchName} />
+            <Fact label="Coding base commit" value={workspace.baseCommit || "Not captured"} />
+            <Fact label="Head commit" value={workspace.headCommit || "Not committed"} />
+            <Fact label="Plan" value={workspace.plan?.status ?? "Not created"} />
+          </div>
+          <p className="text-sm text-muted-foreground">
+            New coding worktrees start from the product integration branch tip after a safe GitHub synchronisation check. They do not start from an arbitrary local HEAD.
+          </p>
+          <p className="text-sm text-muted-foreground">Plan {workspace.plan?.status ?? "Not created"} · version {workspace.plan?.version ?? "—"}</p>
+        </>
+      ) : null}
+      {show("progress") ? (
+        <CodingProgressPanel
+          productId={productId}
+          workspaceId={workspace.id}
+          workspace={workspace}
+          contractBlocked={Boolean(workspace.contractFlight && !workspace.contractFlight.ready && workspace.plan?.status === "APPROVED")}
+          implementRuns={workspace.implementRuns ?? []}
+        />
+      ) : null}
+      {show("files") ? (
+        <div>
+          <p className="text-sm font-medium">Files changed</p>
+          <p className="text-sm text-muted-foreground">
+            {files.length} files, +{workspace.diff?.additions ?? 0} / -{workspace.diff?.deletions ?? 0}
+            {workspace.diff?.truncated ? " Diff truncated." : ""}
+          </p>
+          <ul className="mt-1 text-sm text-muted-foreground">
+            {files.map((file, index) => {
+              const item = file as { path?: string; status?: string; additions?: number; deletions?: number };
+              const identity = `${item.status ?? "changed"}:${item.path ?? "unknown"}`;
+              const identities = files.map((entry) => {
+                const record = entry as { path?: string; status?: string };
+                return `${record.status ?? "changed"}:${record.path ?? "unknown"}`;
+              });
+              const earlier = identities.slice(0, index).filter((value) => value === identity).length;
+              return (
+                <li key={earlier === 0 ? identity : `${identity}:${earlier + 1}`}>
+                  {item.status} {item.path} +{item.additions ?? 0} -{item.deletions ?? 0}
+                </li>
+              );
+            })}
+          </ul>
+          {workspace.diff?.patch ? (
+            <details className="mt-2">
+              <summary className="cursor-pointer text-sm font-medium">View diff</summary>
+              <pre className="mt-2 max-h-80 overflow-auto rounded-lg bg-stone-950 p-3 text-xs text-stone-100">{workspace.diff.patch}</pre>
+            </details>
+          ) : null}
         </div>
       ) : null}
-      {workspace.escalations.length > 0 ? (
-        <div className="text-sm">
-          <p className="font-medium">Escalations</p>
-          <ul className="mt-1 space-y-1 text-muted-foreground">
-            {workspace.escalations.map((item) => (
-              <li key={item.id}>
-                {item.status} {item.type}: {item.description} {item.recommendedAction}
+      {show("validation") ? <ChecksAndEvidence workspace={workspace} /> : null}
+      {show("review") ? (
+        <>
+          {workspace.selfReview ? (
+            <div className="text-sm">
+              <p className="font-medium">Self review</p>
+              <p className="text-muted-foreground">AI analysis, not independent verification. {workspace.selfReview.summary}</p>
+              <FindingList findings={findings} />
+            </div>
+          ) : null}
+          {workspace.escalations.length > 0 ? (
+            <div className="text-sm">
+              <p className="font-medium">Escalations</p>
+              <ul className="mt-1 space-y-1 text-muted-foreground">
+                {workspace.escalations.map((item) => (
+                  <li key={item.id}>
+                    {item.status} {item.type}: {item.description} {item.recommendedAction}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          <HumanCodeReview
+            productId={productId}
+            workspaceId={workspace.id}
+            taskTitle={taskTitle}
+            workspace={workspace}
+          />
+        </>
+      ) : null}
+      {show("recovery") && workspace.status !== "COMPLETED" && workspace.status !== "ABANDONED" ? (
+        <div className="space-y-2">
+          <p className="text-sm text-muted-foreground">{workspace.planIncomplete ? "Coding stays closed until the execution plan is revised and the next version is approved. Revising does not start coding." : "Resume starts another implementation pass in this workspace. A failed validation is repaired inside the approved plan. These actions do not approve the code or start verification."}</p>
+          <WorkspaceRecovery
+            productId={productId}
+            workspaceId={workspace.id}
+            stale={workspace.stale}
+            allowRetry={Boolean(workspace.retryOffer)}
+            allowValidateExisting={Boolean(workspace.validateExistingOffer)}
+            allowResume={!workspace.planIncomplete && !workspace.repairOffer && !workspace.recordRepairOffer && !workspace.retryOffer && workspace.plan?.status === "APPROVED" && (workspace.status === "FAILED" || workspace.status === "ACTIVE")}
+          />
+        </div>
+      ) : null}
+      {show("history") ? <CodingHistory workspace={workspace} /> : null}
+    </div>
+  );
+}
+
+function CodingHistory({
+  workspace,
+}: {
+  workspace: NonNullable<CodingView["tasks"][number]["workspace"]>;
+}) {
+  const runs = workspace.implementRuns ?? [];
+  return (
+    <div className="space-y-4 text-sm">
+      <div>
+        <p className="font-medium">Coding runs</p>
+        {runs.length === 0 ? (
+          <p className="mt-1 text-muted-foreground">No implementation runs yet.</p>
+        ) : (
+          <ul className="mt-2 space-y-2 text-muted-foreground">
+            {runs.map((run) => (
+              <li key={run.id} className="rounded-lg border px-3 py-2">
+                <p className="font-medium text-stone-800">{run.outcome || run.status}</p>
+                <p className="text-xs">
+                  Plan v{run.planVersion ?? "—"}
+                  {run.completedAt ? ` · finished ${run.completedAt.toISOString()}` : run.startedAt ? ` · started ${run.startedAt.toISOString()}` : ""}
+                </p>
+                {run.error ? <p className="mt-1 text-amber-950">{run.error}</p> : null}
               </li>
             ))}
           </ul>
-        </div>
-      ) : null}
-      <div>
-        <p className="text-sm font-medium">Code review</p>
-        <p className="text-sm text-muted-foreground">
-          {taskTitle}. {codeReviewGuidance({
-            status: workspace.status,
-            commitOffer: workspace.commitOffer,
-            headCommit: workspace.headCommit,
-            baseCommit: workspace.baseCommit,
-          })}
-        </p>
-        {workspace.status === "COMPLETED" && workspace.headCommit && workspace.headCommit !== workspace.baseCommit ? (
-          <div className="mt-3">
-            <ApprovedCommit productId={productId} workspaceId={workspace.id} reviewed={0} outOfScope={0} committedSha={workspace.headCommit} />
-          </div>
-        ) : null}
-        {workspace.status === "READY_FOR_REVIEW" ? (
-          <div className="mt-3 space-y-3">
-            {workspace.codeReview && !workspace.codeReview.approvable ? (
-              <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-950">{workspace.codeReview.reason}</p>
-            ) : null}
-            {workspace.commitOffer && workspace.codeReview ? (
-              <ApprovedCommit
-                productId={productId}
-                workspaceId={workspace.id}
-                reviewed={workspace.codeReview.approved.length + workspace.codeReview.derived.length}
-                outOfScope={workspace.codeReview.outOfScope.length}
-              />
-            ) : null}
-            <ReviewActions productId={productId} workspaceId={workspace.id} allowApprove={!workspace.commitOffer && workspace.codeReview?.approvable !== false} hideApprove={Boolean(workspace.commitOffer)} />
-          </div>
-        ) : null}
+        )}
       </div>
-      {workspace.status !== "COMPLETED" && workspace.status !== "ABANDONED" ? (
-        <div className="space-y-2">
-          <p className="text-sm text-muted-foreground">{workspace.planIncomplete ? "Coding stays closed until the execution plan is revised and the next version is approved. Revising does not start coding." : "Resume starts another implementation pass in this workspace. A failed validation is repaired inside the approved plan. These actions do not approve the code or start verification."}</p>
-        <WorkspaceRecovery
-          productId={productId}
-          workspaceId={workspace.id}
-          stale={workspace.stale}
-          allowRetry={Boolean(workspace.retryOffer)}
-          allowResume={!workspace.planIncomplete && !workspace.repairOffer && !workspace.recordRepairOffer && !workspace.retryOffer && workspace.plan?.status === "APPROVED" && (workspace.status === "FAILED" || workspace.status === "ACTIVE")}
-        />
-        </div>
-      ) : null}
+      <details>
+        <summary className="cursor-pointer font-medium">Full evidence audit</summary>
+        <ul className="mt-2 space-y-1 text-muted-foreground">
+          {workspace.evidence.map((item) => (
+            <li key={item.id}>
+              {item.type} · {item.source} · {item.result}
+              {item.command ? ` · ${item.command}` : ""}
+              {item.description && item.description !== item.command ? ` · ${item.description}` : ""}
+            </li>
+          ))}
+        </ul>
+      </details>
     </div>
   );
 }
@@ -366,6 +451,137 @@ function FindingList({ findings }: { findings: unknown }) {
         <li key={line}>{line}</li>
       ))}
     </ul>
+  );
+}
+
+function HumanCodeReview({
+  productId,
+  workspaceId,
+  taskTitle,
+  workspace,
+}: {
+  productId: string;
+  workspaceId: string;
+  taskTitle: string;
+  workspace: NonNullable<CodingView["tasks"][number]["workspace"]>;
+}) {
+  const review = workspace.codeReview;
+  const ready = workspace.status === "READY_FOR_REVIEW";
+  const committed = workspace.status === "COMPLETED" && workspace.headCommit && workspace.headCommit !== workspace.baseCommit;
+  return (
+    <div className="space-y-3 rounded-xl border border-stone-200 bg-stone-50 px-4 py-4">
+      <div>
+        <p className="text-sm font-medium text-stone-900">Code review</p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          {taskTitle}. {codeReviewGuidance({
+            status: workspace.status,
+            commitOffer: workspace.commitOffer,
+            headCommit: workspace.headCommit,
+            baseCommit: workspace.baseCommit,
+          })}
+        </p>
+        <p className="mt-1 text-sm text-muted-foreground">Execution plan v{workspace.plan?.version ?? "—"} · {workspace.plan?.status ?? "none"}.</p>
+      </div>
+      {review ? (
+        <div className="space-y-2 text-sm text-stone-900">
+          <p>
+            Source changes: {review.created.length} created, {review.modified.length} modified, {review.deleted.length} deleted.
+          </p>
+          <p>
+            Plan coverage: {review.approved.length} approved, {review.derived.length} derived, {review.outOfScope.length} out of scope.
+          </p>
+          {review.created.length > 0 ? <p>Created: {review.created.join(", ")}</p> : null}
+          {review.modified.length > 0 ? <p>Modified: {review.modified.join(", ")}</p> : null}
+          {review.deleted.length > 0 ? <p>Deleted: {review.deleted.join(", ")}</p> : null}
+          <div>
+            <p className="font-medium">Required checks</p>
+            <ul className="mt-1 space-y-1 text-muted-foreground">
+              {review.checks.length === 0 ? <li>None recorded.</li> : review.checks.map((check) => (
+                <li key={check.command}>{check.passed ? "✓" : "✗"} {check.command}{check.stale ? " — stale" : ""} · {check.result}</li>
+              ))}
+            </ul>
+          </div>
+          {review.setup.length > 0 ? (
+            <div>
+              <p className="font-medium">Setup</p>
+              <ul className="mt-1 space-y-1 text-muted-foreground">
+                {review.setup.map((item) => (
+                  <li key={item.command}>{item.passed ? "✓" : "✗"} {item.command}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          <div className="pt-1">
+            <ViewChangesButton
+              files={workspace.diff?.files}
+              patch={workspace.diff?.patch}
+              truncated={Boolean(workspace.diff?.truncated)}
+              baseCommit={workspace.baseCommit}
+              headCommit={workspace.headCommit}
+            />
+          </div>
+        </div>
+      ) : (
+        <p className="text-sm text-muted-foreground">Code review details appear once the workspace has a reviewable diff and check evidence.</p>
+      )}
+      {!review && workspace.diff ? (
+        <div className="pt-1">
+          <ViewChangesButton
+            files={workspace.diff.files}
+            patch={workspace.diff.patch}
+            truncated={Boolean(workspace.diff.truncated)}
+            baseCommit={workspace.baseCommit}
+            headCommit={workspace.headCommit}
+          />
+        </div>
+      ) : null}
+      {review && !review.approvable && review.reason ? (
+        <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-950">{review.reason}</p>
+      ) : null}
+      {review && review.outOfScope.length > 0 ? (
+        <div className="space-y-2">
+          <p className="text-sm text-amber-950">Out-of-scope files must be restored or authorised before approval.</p>
+          <ScopeResolution productId={productId} workspaceId={workspaceId} planVersion={review.planVersion} files={review.outOfScope} />
+        </div>
+      ) : null}
+      {committed ? (
+        <ApprovedCommit productId={productId} workspaceId={workspaceId} reviewed={0} outOfScope={0} committedSha={workspace.headCommit} />
+      ) : null}
+      {ready && workspace.commitOffer && review ? (
+        <ApprovedCommit
+          productId={productId}
+          workspaceId={workspaceId}
+          reviewed={review.approved.length + review.derived.length}
+          outOfScope={review.outOfScope.length}
+        />
+      ) : null}
+      {ready && workspace.validateExistingOffer && !workspace.commitOffer && review && !review.approvable ? (
+        <div className="space-y-2 rounded-lg border border-stone-200 bg-white px-3 py-3 text-sm">
+          <p className="font-medium">{VALIDATE_EXISTING_LABEL}</p>
+          <p className="text-muted-foreground">{VALIDATE_EXISTING_HELP}</p>
+          <p className="text-muted-foreground">A newer execution plan was approved for existing scope. Re-run checks against the current snapshot before approving code. This does not call the Coding Agent.</p>
+          <ValidateExistingImplementationButton productId={productId} workspaceId={workspaceId} />
+        </div>
+      ) : null}
+      {ready ? (
+        <div className="space-y-3 rounded-lg border border-stone-200 bg-white px-3 py-3">
+          <p className="text-sm font-medium text-stone-900">Human decision</p>
+          {!workspace.commitOffer && review?.approvable ? (
+            <p className="text-sm text-muted-foreground">Next action: Approve Code Changes. This does not commit, push, or start Independent Verification.</p>
+          ) : null}
+          <ReviewActions
+            productId={productId}
+            workspaceId={workspaceId}
+            allowApprove={!workspace.commitOffer && review?.approvable === true}
+            hideApprove={Boolean(workspace.commitOffer) || Boolean(workspace.validateExistingOffer && review && !review.approvable)}
+          />
+        </div>
+      ) : workspace.status !== "COMPLETED" ? (
+        <p className="text-sm text-muted-foreground">
+          Approve Code Changes stays closed until the workspace is ready for review.
+        </p>
+      ) : null}
+    </div>
   );
 }
 
@@ -408,12 +624,14 @@ export function ChecksAndEvidence({
       })
     : [];
   const planVersion = workspace.plan?.version ?? 0;
+  const acceptPriorEvidence = workspace.status === "READY_FOR_REVIEW" || workspace.status === "COMPLETED";
   const setup = workspace.plan
     ? evaluatePlanChecks({
         planVersion,
         windows,
         checks: asStrings(workspace.plan.setupCommands).map((command) => ({ command, applicability: "REQUIRED" })),
         evidence,
+        acceptPriorEvidence,
       }).required
     : [];
   const validation = workspace.plan
@@ -422,6 +640,7 @@ export function ChecksAndEvidence({
         windows,
         checks: parsePlannedCommands(workspace.plan.validationCommands),
         evidence,
+        acceptPriorEvidence,
       })
     : { required: [], notApplicable: [] };
   const approval = workspace.approvals.find((item) => !item.stale);

@@ -8,12 +8,14 @@ import { idleState } from "@/lib/action-state";
 import {
   approveVerificationAction,
   integratedAction,
+  recoverVerificationAction,
   manualResultAction,
   notApplicableAction,
   rejectVerificationAction,
   requestTestingAction,
   rerunFailedAction,
   retryVerificationAction,
+  startNewVerificationAction,
   startVerificationAction,
 } from "@/server/actions/verification";
 
@@ -64,6 +66,43 @@ export function RetryVerificationButton({ productId, taskId }: { productId: stri
   );
 }
 
+/**
+ * Explicit, human-only request for a fresh attempt after an inconclusive result, or after a result awaiting approval.
+ * Nothing starts until the person submits this form. The server applies the same policy again before it runs.
+ */
+export function StartNewVerificationButton({ productId, taskId }: { productId: string; taskId: string }) {
+  const [state, action] = useActionState(startNewVerificationAction, idleState);
+  return (
+    <form action={action} className="space-y-2">
+      <Hidden productId={productId} taskId={taskId} />
+      <SubmitButton pendingLabel="Starting a new verification attempt">Start New Verification Attempt</SubmitButton>
+      <p className="text-sm text-muted-foreground">
+        Starting a new attempt preserves the previous results and creates a separate verification record.
+      </p>
+      <AttemptProgress label="A new verification attempt is running. The previous attempt is kept in History." />
+      <FormMessage state={state} />
+    </form>
+  );
+}
+
+/**
+ * Explicit, human-only recovery for an attempt that stopped without finishing. It releases what the attempt left
+ * behind and marks it failed. It never starts a new attempt.
+ */
+export function RecoverVerificationButton({ productId, sessionId }: { productId: string; sessionId: string }) {
+  const [state, action] = useActionState(recoverVerificationAction, idleState);
+  return (
+    <form action={action} className="space-y-2">
+      <Hidden productId={productId} sessionId={sessionId} />
+      <SubmitButton pendingLabel="Recovering the interrupted attempt">Recover Interrupted Attempt</SubmitButton>
+      <p className="text-sm text-muted-foreground">
+        This releases the temporary database, directory and processes the stopped attempt recorded, and marks it failed. It does not start a new attempt, and earlier records stay in History.
+      </p>
+      <FormMessage state={state} />
+    </form>
+  );
+}
+
 export function VerificationReview({
   productId,
   sessionId,
@@ -94,6 +133,9 @@ export function VerificationReview({
         <form action={rerun} className="space-y-2">
           <Hidden productId={productId} sessionId={sessionId} />
           <SubmitButton pendingLabel="Re-running">Re-run failed tests</SubmitButton>
+          <p className="text-sm text-muted-foreground">
+            Runs the failed tests again inside this attempt. It does not start a new attempt, and the earlier results are kept.
+          </p>
           <FormMessage state={rerunState} />
         </form>
       ) : null}
@@ -101,7 +143,12 @@ export function VerificationReview({
         <form action={request} className="space-y-2">
           <Hidden productId={productId} sessionId={sessionId} />
           <TextAreaField label="What still needs testing" name="note" id={`${sessionId}-more-testing`} />
-          <SubmitButton pendingLabel="Saving">{failed ? "Review Findings / Request Changes" : "Request More Testing"}</SubmitButton>
+          <SubmitButton pendingLabel="Saving">{failed ? "Review Findings / Request Changes" : "Record Request For More Testing"}</SubmitButton>
+          {review ? (
+            <p className="text-sm text-muted-foreground">
+              This only records your request. No verification runs. To run a new attempt, use Start New Verification Attempt.
+            </p>
+          ) : null}
           <FormMessage state={requestState} />
         </form>
       ) : null}

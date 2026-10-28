@@ -84,6 +84,35 @@ describe("workspace diff persistence", () => {
     await expect(captureWorkspaceDiff(dir)).rejects.toThrow(/not a git repository/i);
   });
 
+  it("surfaces committed implementation changes against the coding baseline when the tree is clean", async () => {
+    const dir = gitRepo();
+    const git = (args: string[]) => execFileSync("git", ["-c", "commit.gpgsign=false", "-c", "core.fsmonitor=false", ...args], { cwd: dir, encoding: "utf8" });
+    const base = git(["rev-parse", "HEAD"]).trim();
+    fs.mkdirSync(path.join(dir, "src"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "src/feed.ts"), "export const feed = 1\n");
+    git(["add", "src/feed.ts"]);
+    git(["commit", "-m", "implement"]);
+    fs.writeFileSync(path.join(dir, "src/feed.ts"), "export const feed = 2\n");
+    git(["add", "src/feed.ts"]);
+    git(["commit", "-m", "validate"]);
+    const head = git(["rev-parse", "HEAD"]).trim();
+    expect(git(["status", "--porcelain"]).trim()).toBe("");
+    const emptyWorking = await captureWorkspaceDiff(dir);
+    expect(emptyWorking.files).toEqual([]);
+    const diff = await captureWorkspaceDiff(dir, undefined, { baseCommit: base, requireBaselineWhenClean: true });
+    expect(diff.headCommit).toBe(head);
+    expect(diff.comparedToBase).toBe(base);
+    expect(diff.files).toEqual([expect.objectContaining({ path: "src/feed.ts", status: "added" })]);
+  });
+
+  it("refuses a clean-tree review when the baseline cannot be resolved", async () => {
+    const dir = gitRepo();
+    await expect(captureWorkspaceDiff(dir, undefined, { requireBaselineWhenClean: true })).rejects.toThrow(/baseline commit/i);
+    await expect(
+      captureWorkspaceDiff(dir, undefined, { baseCommit: "not-a-sha", requireBaselineWhenClean: true }),
+    ).rejects.toThrow(/baseline commit/i);
+  });
+
   it("strips a null byte that reaches the stored patch", () => {
     const stored = sanitizeStoredPatch("alpha\u0000beta");
     expect(stored.omittedNullBytes).toBe(true);

@@ -11,11 +11,16 @@ import { parsePlannedCommands } from "@/modules/coding/commands";
 import { asStrings } from "@/modules/coding/strings";
 import { db } from "@/lib/db";
 import { recomputeSession } from "@/modules/verification/assess";
+import { sessionResourceTracker } from "@/modules/verification/recovery";
 import { commandFailureIsEnvironment } from "@/modules/coding/bootstrap";
 import { commandUnavailable, selectVerificationChecks, type VerificationCheck } from "@/modules/verification/commands";
 import { failureReason } from "@/modules/verification/failure";
 import { verificationEntryBlockers } from "@/modules/verification/gates";
-import { VERIFICATION_SYSTEM_PROMPT, verificationUserMessage } from "@/modules/verification/prompt";
+import {
+  VERIFICATION_SYSTEM_PROMPT,
+  verificationUserMessage,
+  withDeclaredAccountKeys,
+} from "@/modules/verification/prompt";
 import {
   conditionAnalysisSchema,
   coverageMappingSchema,
@@ -26,9 +31,31 @@ import {
   verificationSummarySchema,
 } from "@/modules/verification/schema";
 import { contractText } from "@/modules/verification/contract";
-import { demonstratesCriterion } from "@/modules/verification/policy";
 import { executeVerificationTool } from "@/modules/verification/tools";
+import { inspectImplementation, type ImplementationProfile } from "@/modules/verification/inspection";
+import { LEGACY_ADAPTER_ID, verificationAdapters } from "@/modules/verification/adapters/registry";
+import { persistTestResult } from "@/modules/verification/adapters/results";
+import {
+  defaultHttpDeps,
+  HTTP_ADAPTER_ID,
+  runHttpAcceptance,
+  type HttpAcceptanceCase,
+} from "@/modules/verification/http/acceptance";
+import { EMPTY_FIXTURE_PLAN, type FixturePlan } from "@/modules/verification/http/fixtures";
+import {
+  correctionMessage,
+  validatePlanProposal,
+  validateWithBoundedCorrection,
+  type PlanningError,
+  type PlanProposal,
+} from "@/modules/verification/planning-validation";
+import type { HttpObservation } from "@/modules/verification/http/guard";
+import { assertSnapshotUnchanged, changedProductFiles } from "@/modules/verification/snapshot";
+import { assessTestStructure } from "@/modules/verification/test-binding";
+import { assessHttpEvidence } from "@/modules/verification/evidence-adequacy";
+import type { TestRunOutcome } from "@/modules/verification/test-outcome";
 import { DomainError } from "@/modules/shared/errors";
+import { randomUUID } from "node:crypto";
 import type { ZodType } from "zod";
 
 const refusal = "The Verification Agent returned a response that did not match the required structure. Nothing further was written.";
@@ -95,13 +122,59 @@ async function ask<T>(
 async function runPlan(session: NonNullable<Awaited<ReturnType<typeof loadSession>>>) {
   const contract = contractText(session.contract!);
   const criterionIds = new Set((session.task.workItem?.acceptanceCriteria ?? []).map((item) => item.id));
-  const context = boundedContext(session.workspace!.workspacePath);
+  const workspacePath = session.workspace!.workspacePath;
+  await assertSnapshotUnchanged(workspacePath, session.workspace!.baseCommit);
+  const inspection = inspectImplementation({
+    workspacePath,
+    changedFiles: asStrings(session.contract?.changedFiles),
+  });
+  await db.verificationEvidence.create({
+    data: {
+      sessionId: session.id,
+      type: "STATIC_ANALYSIS",
+      source: "REPOSITORY",
+      description: inspection.summary,
+      result: "INSPECTED",
+      command: "",
+    },
+  });
+  const context = inspection.context;
   const evidence: AIRunEvidence[] = [];
   const conditions = await ask(conditionAnalysisSchema, "verification_conditions", "conditions", contract, context, evidence);
   const plan = await ask(verificationPlanSchema, "verification_plan", "plan", contract, context, evidence);
-  const cases = await ask(testCaseSchema, "verification_test_cases", "test cases", contract, context, evidence);
+  // Test cases must see the account keys this plan declared, so they do not invent identifiers the fixture will not provision.
+  const casesContext = withDeclaredAccountKeys(context, plan.authentication);
+  const cases = await ask(testCaseSchema, "verification_test_cases", "test cases", contract, casesContext, evidence);
   const mapping = await ask(coverageMappingSchema, "verification_coverage", "coverage", contract, context, evidence);
+  // Validate the whole proposal before accepting it. One correction is allowed, and only for correctable errors.
+  const routes = inspection.profile.routes.map((route) => route.url);
   const known = (id: string) => criterionIds.has(id);
+  // Cases that cite no approved criterion are dropped before validation, so each validated case index matches the
+  // case that is stored below.
+  const knownCases = cases.testCases.filter((item) => !item.acceptanceCriterionId || known(item.acceptanceCriterionId));
+  const accepted = await validateOrCorrect({
+    session,
+    contract,
+    context: casesContext,
+    evidence,
+    initial: { authentication: plan.authentication, fixtureSteps: plan.fixtureSteps, testCases: knownCases },
+    routes,
+    profile: inspection.profile,
+    workspacePath,
+  });
+  const fixtures = { plan: accepted.validation.fixturePlan, notes: accepted.validation.fixtureNotes };
+  if (fixtures.notes.length > 0) {
+    await db.verificationEvidence.create({
+      data: {
+        sessionId: session.id,
+        type: "STATIC_ANALYSIS",
+        source: "REPOSITORY",
+        description: `Fixture plan: ${fixtures.notes.join(" ")}`,
+        result: "INSPECTED",
+        command: "",
+      },
+    });
+  }
   for (const criterion of session.task.workItem?.acceptanceCriteria ?? []) {
     await db.verificationCondition.create({
       data: {
@@ -147,12 +220,23 @@ async function runPlan(session: NonNullable<Awaited<ReturnType<typeof loadSessio
       },
     });
   }
-  for (const testCase of cases.testCases) {
+  const acceptedCases = accepted.testCases;
+  for (const [caseIndex, testCase] of acceptedCases.entries()) {
     if (testCase.acceptanceCriterionId && !known(testCase.acceptanceCriterionId)) continue;
+    const criterionId = known(testCase.acceptanceCriterionId) ? testCase.acceptanceCriterionId : null;
+    // The model proposes; the platform decides. The governance result was computed by the shared validator, so the
+    // case is manual with its reason stored whenever it cannot be executed.
+    const governed = accepted.validation.cases[caseIndex] ?? {
+      index: caseIndex,
+      automated: false,
+      adapterId: "",
+      manualReason: "The case was not validated, so a person must verify it.",
+      errors: [],
+    };
     await db.verificationTestCase.create({
       data: {
         sessionId: session.id,
-        acceptanceCriterionId: known(testCase.acceptanceCriterionId) ? testCase.acceptanceCriterionId : null,
+        acceptanceCriterionId: criterionId,
         title: testCase.title,
         purpose: conditionPurpose(conditions.conditions, testCase.acceptanceCriterionId, testCase.purpose),
         preconditions: testCase.preconditions,
@@ -162,7 +246,11 @@ async function runPlan(session: NonNullable<Awaited<ReturnType<typeof loadSessio
         priority: testCase.priority,
         source: testCase.source,
         provenance: "VERIFICATION_AGENT",
-        automated: testCase.automated,
+        automated: governed.automated,
+        manualReason: governed.automated ? "" : governed.manualReason,
+        adapterId: governed.adapterId,
+        targetSurface: testCase.targetSurface,
+        requiredCapabilities: testCase.requiredCapabilities,
         status: "READY",
         filePath: testCase.filePath,
         body: testCase.body,
@@ -171,7 +259,12 @@ async function runPlan(session: NonNullable<Awaited<ReturnType<typeof loadSessio
   }
   await db.verificationSession.update({
     where: { id: session.id },
-    data: { status: "READY", existingTestNotes: plan.existingTestNotes, aiSummary: plan.summary },
+    data: {
+      status: "READY",
+      existingTestNotes: plan.existingTestNotes,
+      aiSummary: plan.summary,
+      fixturePlan: { ...fixtures.plan, notes: fixtures.notes } as unknown as object,
+    },
   });
   return {
     output: {
@@ -193,65 +286,142 @@ function conditionPurpose(
   return negative ? `Negative path. ${purpose}` : purpose;
 }
 
+const MANUAL_NOT_RUN =
+  "This case is manual. A person must run it and record the result in Execution & results. The verification run did not execute it.";
+
+function manualNote(manualReason: string) {
+  return manualReason ? `${manualReason} ${MANUAL_NOT_RUN}` : MANUAL_NOT_RUN;
+}
+
+const TEST_RESULT_LABEL = {
+  PASSED: "EXECUTED",
+  FAILED: "FAILED",
+  BLOCKED: "BLOCKED",
+  NOT_RUN: "NOT RUN",
+} as const;
+
+/**
+ * Verification must not change the approved snapshot. A product file changed during the run means the verdict
+ * would judge something other than what was approved, so it is recorded as a blocking escalation.
+ */
+async function recordProductChanges(sessionId: string, workspacePath: string) {
+  const changed = await changedProductFiles(workspacePath);
+  if (changed.length === 0) return;
+  await db.verificationEscalation.create({
+    data: {
+      sessionId,
+      type: "IMPLEMENTATION_CHANGE",
+      description: `Verification changed files outside verification/: ${changed.slice(0, 20).join(", ")}.`,
+      reason: "The approved snapshot must not change during verification, so this verdict cannot judge it.",
+      status: "OPEN",
+    },
+  });
+}
+
+/**
+ * Makes a skipped test case visible. The row has no acceptance-criterion link, so it cannot satisfy
+ * coverage or change the verdict; it only explains why nothing was executed.
+ */
+async function recordNotRun(sessionId: string, testCaseId: string, reason: string) {
+  const existing = await db.verificationEvidence.findFirst({
+    where: { sessionId, testCaseId, result: "NOT RUN" },
+    select: { id: true },
+  });
+  if (existing) return;
+  await db.verificationEvidence.create({
+    data: {
+      sessionId,
+      testCaseId,
+      acceptanceCriterionId: null,
+      type: "TEST_RESULT",
+      source: "COMMAND_RUNNER",
+      description: reason,
+      result: "NOT RUN",
+      command: "",
+      exitCode: null,
+    },
+  });
+}
+
 async function runExecute(session: NonNullable<Awaited<ReturnType<typeof loadSession>>>) {
   await db.verificationSession.update({ where: { id: session.id }, data: { status: "EXECUTING" } });
   const workspacePath = session.workspace!.workspacePath;
+  await assertSnapshotUnchanged(workspacePath, session.workspace!.baseCommit);
   const cases = await db.verificationTestCase.findMany({ where: { sessionId: session.id } });
+  const httpCases: TestCaseRow[] = [];
   for (const testCase of cases) {
-    if (!testCase.automated || !testCase.body || !testCase.filePath) continue;
+    if (!testCase.automated) {
+      // Existing repository tests are recorded as "inspected only" and are not verification cases.
+      if (testCase.provenance === "VERIFICATION_AGENT") {
+        await recordNotRun(session.id, testCase.id, manualNote(testCase.manualReason));
+      }
+      continue;
+    }
+    if (!testCase.body || !testCase.filePath) {
+      await recordNotRun(session.id, testCase.id, "The automated case has no test file or body, so it was not executed.");
+      continue;
+    }
+    // HTTP cases share one managed application and one disposable database, so they run as a single attempt below.
+    if (testCase.adapterId === HTTP_ADAPTER_ID) {
+      httpCases.push(testCase);
+      continue;
+    }
+    // Cases planned before adapters existed have no adapter id and ran node:test. Any other case runs only through
+    // the adapter it names, and only if that adapter is registered, can execute, and accepts the file.
+    const adapter = verificationAdapters.get(testCase.adapterId || LEGACY_ADAPTER_ID);
+    if (!adapter?.canExecute || !adapter.acceptsFile(testCase.filePath)) {
+      await recordNotRun(
+        session.id,
+        testCase.id,
+        `The adapter ${testCase.adapterId || LEGACY_ADAPTER_ID} cannot execute ${testCase.filePath || "this case"}, so it was not run. A person must verify this criterion.`,
+      );
+      continue;
+    }
     const written = await executeVerificationTool(
       { sessionId: session.id, productId: session.productId, workspacePath },
       { action: "WRITE_FILE", path: testCase.filePath, content: testCase.body },
     );
-    if (!written.allowed) continue;
-    const command = `node --test ${testCase.filePath}`;
+    if (!written.allowed) {
+      await recordNotRun(
+        session.id,
+        testCase.id,
+        `The test file ${testCase.filePath} was refused by verification policy, so the case was not executed. ${written.reason}`,
+      );
+      continue;
+    }
+    const command = adapter.commandFor(testCase.filePath);
     const startedAt = new Date();
+    // The adapter proposed the command. It still runs only through the approved command gate.
     const ran = await executeVerificationTool(
       { sessionId: session.id, productId: session.productId, workspacePath },
       { action: "RUN_COMMAND", command },
     );
-    const exitCode = ran.exitCode;
-    const passed = ran.allowed && exitCode === 0;
-    await db.verificationExecution.create({
-      data: {
-        sessionId: session.id,
-        testCaseId: testCase.id,
-        command,
-        kind: "NEW_VERIFICATION",
-        status: ran.allowed ? (passed ? "PASSED" : "FAILED") : "NOT_RUN",
-        exitCode,
-        outputSummary: ran.output,
-        startedAt,
-        completedAt: new Date(),
-      },
-    });
-    const demonstrated =
-      passed &&
-      Boolean(testCase.acceptanceCriterionId) &&
-      demonstratesCriterion(testCase.body, testCase.acceptanceCriterionId ?? "");
-    await db.verificationEvidence.create({
-      data: {
-        sessionId: session.id,
-        testCaseId: testCase.id,
-        acceptanceCriterionId: testCase.acceptanceCriterionId,
-        type: "TEST_RESULT",
-        source: "COMMAND_RUNNER",
-        description: demonstrated
-          ? "The verification test executed and demonstrates the linked acceptance criterion."
-          : passed
-            ? "The command exited 0. That execution success is not acceptance-criterion verification."
-            : "The verification test failed.",
-        result: demonstrated ? "DEMONSTRATED" : passed ? "EXECUTED" : "FAILED",
-        command,
-        exitCode,
-      },
+    const outcome = ran.allowed
+      ? adapter.classify({ exitCode: ran.exitCode, output: ran.output, timedOut: ran.timedOut })
+      : {
+          category: "NOT_EXECUTED" as const,
+          status: "NOT_RUN" as const,
+          reason: ran.reason || "The command was refused by verification policy, so the test did not run.",
+          counts: { tests: 0, passed: 0, failed: 0, skipped: 0, reported: false },
+        };
+    const result = await recordExecution(session, testCase, {
+      adapterId: adapter.id,
+      command,
+      exitCode: ran.allowed ? ran.exitCode : null,
+      output: ran.output,
+      outcome,
+      startedAt,
     });
     await db.verificationTestCase.update({
       where: { id: testCase.id },
-      data: { status: passed ? "PASSED" : "FAILED" },
+      data: { status: result.executionStatus },
     });
   }
+  if (httpCases.length > 0) {
+    await runHttpCases(session, workspacePath, httpCases, storedFixturePlan(session.fixturePlan));
+  }
   const checkLines = await runRepositoryChecks(session, workspacePath);
+  await recordProductChanges(session.id, workspacePath);
   const contract = contractText(session.contract!);
   const context = [
     "Independent execution finished. Coding self-review is not a verdict.",
@@ -306,6 +476,190 @@ async function runExecute(session: NonNullable<Awaited<ReturnType<typeof loadSes
       ...combineAIEvidence(evidence),
     },
   };
+}
+
+type TestCaseRow = Awaited<ReturnType<typeof db.verificationTestCase.findMany>>[number];
+
+/**
+ * Records one adapter run as an execution and its evidence. A case is demonstrated only when it passed, is linked to a
+ * criterion, is bound to product behaviour, and, for HTTP tests, made at least one request to the managed application.
+ */
+async function recordExecution(
+  session: { id: string; workspace: { baseCommit: string } | null },
+  testCase: TestCaseRow,
+  run: {
+    adapterId: string;
+    command: string;
+    exitCode: number | null;
+    output: string;
+    outcome: TestRunOutcome;
+    startedAt: Date;
+    failureCategory?: string;
+    observations?: HttpObservation[];
+    requiresRequests?: boolean;
+    /** The framework's sign-in route for this session, so a successful login is not counted as the behaviour. */
+    loginPath?: string;
+  },
+) {
+  const structure = assessTestStructure(testCase.body, testCase.acceptanceCriterionId ?? "", {
+    filePath: testCase.filePath,
+    adapterId: testCase.adapterId,
+    targetSurface: testCase.targetSurface,
+  });
+  const observed = !run.requiresRequests || (run.observations?.length ?? 0) > 0;
+  const bound = run.outcome.status === "PASSED" && Boolean(testCase.acceptanceCriterionId) && structure.ok && observed;
+  // A bound pass still has to show the criterion's behaviour: authenticated sessions, a positive outcome, and every
+  // step reaching the application. Anything not shown leaves the execution PASSED but the criterion unverified.
+  const adequacy = bound && run.requiresRequests
+    ? assessHttpEvidence({
+        body: testCase.body ?? "",
+        requiredCapabilities: asStrings(testCase.requiredCapabilities),
+        observations: run.observations ?? [],
+        loginPath: run.loginPath,
+      })
+    : { adequate: true as const, reasons: [] as string[] };
+  const demonstrated = bound && adequacy.adequate;
+  const insufficient = bound && !adequacy.adequate;
+  const basis = run.requiresRequests ? "observed HTTP responses" : "product code";
+  const unbound = [
+    ...structure.reasons,
+    ...(observed ? [] : ["The test made no HTTP request to the managed application, so it observed no behaviour."]),
+    ...(insufficient ? adequacy.reasons : []),
+  ];
+  return persistTestResult({
+    sessionId: session.id,
+    testCaseId: testCase.id,
+    acceptanceCriterionId: testCase.acceptanceCriterionId,
+    adapterId: run.adapterId,
+    command: run.command,
+    exitCode: run.exitCode,
+    output: run.output,
+    outcome: run.outcome,
+    failureCategory: run.failureCategory,
+    observations: run.observations,
+    // The approved snapshot is what this run judged. Later credibility checks compare against it.
+    snapshotCommit: session.workspace!.baseCommit,
+    startedAt: run.startedAt,
+    evidenceDescription: demonstrated
+      ? `The verification test executed, passed, and is bound to the linked acceptance criterion through ${basis}.`
+      : insufficient
+        ? `The test executed and its assertions passed, but the evidence does not demonstrate the linked acceptance criterion. The criterion is not verified. This is an evidence gap, not a product defect. ${adequacy.reasons.join(" ")}`
+        : run.outcome.status === "PASSED"
+          ? `The command exited 0, but the test is not bound to product behaviour, so it does not verify the criterion. ${unbound.join(" ")}`
+          : run.outcome.reason,
+    evidenceResult: demonstrated
+      ? "DEMONSTRATED"
+      : insufficient
+        ? "EVIDENCE INSUFFICIENT"
+        : TEST_RESULT_LABEL[run.outcome.status],
+  });
+}
+
+/**
+ * Runs every HTTP case as one attempt: a managed application, a disposable database, and the framework's accounts and
+ * setup. A failed setup stage is recorded as that stage, so it is never mistaken for a product verdict.
+ */
+async function runHttpCases(
+  session: { id: string; productId: string; workspace: { baseCommit: string } | null },
+  workspacePath: string,
+  cases: TestCaseRow[],
+  fixturePlan: FixturePlan,
+) {
+  const gate = { sessionId: session.id, productId: session.productId, workspacePath };
+  const adapter = verificationAdapters.get(HTTP_ADAPTER_ID);
+  if (!adapter) {
+    for (const testCase of cases) {
+      await recordNotRun(session.id, testCase.id, "The HTTP verification adapter is not registered, so the case was not executed.");
+    }
+    return;
+  }
+  const results = await runHttpAcceptance(
+    {
+      attemptId: randomUUID(),
+      workspacePath,
+      baseCommit: session.workspace!.baseCommit,
+      cases: cases.map((testCase) => ({
+        testCaseId: testCase.id,
+        acceptanceCriterionId: testCase.acceptanceCriterionId,
+        filePath: testCase.filePath ?? "",
+        body: testCase.body ?? "",
+      })),
+      fixturePlan,
+      forbiddenDatabaseNames: forbiddenDatabaseNames(),
+      tracker: sessionResourceTracker(session.id),
+    },
+    defaultHttpDeps({
+      writeTest: async (item: HttpAcceptanceCase) => {
+        // The framework writes only approved HTTP paths. The adapter and the policy gate both check the path.
+        if (!adapter.acceptsFile(item.filePath)) {
+          return { allowed: false, reason: `The test file ${item.filePath} is not an approved HTTP verification path.` };
+        }
+        const written = await executeVerificationTool(gate, { action: "WRITE_FILE", path: item.filePath, content: item.body });
+        return { allowed: written.allowed, reason: written.allowed ? "" : written.reason };
+      },
+      runTest: async (input: { command: string; environment: Record<string, string> }) => {
+        const ran = await executeVerificationTool(gate, {
+          action: "RUN_COMMAND",
+          command: input.command,
+          environment: input.environment,
+        });
+        return {
+          allowed: ran.allowed,
+          reason: ran.reason ?? "",
+          exitCode: ran.exitCode,
+          output: ran.output,
+          timedOut: ran.timedOut,
+        };
+      },
+      classify: (run: { exitCode: number | null; output: string; timedOut: boolean }) => adapter.classify(run),
+    }),
+  );
+  const byId = new Map(cases.map((testCase) => [testCase.id, testCase]));
+  for (const result of results) {
+    const testCase = byId.get(result.testCaseId);
+    if (!testCase) continue;
+    if (!result.attempted && !result.stage) {
+      await recordNotRun(session.id, testCase.id, result.outcome.reason);
+      continue;
+    }
+    const recorded = await recordExecution(session, testCase, {
+      adapterId: HTTP_ADAPTER_ID,
+      command: result.command,
+      exitCode: result.exitCode,
+      output: result.output,
+      outcome: result.outcome,
+      startedAt: result.startedAt,
+      failureCategory: result.stage ?? undefined,
+      observations: result.observations,
+      requiresRequests: true,
+      loginPath: fixturePlan.authentication.loginPath,
+    });
+    await db.verificationTestCase.update({
+      where: { id: testCase.id },
+      data: { status: recorded.executionStatus },
+    });
+  }
+}
+
+/** Reads the fixture plan stored at planning time. Anything malformed means no fixtures, so no account is assumed. */
+function storedFixturePlan(value: unknown): FixturePlan {
+  const record = value && typeof value === "object" && !Array.isArray(value) ? (value as Partial<FixturePlan>) : null;
+  if (!record?.authentication || !Array.isArray(record.steps)) return EMPTY_FIXTURE_PLAN;
+  return { authentication: record.authentication, steps: record.steps };
+}
+
+/** The builder's own database must never be created, used or dropped by verification. */
+function forbiddenDatabaseNames() {
+  const names = ["ai_product_factory"];
+  const builder = process.env.DATABASE_URL;
+  if (builder) {
+    try {
+      names.push(decodeURIComponent(new URL(builder).pathname.replace(/^\//, "")));
+    } catch {
+      // A malformed builder URL names no database, so there is nothing more to forbid.
+    }
+  }
+  return names.filter((name) => name.length > 0);
 }
 
 async function createDefect(
@@ -447,7 +801,8 @@ async function recordCheck(
     { action: "RUN_COMMAND", command: check.command },
   );
   const unavailable = !ran.allowed || commandUnavailable(ran.output, ran.exitCode) || commandFailureIsEnvironment(ran.output);
-  const status = !ran.allowed || unavailable ? "BLOCKED" : ran.exitCode === 0 ? "PASSED" : "FAILED";
+  // An interrupted check is an infrastructure stop, not a product failure.
+  const status = !ran.allowed || unavailable || ran.timedOut ? "BLOCKED" : ran.exitCode === 0 ? "PASSED" : "FAILED";
   await db.verificationExecution.create({
     data: {
       sessionId: session.id,
@@ -503,31 +858,179 @@ async function recordExistingTests(sessionId: string, workspacePath: string) {
   }
 }
 
-function boundedContext(workspacePath: string) {
-  const chunks: string[] = [];
-  const root = path.join(workspacePath, "src");
-  const files: string[] = [];
-  const walk = (directory: string, depth: number) => {
-    if (depth > 3 || !fs.existsSync(directory)) return;
-    for (const name of fs.readdirSync(directory)) {
-      if (name === "node_modules" || name === ".git") continue;
-      const absolute = path.join(directory, name);
-      if (fs.statSync(absolute).isDirectory()) walk(absolute, depth + 1);
-      else if (/\.(test|spec)\./.test(name) || name.endsWith(".ts") || name.endsWith(".js")) files.push(absolute);
-    }
-  };
-  walk(workspacePath, 0);
-  walk(root, 0);
-  for (const file of files.slice(0, 8)) {
-    const relative = path.relative(workspacePath, file);
-    if (relative.includes(".env")) continue;
-    chunks.push(`File ${relative}\n${fs.readFileSync(file, "utf8").slice(0, 1500)}`);
-  }
-  return chunks.join("\n\n").slice(0, 12_000) || "No project files were readable.";
-}
-
 function text(value: unknown) {
   return typeof value === "string" ? value : "";
 }
 
 export type { AgentExecutionRequest };
+
+/** The maximum number of correction requests for one plan. Deliberately one: a second failure is a diagnostic, not a loop. */
+export const MAX_PLAN_CORRECTIONS = 1;
+
+type ProposedPlan = {
+  authentication: FixturePlan["authentication"];
+  fixtureSteps: FixturePlan["steps"];
+  testCases: TestCaseProposalShape[];
+};
+
+type TestCaseProposalShape = {
+  title: string;
+  purpose: string;
+  preconditions: string;
+  steps: string[];
+  expectedResult: string;
+  testType: string;
+  priority: string;
+  source: string;
+  acceptanceCriterionId: string;
+  automated: boolean;
+  adapterId: string;
+  targetSurface: string;
+  requiredCapabilities: string[];
+  filePath: string;
+  body: string;
+  manualReason: string;
+};
+
+/**
+ * Validates the AI's proposal. If it has correctable errors, asks the Verification Agent once to correct its own
+ * proposal, then revalidates. Each stage is recorded as evidence, so the outcome can be explained later.
+ *
+ * The approved criteria are not sent for change and the framework's rules are not relaxed. A correction that still
+ * fails leaves the affected cases manual, with the validator's reasons.
+ */
+async function validateOrCorrect(input: {
+  session: { id: string };
+  contract: string;
+  context: string;
+  evidence: AIRunEvidence[];
+  initial: ProposedPlan;
+  routes: string[];
+  profile: ImplementationProfile;
+  workspacePath: string;
+}) {
+  const validate = (proposal: ProposedPlan) =>
+    validatePlanProposal({
+      proposal: toPlanProposal(proposal),
+      routes: input.routes,
+      profile: input.profile,
+      workspacePath: input.workspacePath,
+    });
+
+  const outcome = await validateWithBoundedCorrection({
+    initial: toPlanProposal(input.initial),
+    validate: (proposal) => validate(fromPlanProposal(proposal, input.initial)),
+    correct: async (errors) => {
+      const corrected = await askCorrection({ ...input, errors });
+      return corrected ? toPlanProposal(corrected) : null;
+    },
+    maxCorrections: MAX_PLAN_CORRECTIONS,
+  });
+  for (const stage of outcome.stages) {
+    await recordPlanValidation(input.session.id, stage.stage, stage.valid, stage.errorCodes, outcome.correctionRequests);
+  }
+  const acceptedPlan = outcome.accepted === "CORRECTED" && outcome.corrected ? fromPlanProposal(outcome.corrected, input.initial) : input.initial;
+  return { validation: outcome.validation, testCases: acceptedPlan.testCases, corrected: outcome.accepted === "CORRECTED" };
+}
+
+/** Maps the runner's proposal shape to the validator's. The mapping is one-to-one; nothing is rewritten. */
+function toPlanProposal(proposal: ProposedPlan): PlanProposal {
+  return {
+    authentication: proposal.authentication,
+    fixtureSteps: proposal.fixtureSteps,
+    testCases: proposal.testCases.map((item) => ({
+      title: item.title,
+      automated: item.automated,
+      body: item.body,
+      filePath: item.filePath,
+      criterionId: item.acceptanceCriterionId || null,
+      manualReason: item.manualReason,
+      adapterId: item.adapterId,
+      targetSurface: item.targetSurface,
+      requiredCapabilities: item.requiredCapabilities,
+    })),
+  };
+}
+
+/** Restores the runner's shape from a validator proposal, keeping the non-validated fields from the original. */
+function fromPlanProposal(proposal: PlanProposal, original: ProposedPlan): ProposedPlan {
+  return {
+    authentication: proposal.authentication,
+    fixtureSteps: proposal.fixtureSteps,
+    testCases: proposal.testCases.map((item, index) => ({
+      ...original.testCases[index]!,
+      title: item.title,
+      automated: item.automated,
+      body: item.body,
+      filePath: item.filePath,
+      acceptanceCriterionId: item.criterionId ?? "",
+      manualReason: item.manualReason,
+      adapterId: item.adapterId,
+      targetSurface: item.targetSurface,
+      requiredCapabilities: item.requiredCapabilities,
+    })),
+  };
+}
+
+/**
+ * Asks the Verification Agent once to correct its proposal. The corrected plan and corrected test cases are requested
+ * with the same schemas as the original, so the correction cannot introduce a shape the framework does not accept.
+ * Returns null when either response fails schema validation.
+ */
+async function askCorrection(input: {
+  contract: string;
+  context: string;
+  evidence: AIRunEvidence[];
+  errors: PlanningError[];
+}): Promise<ProposedPlan | null> {
+  const message = correctionMessage(input.errors);
+  const planResult = await requestCorrected(verificationPlanSchema, "verification_plan", "plan correction", input, message);
+  if (!planResult) return null;
+  const casesResult = await requestCorrected(testCaseSchema, "verification_test_cases", "test case correction", input, message);
+  if (!casesResult) return null;
+  return {
+    authentication: planResult.authentication,
+    fixtureSteps: planResult.fixtureSteps,
+    testCases: casesResult.testCases,
+  };
+}
+
+async function requestCorrected<T>(
+  schema: ZodType<T>,
+  schemaName: string,
+  phase: string,
+  input: { contract: string; context: string; evidence: AIRunEvidence[] },
+  correction: string,
+): Promise<T | null> {
+  const provider = await getAIProvider();
+  const result = await provider.generate({
+    systemPrompt: VERIFICATION_SYSTEM_PROMPT,
+    messages: [
+      { role: "user", content: verificationUserMessage({ phase, contract: input.contract, context: input.context }) },
+      { role: "user", content: correction },
+    ],
+    responseSchema: schema,
+    schemaName,
+    temperature: 0.1,
+  });
+  const parsed = schema.safeParse(result.data);
+  if (!parsed.success) return null;
+  input.evidence.push(aiRunEvidence(result));
+  return parsed.data;
+}
+
+/** Stores one validation stage as an evidence row, so the audit trail explains the decision without a migration. */
+async function recordPlanValidation(sessionId: string, stage: string, valid: boolean, codes: string[], correctionRequests: number) {
+  await db.verificationEvidence.create({
+    data: {
+      sessionId,
+      type: "STATIC_ANALYSIS",
+      source: "REPOSITORY",
+      description: `Plan validation ${stage} (correction requests: ${correctionRequests}). ${
+        valid ? "No validation errors." : `Errors: ${codes.join(", ")}.`
+      }`,
+      result: valid ? "INSPECTED" : "NOT APPLICABLE",
+      command: "",
+    },
+  });
+}

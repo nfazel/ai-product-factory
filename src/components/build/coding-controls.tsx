@@ -18,13 +18,16 @@ import {
   recordRepairResultAction,
   restoreUnapprovedChangeAction,
   proposeOutOfScopePlanAction,
+  repairProposedPlanCoverageAction,
   repairCodingAction,
   resumeCodingAction,
   retryCodingAction,
   proposeContractPlanAction,
   revisePlanAction,
   startCodingAction,
+  validateExistingImplementationAction,
 } from "@/server/actions/coding";
+import { VALIDATE_EXISTING_HELP, VALIDATE_EXISTING_LABEL } from "@/modules/coding/validate-existing";
 
 function Hidden({ productId, taskId, workspaceId }: { productId: string; taskId?: string; workspaceId?: string }) {
   return (
@@ -64,6 +67,17 @@ export function ApprovePlanButton({ productId, workspaceId }: { productId: strin
     <form action={action} className="space-y-2">
       <Hidden productId={productId} workspaceId={workspaceId} />
       <SubmitButton pendingLabel="Approving">Approve Execution Plan</SubmitButton>
+      <FormMessage state={state} />
+    </form>
+  );
+}
+
+export function RepairPlanCoverageButton({ productId, workspaceId }: { productId: string; workspaceId: string }) {
+  const [state, action] = useActionState(repairProposedPlanCoverageAction, idleState);
+  return (
+    <form action={action} className="space-y-2">
+      <Hidden productId={productId} workspaceId={workspaceId} />
+      <SubmitButton pendingLabel="Repairing">Repair work-item coverage</SubmitButton>
       <FormMessage state={state} />
     </form>
   );
@@ -115,6 +129,24 @@ export function RecordRepairResultButton({ productId, workspaceId }: { productId
     <form action={action} className="space-y-2">
       <Hidden productId={productId} workspaceId={workspaceId} />
       <SubmitButton pendingLabel="Recording">Record repair result</SubmitButton>
+      <FormMessage state={state} />
+    </form>
+  );
+}
+
+export function ValidateExistingImplementationButton({
+  productId,
+  workspaceId,
+}: {
+  productId: string;
+  workspaceId: string;
+}) {
+  const [state, action] = useActionState(validateExistingImplementationAction, idleState);
+  return (
+    <form action={action} className="space-y-2">
+      <Hidden productId={productId} workspaceId={workspaceId} />
+      <SubmitButton pendingLabel="Validating">{VALIDATE_EXISTING_LABEL}</SubmitButton>
+      <p className="text-sm text-muted-foreground">{VALIDATE_EXISTING_HELP}</p>
       <FormMessage state={state} />
     </form>
   );
@@ -238,13 +270,16 @@ export function ApprovedCommit({
   return (
     <form action={commitAction} className="space-y-2 rounded-lg border px-3 py-3 text-sm">
       <Hidden productId={productId} workspaceId={workspaceId} />
-      <p className="font-medium">Create Approved Commit</p>
-      <p>This will create a local, immutable commit containing the code changes you approved.</p>
+      <p className="font-medium">Record approved source snapshot</p>
+      <p>
+        This locks the approved source snapshot for Independent Verification. If the validated implementation is already
+        committed, that commit is reused. Otherwise a local commit is created. History is not rewritten.
+      </p>
       <p>{countLabel(reviewed, "reviewed file")}</p>
       <p>{countLabel(outOfScope, "out-of-scope file")}</p>
       <p>Generated build files excluded</p>
       <p>This does not publish, create a pull request, or merge code.</p>
-      <SubmitButton pendingLabel="Committing">Create Approved Commit</SubmitButton>
+      <SubmitButton pendingLabel="Recording">Record Approved Snapshot</SubmitButton>
       <FormMessage state={commitState} />
     </form>
   );
@@ -254,18 +289,24 @@ function countLabel(count: number, singular: string) {
   return `${count} ${singular}${count === 1 ? "" : "s"}`;
 }
 
+export function ApproveCodeChangesButton({ productId, workspaceId }: { productId: string; workspaceId: string }) {
+  const [state, action] = useActionState(approveCodeAction, idleState);
+  return (
+    <form action={action} className="space-y-2">
+      <Hidden productId={productId} workspaceId={workspaceId} />
+      <SubmitButton pendingLabel="Approving">Approve Code Changes</SubmitButton>
+      <FormMessage state={state} />
+    </form>
+  );
+}
+
 export function ReviewActions({ productId, workspaceId, allowApprove = true, hideApprove = false }: { productId: string; workspaceId: string; allowApprove?: boolean; hideApprove?: boolean }) {
   const [requestState, requestAction] = useActionState(requestChangesAction, idleState);
-  const [approveState, approveAction] = useActionState(approveCodeAction, idleState);
   const [rejectState, rejectAction] = useActionState(rejectCodeAction, idleState);
   return (
     <div className="space-y-4">
       {allowApprove ? (
-        <form action={approveAction} className="space-y-2">
-          <Hidden productId={productId} workspaceId={workspaceId} />
-          <SubmitButton pendingLabel="Approving">Approve Code Changes</SubmitButton>
-          <FormMessage state={approveState} />
-        </form>
+        <ApproveCodeChangesButton productId={productId} workspaceId={workspaceId} />
       ) : hideApprove ? null : (
         <p className="text-sm text-muted-foreground">Approve Code Changes is not available for this snapshot.</p>
       )}
@@ -297,18 +338,24 @@ export function WorkspaceRecovery({
   stale,
   allowResume,
   allowRetry,
+  allowValidateExisting = false,
 }: {
   productId: string;
   workspaceId: string;
   stale: boolean;
   allowResume: boolean;
   allowRetry: boolean;
+  allowValidateExisting?: boolean;
 }) {
   const [retryState, retryAction] = useActionState(retryCodingAction, idleState);
   const [resumeState, resumeAction] = useActionState(resumeCodingAction, idleState);
   const [abandonState, abandonAction] = useActionState(abandonWorkspaceAction, idleState);
   const [contractState, contractAction] = useActionState(regenerateContractAction, idleState);
   return (
+    <div className="space-y-3">
+      {allowValidateExisting ? (
+        <ValidateExistingImplementationButton productId={productId} workspaceId={workspaceId} />
+      ) : null}
     <div className="flex flex-wrap gap-3">
       {allowRetry ? (
         <form action={retryAction}>
@@ -346,6 +393,7 @@ export function WorkspaceRecovery({
         </SubmitButton>
         <FormMessage state={abandonState} />
       </form>
+    </div>
     </div>
   );
 }

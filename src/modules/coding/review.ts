@@ -1,8 +1,7 @@
-const GENERATED_REVIEW_PATH = /(?:^|\/)(?:node_modules|\.next|\.prisma|src\/generated\/prisma)(?:\/|$)|\.tsbuildinfo$|next-env\.d\.ts$/;
+import { authorisationStepFor, workItemProduces } from "@/modules/coding/bootstrap";
+import { isGeneratedReviewPath } from "@/modules/coding/generated-paths";
 
-export function isGeneratedReviewPath(filePath: string) {
-  return GENERATED_REVIEW_PATH.test(filePath.replaceAll("\\", "/"));
-}
+export { isGeneratedReviewPath };
 
 export function reviewableDiffFiles(files: unknown) {
   if (!Array.isArray(files)) return [];
@@ -16,9 +15,31 @@ export function reviewableDiffFiles(files: unknown) {
 
 export const CHECKS_BLOCK_APPROVAL = "Code changes cannot be approved until the required validation checks have passed.";
 export const DIFF_UNAVAILABLE = "Code changes are unavailable until the workspace diff is reconciled.";
+export const BASELINE_UNRESOLVED_REVIEW =
+  "The coding baseline commit is missing or cannot be resolved. Reconcile the workspace baseline before code review can continue.";
 export const CHECKS_STALE = "Required checks are stale because source files changed after they ran. Approval stays closed until they run against the current source.";
 export const OUT_OF_SCOPE_BLOCK = "Code changes include files outside the approved Execution Plan.";
 export const PLAN_NOT_APPROVED = "Code changes cannot be approved until the execution plan is approved.";
+
+/**
+ * True when the validated source snapshot changed after checks ran.
+ * Uncommitted work while HEAD is still the coding baseline is the normal review path, not drift.
+ * Drift applies when HEAD moved, or when uncommitted edits appear after a committed validated snapshot.
+ */
+export function validationSnapshotDrifted(input: {
+  recordedHeadCommit: string | null | undefined;
+  currentHeadCommit: string | null | undefined;
+  baseCommit?: string | null | undefined;
+  workingTreeDirty: boolean;
+}) {
+  const recorded = input.recordedHeadCommit?.trim() ?? "";
+  const current = input.currentHeadCommit?.trim() ?? "";
+  const base = input.baseCommit?.trim() ?? "";
+  if (!/^[0-9a-f]{40}$/.test(recorded) || !/^[0-9a-f]{40}$/.test(current)) return false;
+  if (recorded !== current) return true;
+  const validatedCommittedSnapshot = /^[0-9a-f]{40}$/.test(base) && recorded !== base;
+  return Boolean(input.workingTreeDirty && validatedCommittedSnapshot);
+}
 
 export type PlanChangeClass = "APPROVED" | "DERIVED" | "GENERATED_IGNORED" | "OUT_OF_SCOPE";
 
@@ -35,8 +56,18 @@ export function deletionIsPlanned(filePath: string, steps: string[]) {
   return steps.some((step) => DELETE_STEP.test(step) && step.includes(filePath));
 }
 
+/** Tooling metadata paths that may be authorised by an execution-plan revision without being application source. */
+export function isToolingMetadataPath(filePath: string) {
+  const normalized = filePath.replaceAll("\\", "/");
+  return normalized === ".gitignore"
+    || normalized.endsWith("/.gitignore")
+    || normalized === ".gitattributes"
+    || normalized === ".editorconfig";
+}
+
 function isDerivedChange(filePath: string, status: string, setupCommands: string[]) {
   if (changeVerb(status) === "deleted") return false;
+  if (isToolingMetadataPath(filePath)) return true;
   const install = setupCommands.some((command) => /\bnpm(?:\s+install|\s+ci)\b/.test(command));
   return install && filePath === "package-lock.json";
 }
@@ -86,8 +117,12 @@ export function executionPlanScopeRevision(input: {
   status: string;
 }) {
   const files = input.files.includes(input.path) ? [...input.files] : [...input.files, input.path];
-  const planned = deletionIsPlanned(input.path, input.steps);
-  const steps = changeVerb(input.status) === "deleted" && !planned ? [...input.steps, `Delete ${input.path}.`] : [...input.steps];
+  const verb = changeVerb(input.status);
+  const plannedDelete = verb === "deleted" && deletionIsPlanned(input.path, input.steps);
+  const covered = workItemProduces(input.steps, input.path) || plannedDelete;
+  const steps = covered
+    ? [...input.steps]
+    : [...input.steps, authorisationStepFor(input.path, verb)];
   return {
     version: input.version + 1,
     status: "PROPOSED" as const,
@@ -189,7 +224,9 @@ export function codeApprovalDecision(input: {
   checksStale: boolean;
   outOfScope?: { path: string }[];
   planAuthorised?: boolean;
+  baselineUnresolved?: boolean;
 }) {
+  if (input.baselineUnresolved) return { approvable: false, reason: BASELINE_UNRESOLVED_REVIEW };
   if (input.sourceFileCount === 0) return { approvable: false, reason: DIFF_UNAVAILABLE };
   if (input.planAuthorised === false) return { approvable: false, reason: PLAN_NOT_APPROVED };
   if ((input.outOfScope?.length ?? 0) > 0) return { approvable: false, reason: OUT_OF_SCOPE_BLOCK };

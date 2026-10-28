@@ -20,9 +20,11 @@ import {
   getProveView,
   recordManualResult,
   retryVerification,
+  startNewVerificationAttempt,
   startVerification,
 } from "@/modules/verification/service";
 import { verificationEntryBlockers } from "@/modules/verification/gates";
+import { recomputeSession } from "@/modules/verification/assess";
 
 const products: string[] = [];
 const repos: string[] = [];
@@ -40,12 +42,20 @@ function git(dir: string, args: string[]) {
   });
 }
 
-function makeRepo(pass: boolean | "absent" = true, build = false) {
+const PRODUCT_MODULE = "export function submitClaim() { return { reference: \"CLM-1001\" }; }\n";
+
+type RepoOptions = { javascript?: boolean; productModule?: string };
+
+function makeRepo(pass: boolean | "absent" = true, build = false, options: RepoOptions = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "apf-verify-repo-"));
   repos.push(dir);
   fs.mkdirSync(path.join(dir, "src/claims"), { recursive: true });
   fs.writeFileSync(path.join(dir, "src/claims/submit.ts"), "export const claim = \"notice\"\n");
   fs.writeFileSync(path.join(dir, "src/claims/submit.test.ts"), "test(\"notice\", () => { expect(1).toBe(1) })\n");
+  // A plain JavaScript product module gives node:test something behavioural to import.
+  if (options.javascript !== false) {
+    fs.writeFileSync(path.join(dir, "src/claims/submit.mjs"), options.productModule ?? PRODUCT_MODULE);
+  }
   const scripts: Record<string, string> = {};
   if (pass !== "absent") scripts.test = `node -e "process.exit(${pass ? 0 : 1})"`;
   if (build) scripts.build = "node -e \"process.exit(0)\"";
@@ -58,8 +68,8 @@ function makeRepo(pass: boolean | "absent" = true, build = false) {
   return dir;
 }
 
-function prepareRepo(pass: boolean | "absent" = true, build = false) {
-  const repo = makeRepo(pass, build);
+function prepareRepo(pass: boolean | "absent" = true, build = false, options: RepoOptions = {}) {
+  const repo = makeRepo(pass, build, options);
   process.env.PRODUCT_REPOSITORY_ROOT = repo;
   process.env.PRODUCT_REPOSITORY_WORKTREE_ROOT = worktreeRoot;
   process.env.AI_PROVIDER = "openai";
@@ -68,19 +78,32 @@ function prepareRepo(pass: boolean | "absent" = true, build = false) {
   return repo;
 }
 
+/** A behavioural test: it imports the product module and asserts on the value that module returns. */
 function passingBody(criterionId: string) {
   return `import test from "node:test";
 import assert from "node:assert/strict";
+import { submitClaim } from "../../src/claims/submit.mjs";
 // verifies:${criterionId}
-test("submit valid claim", () => { assert.equal(1, 1); });
+test("submit valid claim returns a reference", () => { assert.equal(submitClaim().reference, "CLM-1001"); });
 `;
 }
 
 function failingBody(criterionId: string) {
   return `import test from "node:test";
 import assert from "node:assert/strict";
+import { submitClaim } from "../../src/claims/submit.mjs";
 // verifies:${criterionId}
-test("submit valid claim", () => { assert.equal(1, 2); });
+test("submit valid claim returns a reference", () => { assert.equal(submitClaim().reference, "CLM-9999"); });
+`;
+}
+
+/** A test that carries the marker and passes, but proves nothing about the product. */
+function trivialBody(criterionId: string) {
+  return `import test from "node:test";
+import assert from "node:assert/strict";
+import { submitClaim } from "../../src/claims/submit.mjs";
+// verifies:${criterionId}
+test("submit valid claim", () => { assert.ok(true); });
 `;
 }
 
@@ -88,16 +111,22 @@ function provider(options: {
   criterionId: string;
   body?: string;
   automated?: boolean;
+  adapterId?: string;
+  requiredCapabilities?: string[];
   extraCriterionId?: string;
   throwOn?: string;
+  filePath?: string;
+  targetSurface?: string;
 }): AIProvider {
-  const filePath = `verification/${options.criterionId}/claim.test.mjs`;
+  const filePath = options.filePath ?? `verification/${options.criterionId}/claim.test.mjs`;
   const responses: Record<string, unknown> = {
     verification_conditions: { summary: "Conditions come from the approved criteria.", conditions: [] },
     verification_plan: {
       summary: "Verify the claim reference independently.",
       existingTestNotes: "Existing tests were inspected. A passing suite is not acceptance coverage.",
       untestedAreas: [],
+      authentication: { required: false, signupPath: "", loginPath: "", accountKeys: [] },
+      fixtureSteps: [],
     },
     verification_test_cases: {
       testCases: [
@@ -112,8 +141,12 @@ function provider(options: {
           source: "ACCEPTANCE_CRITERION",
           acceptanceCriterionId: options.criterionId,
           automated: options.automated ?? true,
+          adapterId: options.adapterId ?? "node-test-mjs",
+          targetSurface: options.targetSurface ?? "MODULE_EXPORT",
+          requiredCapabilities: options.requiredCapabilities ?? [],
           filePath,
           body: options.body ?? passingBody(options.criterionId),
+          manualReason: options.automated === false ? "A person must submit a notice in the running product and record the reference." : "",
         },
       ],
     },
@@ -135,6 +168,8 @@ function provider(options: {
 async function completedTask(options?: {
   pass?: boolean | "absent";
   build?: boolean;
+  javascript?: boolean;
+  productModule?: string;
   testApplicability?: "REQUIRED" | "NOT_APPLICABLE";
   status?: "COMPLETED" | "APPROVED";
   approval?: boolean;
@@ -144,7 +179,10 @@ async function completedTask(options?: {
   workspace?: boolean;
   criteria?: number;
 }) {
-  const repo = prepareRepo(options?.pass ?? true, options?.build ?? false);
+  const repo = prepareRepo(options?.pass ?? true, options?.build ?? false, {
+    javascript: options?.javascript,
+    productModule: options?.productModule,
+  });
   const sha = git(repo, ["rev-parse", "HEAD"]).trim();
   const product = await db.product.create({
     data: {
@@ -412,6 +450,76 @@ describe("verification entry", () => {
     expect(reasons.filter((reason) => /baseline|commit SHA|product repository/i.test(reason))).toEqual([]);
   });
 
+  it("allows verification after a scope-only plan revision that reuses earlier passing checks", async () => {
+    const setup = await completedTask({ build: true, testApplicability: "NOT_APPLICABLE" });
+    const parent = setup.sha;
+    fs.writeFileSync(path.join(setup.repo, "src/claims/submit.ts"), "export const claim = \"approved\"\n");
+    git(setup.repo, ["add", "src/claims/submit.ts"]);
+    git(setup.repo, ["commit", "-m", "approved snapshot"]);
+    const approved = git(setup.repo, ["rev-parse", "HEAD"]).trim();
+    const workspace = await db.repositoryWorkspace.findFirstOrThrow({ where: { implementationTaskId: setup.task.id } });
+    await db.repositoryWorkspace.update({
+      where: { id: workspace.id },
+      data: { baseCommit: parent, headCommit: approved },
+    });
+    await db.codeChangeApproval.updateMany({
+      where: { implementationTaskId: setup.task.id },
+      data: { baseCommit: parent, headCommit: approved },
+    });
+    const priorEvidenceAt = new Date("2026-10-13T15:00:00.000Z");
+    await db.codingEvidence.updateMany({
+      where: { workspaceId: workspace.id },
+      data: { createdAt: priorEvidenceAt, completedAt: priorEvidenceAt },
+    });
+    await db.codingExecutionPlan.update({
+      where: { workspaceId: workspace.id },
+      data: {
+        version: 4,
+        status: "APPROVED",
+        approvedAt: new Date("2026-10-14T13:12:17.272Z"),
+        approvedBy: "Local user",
+        filesExpectedToChange: ["src/claims/submit.ts", ".gitignore"],
+        history: [{
+          version: 1,
+          status: "COMPLETED",
+          approvedAt: "2026-10-13T14:00:00.000Z",
+          filesExpectedToChange: ["src/claims/submit.ts"],
+        }],
+        changeRequest: "Authorise .gitignore. Existing implementation evidence was kept.",
+      },
+    });
+    const reasons = await verificationEntryBlockers(setup.product.id, setup.task.id);
+    expect(reasons).not.toContain("Required coding checks did not pass.");
+    expect(reasons.filter((reason) => /coding checks|baseline|commit SHA|product repository/i.test(reason))).toEqual([]);
+  });
+
+  it("still blocks verification when the latest coding check failed after recovery history", async () => {
+    const setup = await completedTask({ build: true, testApplicability: "NOT_APPLICABLE" });
+    const workspace = await db.repositoryWorkspace.findFirstOrThrow({ where: { implementationTaskId: setup.task.id } });
+    const earlierPassAt = new Date("2026-10-14T12:00:00.000Z");
+    const laterFailAt = new Date("2026-10-15T12:00:00.000Z");
+    await db.codingEvidence.updateMany({
+      where: { workspaceId: workspace.id, command: "npm run build" },
+      data: { createdAt: earlierPassAt, completedAt: earlierPassAt, result: "PASS" },
+    });
+    await db.codingEvidence.create({
+      data: {
+        workspaceId: workspace.id,
+        implementationTaskId: setup.task.id,
+        type: "BUILD",
+        source: "COMMAND_RUNNER",
+        description: "npm run build",
+        result: "FAIL",
+        command: "npm run build",
+        exitCode: 1,
+        createdAt: laterFailAt,
+        completedAt: laterFailAt,
+      },
+    });
+    const reasons = await verificationEntryBlockers(setup.product.id, setup.task.id);
+    expect(reasons).toContain("Required coding checks did not pass.");
+  });
+
   it("blocks a stale execution contract", async () => {
     const setup = await completedTask({ stale: true });
     await expect(startVerification(setup.product.id, setup.task.id)).rejects.toThrow(/execution contract is stale/);
@@ -459,15 +567,94 @@ describe("verification execution", () => {
     expect(coverage?.status).toBe("VERIFIED");
   });
 
-  it("does not treat a zero exit code as acceptance verification without a criterion marker", async () => {
+  it("does not execute an automated test without the criterion marker, and says why", async () => {
     const setup = await completedTask();
     const body = passingBody(setup.criterion.id).replace(`// verifies:${setup.criterion.id}\n`, "");
     setAIProviderForTests(provider({ criterionId: setup.criterion.id, body }));
     const session = await startVerification(setup.product.id, setup.task.id);
-    expect(session?.executions.some((item) => item.kind === "NEW_VERIFICATION" && item.exitCode === 0)).toBe(true);
+    expect(session?.executions.some((item) => item.kind === "NEW_VERIFICATION")).toBe(false);
     expect(session?.coverages[0]?.status).toBe("NOT_TESTED");
     expect(session?.overallVerdict).toBe("INCONCLUSIVE");
-    expect(session?.evidence.some((item) => item.result === "EXECUTED")).toBe(true);
+    const notRun = session?.evidence.find((item) => item.result === "NOT RUN");
+    expect(notRun?.description).toContain("marker");
+    expect(notRun?.description).toContain("manual");
+  });
+
+  it("does not verify a criterion with a trivial assertion, even when the marker and exit code are present", async () => {
+    const setup = await completedTask();
+    setAIProviderForTests(provider({ criterionId: setup.criterion.id, body: trivialBody(setup.criterion.id) }));
+    const session = await startVerification(setup.product.id, setup.task.id);
+    expect(session?.executions.some((item) => item.kind === "NEW_VERIFICATION")).toBe(false);
+    expect(session?.coverages[0]?.status).toBe("NOT_TESTED");
+    expect(session?.overallVerdict).toBe("INCONCLUSIVE");
+    const notRun = session?.evidence.find((item) => item.result === "NOT RUN");
+    expect(notRun?.description).toContain("trivial assertion");
+  });
+
+  it("does not verify a criterion with a self-comparing assertion", async () => {
+    const setup = await completedTask();
+    const body = passingBody(setup.criterion.id).replace("assert.equal(submitClaim().reference, \"CLM-1001\")", "assert.equal(1, 1)");
+    setAIProviderForTests(provider({ criterionId: setup.criterion.id, body }));
+    const session = await startVerification(setup.product.id, setup.task.id);
+    expect(session?.executions.some((item) => item.kind === "NEW_VERIFICATION")).toBe(false);
+    expect(session?.coverages[0]?.status).not.toBe("VERIFIED");
+    expect(session?.overallVerdict).not.toBe("PASS");
+  });
+
+  it("classifies a missing dependency during a verification test as an environment failure, not a product failure", async () => {
+    const setup = await completedTask({
+      productModule: "import \"left-pad-not-installed-for-verification\";\nexport function submitClaim() { return { reference: \"CLM-1001\" }; }\n",
+    });
+    setAIProviderForTests(provider({ criterionId: setup.criterion.id }));
+    const session = await startVerification(setup.product.id, setup.task.id);
+    const execution = session?.executions.find((item) => item.kind === "NEW_VERIFICATION");
+    expect(execution?.status).toBe("BLOCKED");
+    expect(session?.failureClass).toBe("VERIFICATION_TEST_ENVIRONMENT_FAILED");
+    expect(session?.overallVerdict).toBe("INCONCLUSIVE");
+    expect(session?.overallVerdict).not.toBe("FAIL");
+    expect(session?.coverages[0]?.status).toBe("BLOCKED");
+    expect(session?.defectLinks).toHaveLength(0);
+    expect(session?.failureStage).toBe("AGENT_EXECUTE");
+    expect(session?.failureDetail).toContain("not installed or does not exist");
+  });
+
+  it("marks an automated case as manual when the implementation has no executable JavaScript product module", async () => {
+    const setup = await completedTask({ javascript: false });
+    setAIProviderForTests(provider({ criterionId: setup.criterion.id }));
+    const session = await startVerification(setup.product.id, setup.task.id);
+    expect(session?.executions.some((item) => item.kind === "NEW_VERIFICATION")).toBe(false);
+    const notRun = session?.evidence.find((item) => item.result === "NOT RUN");
+    expect(notRun?.description).toContain("Automated execution is not available for this implementation");
+    expect(session?.testCases.find((item) => item.title === "Submit valid claim")?.manualReason).toContain("not available");
+    const inspection = session?.evidence.find((item) => item.type === "STATIC_ANALYSIS" && item.result === "INSPECTED");
+    expect(inspection?.description).toContain("not available");
+    expect(session?.coverages[0]?.status).toBe("NOT_TESTED");
+    expect(session?.overallVerdict).toBe("INCONCLUSIVE");
+  });
+
+  it("treats a product change made during verification as a blocking implementation change", async () => {
+    const setup = await completedTask();
+    setAIProviderForTests({
+      async generate(request) {
+        if (request.schemaName === "verification_conditions") {
+          // Simulates a verification run that modifies the approved product source.
+          const current = await db.verificationSession.findFirstOrThrow({
+            where: { productId: setup.product.id },
+            include: { workspace: true },
+          });
+          fs.writeFileSync(
+            path.join(current.workspace!.workspacePath, "src/claims/submit.mjs"),
+            "export function submitClaim() { return { reference: \"tampered\" }; }\n",
+          );
+        }
+        return provider({ criterionId: setup.criterion.id }).generate(request);
+      },
+    });
+    const session = await startVerification(setup.product.id, setup.task.id);
+    expect(session?.escalations.some((item) => item.type === "IMPLEMENTATION_CHANGE" && item.status === "OPEN")).toBe(true);
+    expect(session?.overallVerdict).not.toBe("PASS");
+    expect(session?.overallVerdict).not.toBe("PASS_WITH_CONCERNS");
+    expect(fs.readFileSync(path.join(setup.repo, "src/claims/submit.mjs"), "utf8")).toContain("CLM-1001");
   });
 
   it("fails when the verification test fails even if the coding self-review is positive", async () => {
@@ -585,7 +772,7 @@ describe("verification execution", () => {
       },
     });
     setAIProviderForTests(provider({ criterionId: setup.criterion.id }));
-    const created = await startVerification(setup.product.id, setup.task.id);
+    const created = await startNewVerificationAttempt(setup.product.id, setup.task.id);
     const again = await db.verificationSession.findUnique({ where: { id: historical.id } });
     expect(created?.id).not.toBe(historical.id);
     expect(again?.status).toBe("BLOCKED");
@@ -599,7 +786,7 @@ describe("verification execution", () => {
     setAIProviderForTests(provider({ criterionId: setup.criterion.id }));
     const first = await startVerification(setup.product.id, setup.task.id);
     const before = await db.verificationEvidence.count({ where: { sessionId: first!.id } });
-    const second = await startVerification(setup.product.id, setup.task.id);
+    const second = await startNewVerificationAttempt(setup.product.id, setup.task.id);
     expect(second?.id).not.toBe(first?.id);
     expect(await db.verificationEvidence.count({ where: { sessionId: first!.id } })).toBe(before);
     expect(await db.verificationSession.count({ where: { productId: setup.product.id } })).toBe(2);
@@ -715,6 +902,64 @@ describe("verification execution", () => {
     expect(["PASS", "FAIL", "PASS_WITH_CONCERNS"]).not.toContain(session?.overallVerdict);
   });
 
+  it("records the failed stage and a redacted technical detail when execution fails", async () => {
+    const setup = await completedTask();
+    const secret = "sk-FAKE_TEST_KEY_NOT_REAL_1234567890";
+    setAIProviderForTests({
+      async generate(request) {
+        if (request.schemaName === "verification_interpretation") {
+          throw new Error(`upstream rejected the request api_key=${secret}`);
+        }
+        return provider({ criterionId: setup.criterion.id }).generate(request);
+      },
+    });
+    await expect(startVerification(setup.product.id, setup.task.id)).rejects.toThrow(/upstream rejected/);
+    const session = await db.verificationSession.findFirstOrThrow({ where: { productId: setup.product.id } });
+    expect(session.status).toBe("FAILED");
+    expect(session.overallVerdict).toBeNull();
+    expect(session.failureStage).toBe("AGENT_EXECUTE");
+    expect(session.failureDetail).toContain("upstream rejected the request");
+    expect(session.failureDetail).not.toContain(secret);
+  });
+
+  it("records the planning stage when the plan phase fails before any execution", async () => {
+    const setup = await completedTask();
+    setAIProviderForTests(provider({ criterionId: setup.criterion.id, throwOn: "verification_plan" }));
+    await expect(startVerification(setup.product.id, setup.task.id)).rejects.toThrow(/model unavailable/);
+    const session = await db.verificationSession.findFirstOrThrow({ where: { productId: setup.product.id } });
+    expect(session.status).toBe("FAILED");
+    expect(session.overallVerdict).toBeNull();
+    expect(session.failureStage).toBe("AGENT_PLAN");
+    expect(await db.verificationExecution.count({ where: { sessionId: session.id, kind: "NEW_VERIFICATION" } })).toBe(0);
+  });
+
+  it("records a manual test case as not run, with its reason, without demonstrating the criterion", async () => {
+    const setup = await completedTask();
+    setAIProviderForTests(provider({ criterionId: setup.criterion.id, automated: false }));
+    const session = await startVerification(setup.product.id, setup.task.id);
+    const notRun = session?.evidence.filter((item) => item.result === "NOT RUN") ?? [];
+    expect(notRun).toHaveLength(1);
+    expect(notRun[0]).toMatchObject({ acceptanceCriterionId: null, type: "TEST_RESULT" });
+    expect(notRun[0]?.description).toContain("manual");
+    expect(session?.coverages[0]?.status).not.toBe("VERIFIED");
+    expect(session?.overallVerdict).not.toBe("PASS");
+  });
+
+  it("explains why an automated case pointing at product source was not executed", async () => {
+    const setup = await completedTask();
+    setAIProviderForTests(provider({
+      criterionId: setup.criterion.id,
+      filePath: "src/app/discovery/page.tsx",
+    }));
+    const session = await startVerification(setup.product.id, setup.task.id);
+    const notRun = session?.evidence.find((item) => item.result === "NOT RUN");
+    expect(notRun?.description).toContain("src/app/discovery/page.tsx");
+    expect(notRun?.description).toContain("Automated execution was refused.");
+    expect(session?.executions.some((item) => item.kind === "NEW_VERIFICATION")).toBe(false);
+    expect(session?.coverages[0]?.status).not.toBe("VERIFIED");
+    expect(session?.overallVerdict).not.toBe("PASS");
+  });
+
   it("retries against the same approved commit in a new workspace and keeps the failed attempt", async () => {
     const setup = await completedTask();
     setAIProviderForTests(provider({ criterionId: setup.criterion.id, throwOn: "verification_interpretation" }));
@@ -745,7 +990,7 @@ describe("verification execution", () => {
     const first = await startVerification(setup.product.id, setup.task.id);
     const head = git(setup.repo, ["rev-parse", "HEAD"]).trim();
     fs.rmSync(first!.workspace!.workspacePath, { recursive: true, force: true });
-    const second = await retryVerification(setup.product.id, setup.task.id);
+    const second = await startNewVerificationAttempt(setup.product.id, setup.task.id);
     expect(fs.existsSync(second!.workspace!.workspacePath)).toBe(true);
     expect(second?.workspace?.baseCommit).toBe(setup.sha);
     expect(second?.id).not.toBe(first?.id);
@@ -762,7 +1007,7 @@ describe("verification execution", () => {
       where: { implementationTaskId: setup.task.id },
       data: { stale: true },
     });
-    await expect(retryVerification(setup.product.id, setup.task.id)).rejects.toThrow(/code approval/);
+    await expect(startNewVerificationAttempt(setup.product.id, setup.task.id)).rejects.toThrow(/code approval/);
     expect(await db.verificationSession.count({ where: { productId: setup.product.id } })).toBe(1);
     await db.codeChangeApproval.updateMany({
       where: { implementationTaskId: setup.task.id },
@@ -776,7 +1021,7 @@ describe("verification execution", () => {
       where: { implementationTaskId: setup.task.id },
       data: { headCommit: later },
     });
-    await expect(retryVerification(setup.product.id, setup.task.id)).rejects.toThrow(/approved commit SHA/);
+    await expect(startNewVerificationAttempt(setup.product.id, setup.task.id)).rejects.toThrow(/approved commit SHA/);
     expect(await db.verificationSession.count({ where: { productId: setup.product.id } })).toBe(1);
     expect(first?.commitSha).toBe(setup.sha);
   });
@@ -816,5 +1061,238 @@ describe("verification execution", () => {
     setAIProviderForTests(null);
     delete process.env.OPENAI_API_KEY;
     expect((await listAgentCatalogue()).find((agent) => agent.agentType === "TESTING")?.configured).toBe(false);
+  });
+});
+
+describe("test adapters: traceability, selection and snapshot binding", () => {
+  it("records each automated result with its test case, execution, adapter, criterion and approved snapshot", async () => {
+    const setup = await completedTask();
+    setAIProviderForTests(provider({ criterionId: setup.criterion.id }));
+    const session = await startVerification(setup.product.id, setup.task.id);
+    const testCase = session?.testCases.find((item) => item.title === "Submit valid claim");
+    expect(testCase).toMatchObject({ automated: true, adapterId: "node-test-mjs", targetSurface: "MODULE_EXPORT" });
+
+    const execution = session?.executions.find((item) => item.kind === "NEW_VERIFICATION");
+    expect(execution).toMatchObject({
+      testCaseId: testCase?.id,
+      adapterId: "node-test-mjs",
+      failureCategory: "PASSED",
+      snapshotCommit: setup.sha,
+      status: "PASSED",
+    });
+    expect(execution?.durationMs).toBeGreaterThanOrEqual(0);
+
+    const evidence = session?.evidence.find((item) => item.executionId === execution?.id);
+    expect(evidence).toMatchObject({
+      testCaseId: testCase?.id,
+      acceptanceCriterionId: setup.criterion.id,
+      adapterId: "node-test-mjs",
+      snapshotCommit: setup.sha,
+      result: "DEMONSTRATED",
+    });
+  });
+
+  it("keeps an HTTP case manual when the approved snapshot offers no route to test, and never runs it", async () => {
+    const setup = await completedTask();
+    setAIProviderForTests(
+      provider({
+        criterionId: setup.criterion.id,
+        adapterId: "http-blackbox",
+        targetSurface: "HTTP_ENDPOINT",
+        requiredCapabilities: ["http-request", "status-assertion"],
+        filePath: "verification/http/claim.test.mjs",
+        body: `// verifies:${setup.criterion.id}\nconst base = process.env.VERIFICATION_BASE_URL;\nconst response = await fetch(new URL("/api/claims", base));\nif (response.status !== 200) throw new Error("status");\n`,
+      }),
+    );
+    const session = await startVerification(setup.product.id, setup.task.id);
+    const testCase = session?.testCases.find((item) => item.title === "Submit valid claim");
+    expect(testCase).toMatchObject({ automated: false, adapterId: "" });
+    expect(testCase?.manualReason).toMatch(/not available for this implementation/);
+    expect(await db.verificationExecution.count({ where: { testCaseId: testCase?.id, kind: "NEW_VERIFICATION" } })).toBe(0);
+  });
+
+  it("refuses a case that names an unregistered adapter and never executes it", async () => {
+    const setup = await completedTask();
+    setAIProviderForTests(provider({ criterionId: setup.criterion.id, adapterId: "vitest" }));
+    const session = await startVerification(setup.product.id, setup.task.id);
+    const testCase = session?.testCases.find((item) => item.title === "Submit valid claim");
+    expect(testCase?.automated).toBe(false);
+    expect(testCase?.adapterId).toBe("");
+    expect(testCase?.manualReason).toContain("The adapter vitest is not registered");
+    expect(session?.executions.some((item) => item.kind === "NEW_VERIFICATION")).toBe(false);
+    expect(session?.coverages[0]?.status).not.toBe("VERIFIED");
+    expect(session?.overallVerdict).not.toBe("PASS");
+  });
+
+  it("refuses a case that requires a capability its adapter does not provide", async () => {
+    const setup = await completedTask();
+    setAIProviderForTests(provider({ criterionId: setup.criterion.id, requiredCapabilities: ["browser-session"] }));
+    const session = await startVerification(setup.product.id, setup.task.id);
+    const testCase = session?.testCases.find((item) => item.title === "Submit valid claim");
+    expect(testCase?.automated).toBe(false);
+    expect(testCase?.manualReason).toContain("browser-session");
+    expect(testCase?.requiredCapabilities).toEqual(["browser-session"]);
+    expect(session?.executions.some((item) => item.kind === "NEW_VERIFICATION")).toBe(false);
+  });
+
+  it("does not let a pass from a different snapshot satisfy the criterion", async () => {
+    const setup = await completedTask();
+    setAIProviderForTests(provider({ criterionId: setup.criterion.id }));
+    const session = await startVerification(setup.product.id, setup.task.id);
+    expect(session?.overallVerdict).toBe("PASS");
+
+    await db.verificationExecution.updateMany({
+      where: { sessionId: session!.id, kind: "NEW_VERIFICATION" },
+      data: { snapshotCommit: "0".repeat(40) },
+    });
+    await recomputeSession(session!.id);
+    const coverage = await db.verificationCoverage.findFirst({
+      where: { sessionId: session!.id, acceptanceCriterionId: setup.criterion.id },
+    });
+    expect(coverage?.status).not.toBe("VERIFIED");
+  });
+});
+
+describe("new attempt governance", () => {
+  it("starts a new attempt after an inconclusive result and leaves the previous session unchanged", async () => {
+    const setup = await completedTask();
+    const previous = await db.verificationSession.create({
+      data: {
+        productId: setup.product.id,
+        implementationTaskId: setup.task.id,
+        commitSha: setup.sha,
+        status: "BLOCKED",
+        overallVerdict: "INCONCLUSIVE",
+        verdictReason: "Evidence was insufficient.",
+        failureClass: "VERIFICATION_EVIDENCE_INSUFFICIENT",
+      },
+    });
+    setAIProviderForTests(provider({ criterionId: setup.criterion.id }));
+    const created = await startNewVerificationAttempt(setup.product.id, setup.task.id);
+    expect(created?.id).toBeTruthy();
+    expect(created?.id).not.toBe(previous.id);
+    const kept = await db.verificationSession.findUniqueOrThrow({ where: { id: previous.id } });
+    expect(kept.status).toBe("BLOCKED");
+    expect(kept.overallVerdict).toBe("INCONCLUSIVE");
+    expect(kept.verdictReason).toBe("Evidence was insufficient.");
+    expect(kept.failureClass).toBe("VERIFICATION_EVIDENCE_INSUFFICIENT");
+    expect(kept.updatedAt.getTime()).toBe(previous.updatedAt.getTime());
+    expect(await db.verificationSession.count({ where: { productId: setup.product.id } })).toBe(2);
+  });
+
+  it("refuses the first-attempt entry point once any attempt exists", async () => {
+    const setup = await completedTask();
+    await db.verificationSession.create({
+      data: {
+        productId: setup.product.id,
+        implementationTaskId: setup.task.id,
+        commitSha: setup.sha,
+        status: "BLOCKED",
+        overallVerdict: "INCONCLUSIVE",
+        failureClass: "VERIFICATION_EVIDENCE_INSUFFICIENT",
+      },
+    });
+    await expect(startVerification(setup.product.id, setup.task.id)).rejects.toThrow(/Start New Verification Attempt/);
+    expect(await db.verificationSession.count({ where: { productId: setup.product.id } })).toBe(1);
+  });
+
+  it("refuses the retry entry point after an inconclusive result", async () => {
+    const setup = await completedTask();
+    await db.verificationSession.create({
+      data: {
+        productId: setup.product.id,
+        implementationTaskId: setup.task.id,
+        commitSha: setup.sha,
+        status: "BLOCKED",
+        overallVerdict: "INCONCLUSIVE",
+        failureClass: "VERIFICATION_EVIDENCE_INSUFFICIENT",
+      },
+    });
+    await expect(retryVerification(setup.product.id, setup.task.id)).rejects.toThrow(/After an inconclusive result/);
+    expect(await db.verificationSession.count({ where: { productId: setup.product.id } })).toBe(1);
+  });
+
+  it("refuses a new attempt while an attempt is still running", async () => {
+    const setup = await completedTask();
+    await db.verificationSession.create({
+      data: {
+        productId: setup.product.id,
+        implementationTaskId: setup.task.id,
+        commitSha: setup.sha,
+        status: "EXECUTING",
+      },
+    });
+    await expect(startNewVerificationAttempt(setup.product.id, setup.task.id)).rejects.toThrow(
+      /already running|stopped before it finished/,
+    );
+    expect(await db.verificationSession.count({ where: { productId: setup.product.id } })).toBe(1);
+  });
+
+  it("refuses a new attempt after a person has approved the verification, and the approval stands", async () => {
+    const setup = await completedTask();
+    const approvedSession = await db.verificationSession.create({
+      data: {
+        productId: setup.product.id,
+        implementationTaskId: setup.task.id,
+        commitSha: setup.sha,
+        status: "PASSED",
+        overallVerdict: "PASS",
+      },
+    });
+    const approval = await db.approval.create({
+      data: { productId: setup.product.id, approvalType: "VERIFICATION", status: "APPROVED", approvedBy: "Local user" },
+    });
+    await db.verificationApproval.create({
+      data: {
+        productId: setup.product.id,
+        approvalId: approval.id,
+        sessionId: approvedSession.id,
+        implementationTaskId: setup.task.id,
+        commitSha: setup.sha,
+        evidenceFingerprint: "fingerprint",
+      },
+    });
+    await expect(startNewVerificationAttempt(setup.product.id, setup.task.id)).rejects.toThrow(/already approved/);
+    await expect(retryVerification(setup.product.id, setup.task.id)).rejects.toThrow(/already approved/);
+    const stillApproved = await db.verificationApproval.findFirstOrThrow({ where: { sessionId: approvedSession.id } });
+    expect(stillApproved.stale).toBe(false);
+    expect(await db.verificationSession.count({ where: { productId: setup.product.id } })).toBe(1);
+  });
+
+  it("refuses a new attempt after a failed verdict, which needs a change rather than a new run", async () => {
+    const setup = await completedTask();
+    await db.verificationSession.create({
+      data: {
+        productId: setup.product.id,
+        implementationTaskId: setup.task.id,
+        commitSha: setup.sha,
+        status: "REVIEW",
+        overallVerdict: "FAIL",
+      },
+    });
+    await expect(startNewVerificationAttempt(setup.product.id, setup.task.id)).rejects.toThrow(
+      /inconclusive result or a result awaiting human review/,
+    );
+    expect(await db.verificationSession.count({ where: { productId: setup.product.id } })).toBe(1);
+  });
+
+  it("refuses a new attempt when the approved code snapshot is no longer valid", async () => {
+    const setup = await completedTask();
+    await db.verificationSession.create({
+      data: {
+        productId: setup.product.id,
+        implementationTaskId: setup.task.id,
+        commitSha: setup.sha,
+        status: "BLOCKED",
+        overallVerdict: "INCONCLUSIVE",
+        failureClass: "VERIFICATION_EVIDENCE_INSUFFICIENT",
+      },
+    });
+    await db.codeChangeApproval.updateMany({
+      where: { implementationTaskId: setup.task.id },
+      data: { stale: true },
+    });
+    await expect(startNewVerificationAttempt(setup.product.id, setup.task.id)).rejects.toThrow(/code approval/);
+    expect(await db.verificationSession.count({ where: { productId: setup.product.id } })).toBe(1);
   });
 });

@@ -8,7 +8,9 @@ const TEST_PATH = /^verification\/[A-Za-z0-9._/-]+\.test\.mjs$/;
 const FIXTURE_PATH = /^verification\/[A-Za-z0-9._/-]+\/fixtures\/[A-Za-z0-9._/-]+$/;
 
 export function isVerificationTestPath(relativePath: string) {
-  return TEST_PATH.test(relativePath.replaceAll("\\", "/"));
+  const normalized = relativePath.replaceAll("\\", "/");
+  // A traversal segment could point the run at a file outside verification/, so it is never a test path.
+  return TEST_PATH.test(normalized) && !normalized.split("/").includes("..");
 }
 
 export function isVerificationFixturePath(relativePath: string) {

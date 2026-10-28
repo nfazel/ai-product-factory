@@ -8,6 +8,7 @@ import { runGit } from "@/modules/coding/git";
 import {
   approveCommand,
   classifyWrite,
+  filesBlockingPlanApproval,
   filesOutsideContract,
   isSecretPath,
   ensureParentDirectory,
@@ -26,6 +27,24 @@ describe("coding policy", () => {
     expect(filesOutsideContract(["prisma/schema.prisma", "src/lib/db.ts"], ["src/", "prisma/"], [])).toEqual([]);
     expect(outsideApprovedPlan("src/extra.ts", ["src/lib/db.ts"])).toBe(true);
     expect(outsideApprovedPlan("src/lib/db.ts", ["src/lib/db.ts"])).toBe(false);
+  });
+
+  it("lets tooling metadata in a plan revision through approval without blocking", () => {
+    expect(filesOutsideContract(
+      ["src/app/discovery/page.tsx", ".gitignore"],
+      ["src/"],
+      [],
+    )).toEqual([".gitignore"]);
+    expect(filesBlockingPlanApproval(
+      ["src/app/discovery/page.tsx", ".gitignore", ".editorconfig"],
+      ["src/"],
+      [],
+    )).toEqual([]);
+    expect(filesBlockingPlanApproval(
+      ["src/app/discovery/page.tsx", ".gitignore", "infra/main.tf"],
+      ["src/"],
+      [],
+    )).toEqual(["infra/main.tf"]);
   });
 
   it("states the coding agent authority", () => {

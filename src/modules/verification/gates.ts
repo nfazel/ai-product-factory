@@ -3,7 +3,7 @@ import "server-only";
 import fs from "node:fs";
 
 import { db } from "@/lib/db";
-import { approvedPlanWindows, evaluatePlanChecks } from "@/modules/coding/check-identity";
+import { codingChecksReadyForVerification } from "@/modules/coding/check-identity";
 import { parsePlannedCommands } from "@/modules/coding/commands";
 import { commitExists } from "@/modules/coding/git";
 import { reviewableDiffFiles } from "@/modules/coding/review";
@@ -39,14 +39,11 @@ export async function verificationEntryBlockers(productId: string, taskId: strin
     if (!plan || (plan.status !== "APPROVED" && plan.status !== "COMPLETED")) {
       reasons.push("An approved execution plan is required before verification.");
     } else {
-      const decision = evaluatePlanChecks({
+      const decision = codingChecksReadyForVerification({
         planVersion: plan.version,
-        windows: approvedPlanWindows({
-          version: plan.version,
-          status: plan.status,
-          approvedAt: plan.approvedAt,
-          history: plan.history,
-        }),
+        planStatus: plan.status,
+        planApprovedAt: plan.approvedAt,
+        planHistory: plan.history,
         checks: parsePlannedCommands(plan.validationCommands),
         evidence: workspace.evidence.map((item) => ({
           command: item.command,

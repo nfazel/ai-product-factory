@@ -10,7 +10,14 @@ export type NextActionDestination = {
    * confirm opens the section where a person must take the separate confirmation step.
    */
   execution?: NextActionExecution;
+  /**
+   * Task-scoped destinations open one task's verification workspace at a tab. The action's subject is the task.
+   * Without this, a verification link opens the Prove overview, not the workspace where the decision is made.
+   */
+  tab?: VerificationTab;
 };
+
+export type VerificationTab = "overview" | "plan" | "results" | "evidence" | "approval" | "history";
 
 export const NEXT_ACTION_DESTINATIONS = {
   "add-requirements": { path: "/discovery", hash: "add" },
@@ -59,17 +66,19 @@ export const NEXT_ACTION_DESTINATIONS = {
   "retry-coding": { path: "/build", hash: "coding-progress" },
   "repair-implementation": { path: "/build", hash: "coding-progress" },
   "record-repair-result": { path: "/build", hash: "coding-progress" },
+  "validate-existing-implementation": { path: "/build", hash: "coding-progress" },
   "resolve-coding-blocker": { path: "/build", hash: "coding-progress" },
   "restore-unapproved-change": { path: "/build", hash: "coding-progress" },
   "review-change": { path: "/build", hash: "code" },
   "approve-change": { path: "/build", hash: "code", execution: "confirm" },
   "create-commit": { path: "/build", hash: "code", execution: "confirm" },
   "start-check": { path: "/testing", hash: "check", execution: "command" },
-  "view-verification": { path: "/testing", hash: "check", execution: "navigate" },
+  "view-verification": { path: "/testing/tasks", hash: "verification-tabs", execution: "navigate", tab: "results" },
+  "recover-verification": { path: "/testing/tasks", hash: "verification-tabs", execution: "navigate", tab: "overview" },
   "retry-verification": { path: "/testing", hash: "check", execution: "command" },
-  "review-verification": { path: "/testing", hash: "check", execution: "confirm" },
-  "approve-verification": { path: "/testing", hash: "check", execution: "confirm" },
-  "review-verification-findings": { path: "/testing", hash: "check", execution: "confirm" },
+  "review-verification": { path: "/testing/tasks", hash: "verification-tabs", execution: "confirm", tab: "approval" },
+  "approve-verification": { path: "/testing/tasks", hash: "verification-tabs", execution: "confirm", tab: "approval" },
+  "review-verification-findings": { path: "/testing/tasks", hash: "verification-tabs", execution: "confirm", tab: "approval" },
   "configure-github": { path: "/settings", hash: "github", kind: "settings" },
   "choose-product-repository": { path: "/build", hash: "repository" },
   "publish-branch": { path: "/testing", hash: "publish", execution: "confirm" },

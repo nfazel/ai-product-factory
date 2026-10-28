@@ -13,10 +13,25 @@ import { assertWorktreeIsolated, branchNameFor, createWorktree, workspaceDirecto
 import { getCurrentActor } from "@/modules/identity/actor";
 import { db } from "@/lib/db";
 import { recomputeSession } from "@/modules/verification/assess";
-import { classifyVerificationFailure, failureReason, isVerificationFailureClass } from "@/modules/verification/failure";
+import {
+  BLOCKING_VERIFICATION_FAILURES,
+  classifyVerificationFailure,
+  failureReason,
+  isVerificationFailureClass,
+} from "@/modules/verification/failure";
+import {
+  isAttemptActive,
+  markAttemptActive,
+  markAttemptInactive,
+  recordOf,
+  releaseRecordedResources,
+} from "@/modules/verification/recovery";
+import { parseTrackedResources } from "@/modules/verification/resources";
+import { sanitizeFailureDetail, type VerificationFailureStage } from "@/modules/verification/diagnostics";
 import { initialNfrEvidenceNote } from "@/modules/verification/nfr-evidence";
 import { buildVerificationContract } from "@/modules/verification/contract";
-import { assertVerificationEntry, verificationEntryBlockers } from "@/modules/verification/gates";
+import { verificationEntryBlockers } from "@/modules/verification/gates";
+import { attemptPolicy, attemptStateFor, type AttemptKind } from "@/modules/verification/attempt-policy";
 import { executeVerificationTool } from "@/modules/verification/tools";
 import { DomainError } from "@/modules/shared/errors";
 
@@ -33,6 +48,27 @@ function assertHuman(actor: string) {
   }
 }
 
+const OPEN_ATTEMPT_STATUSES = ["PLANNING", "READY", "EXECUTING"] as const;
+
+/**
+ * An open attempt is either running in this server, or it stopped without finishing (the server restarted or the
+ * process died). Only a person can recover the second kind, so nothing new starts until they do.
+ */
+function openAttemptError(sessionId: string) {
+  if (isAttemptActive(sessionId)) return new DomainError("Independent Verification is already running for this task.");
+  return new DomainError(
+    "An earlier Independent Verification attempt stopped before it finished. Recover it in the verification workspace before starting another attempt. Nothing was run.",
+  );
+}
+
+async function assertNoOpenAttempt(productId: string, taskId: string) {
+  const open = await db.verificationSession.findFirst({
+    where: { productId, implementationTaskId: taskId, demo: false, status: { in: [...OPEN_ATTEMPT_STATUSES] } },
+    select: { id: true },
+  });
+  if (open) throw openAttemptError(open.id);
+}
+
 async function claimVerificationAttempt(input: {
   productId: string;
   taskId: string;
@@ -46,10 +82,11 @@ async function claimVerificationAttempt(input: {
         productId: input.productId,
         implementationTaskId: input.taskId,
         demo: false,
-        status: { in: ["PLANNING", "READY", "EXECUTING"] },
+        status: { in: [...OPEN_ATTEMPT_STATUSES] },
       },
+      select: { id: true },
     });
-    if (running) throw new DomainError("Independent Verification is already running for this task.");
+    if (running) throw openAttemptError(running.id);
     return tx.verificationSession.create({
       data: {
         productId: input.productId,
@@ -63,30 +100,52 @@ async function claimVerificationAttempt(input: {
   });
 }
 
-export async function retryVerification(productId: string, taskId: string) {
-  const running = await db.verificationSession.findFirst({
-    where: {
-      productId,
-      implementationTaskId: taskId,
-      demo: false,
-      status: { in: ["PLANNING", "READY", "EXECUTING"] },
-    },
-  });
-  if (running) throw new DomainError("Independent Verification is already running for this task.");
-  return startVerification(productId, taskId);
+/**
+ * Every entry point that creates a verification attempt goes through `createAttempt`. The three public functions differ
+ * only in the kind of attempt they request, and `createAttempt` applies the attempt policy on the server. The user
+ * interface only shows what the policy allows; it is never the only check.
+ */
+export async function startVerification(productId: string, taskId: string) {
+  return createAttempt(productId, taskId, "first");
 }
 
-export async function startVerification(productId: string, taskId: string) {
-  const running = await db.verificationSession.findFirst({
-    where: {
-      productId,
-      implementationTaskId: taskId,
-      demo: false,
-      status: { in: ["PLANNING", "READY", "EXECUTING"] },
-    },
+/** Repeats an attempt that failed for a technical reason. Refused after an inconclusive or unapproved result. */
+export async function retryVerification(productId: string, taskId: string) {
+  return createAttempt(productId, taskId, "retry");
+}
+
+/**
+ * A person's explicit request for a fresh attempt after an inconclusive result, or after a result that awaits human
+ * review without approval. The previous attempts, executions, evidence and decisions are kept. It never runs automatically.
+ */
+export async function startNewVerificationAttempt(productId: string, taskId: string) {
+  return createAttempt(productId, taskId, "new");
+}
+
+/**
+ * The server's check for every attempt kind. It reads the task's attempts and approvals, then applies the pure
+ * policy with the entry gate. Refusals are thrown before anything is written.
+ */
+async function assertAttemptAllowed(productId: string, taskId: string, kind: AttemptKind) {
+  const sessions = await db.verificationSession.findMany({
+    where: { productId, implementationTaskId: taskId },
+    orderBy: { createdAt: "desc" },
+    include: { approvals: { select: { stale: true } } },
   });
-  if (running) throw new DomainError("Independent Verification is already running for this task.");
-  await assertVerificationEntry(productId, taskId);
+  const state = attemptStateFor(sessions, { interrupted: false });
+  const decision = attemptPolicy({
+    kind,
+    progress: state.progress,
+    humanApproved: state.humanApproved,
+    openAttempt: false,
+    entryBlockers: await verificationEntryBlockers(productId, taskId),
+  });
+  if (!decision.allowed) throw new DomainError(decision.reason);
+}
+
+async function createAttempt(productId: string, taskId: string, kind: AttemptKind) {
+  await assertNoOpenAttempt(productId, taskId);
+  await assertAttemptAllowed(productId, taskId, kind);
   await prepareAI();
   if (!isAIConfigured()) throw new AgentNotConfiguredError("TESTING");
   await assertAIReady("verification", "No verification was started.");
@@ -144,100 +203,172 @@ export async function startVerification(productId: string, taskId: string) {
     repositoryWorkspaceId: codingWorkspace.id,
     commitSha: codingWorkspace.headCommit,
   });
-  const workspace = await db.verificationWorkspace.create({
-    data: {
-      sessionId: session.id,
-      repositoryId: repository.id,
-      branchName: branchNameFor(taskId, `verify ${task.title}`).replace("ai-factory/task-", "ai-factory/verify-task-"),
-      baseCommit: codingWorkspace.headCommit,
-      status: "CREATING",
-    },
-  });
-  const directory = workspaceDirectory(workspace.id);
+  // Registered for the life of this request so a concurrent check can tell "running" from "interrupted".
+  markAttemptActive(session.id);
   try {
-    const created = await createWorktree({
-      repositoryPath: configured.localPath,
-      workspacePath: directory,
-      branchName: workspace.branchName,
-      baseCommit: codingWorkspace.headCommit,
-    });
-    await assertWorktreeIsolated(directory, configured.localPath);
-    await db.verificationWorkspace.update({
-      where: { id: workspace.id },
-      data: { workspacePath: directory, branchName: created.branchName, status: "ACTIVE" },
-    });
-  } catch (error) {
-    await db.verificationWorkspace.update({
-      where: { id: workspace.id },
-      data: { workspacePath: directory, status: "FAILED" },
-    });
-    await db.verificationSession.update({
-      where: { id: session.id },
-      data: {
-        status: "FAILED",
-        failureClass: "VERIFICATION_SETUP_FAILED",
-        verdictReason: failureReason("VERIFICATION_SETUP_FAILED"),
-      },
-    });
-    throw new DomainError(
-      `The verification workspace could not be created. The coding workspace and main working tree were not modified. ${error instanceof Error ? error.message : ""}`,
-    );
-  }
-  await db.verificationContract.create({
-    data: { sessionId: session.id, ...draft },
-  });
-  for (const nfr of nfrs) {
-    await db.verificationNfrResult.create({
+    const workspace = await db.verificationWorkspace.create({
       data: {
         sessionId: session.id,
-        nfrId: nfr.id,
-        title: nfr.title,
-        status: "NOT_TESTED",
-        note: initialNfrEvidenceNote(nfr),
+        repositoryId: repository.id,
+        branchName: branchNameFor(taskId, `verify ${task.title}`).replace("ai-factory/task-", "ai-factory/verify-task-"),
+        baseCommit: codingWorkspace.headCommit,
+        status: "CREATING",
       },
     });
-  }
-  await recordActivity({
-    productId,
-    type: "VERIFICATION_STARTED",
-    description: `Started verification for commit ${codingWorkspace.headCommit.slice(0, 12)}.`,
-    actor: AGENT_CATALOG.TESTING.name,
-  });
-  try {
-    await executeAgent({
-      productId,
-      workItemId: task.workItemId ?? undefined,
-      agentType: "TESTING",
-      input: { phase: "plan", sessionId: session.id, taskId },
-    });
-    await executeAgent({
-      productId,
-      workItemId: task.workItemId ?? undefined,
-      agentType: "TESTING",
-      input: { phase: "execute", sessionId: session.id, taskId },
-    });
-  } catch (error) {
-    const existing = await db.verificationSession.findUnique({
-      where: { id: session.id },
-      select: { failureClass: true, overallVerdict: true, verdictReason: true },
-    });
-    if (!existing?.overallVerdict) {
-      const failureClass =
-        existing?.failureClass && isVerificationFailureClass(existing.failureClass)
-          ? existing.failureClass
-          : classifyVerificationFailure(error);
+    const directory = workspaceDirectory(workspace.id);
+    try {
+      const created = await createWorktree({
+        repositoryPath: configured.localPath,
+        workspacePath: directory,
+        branchName: workspace.branchName,
+        baseCommit: codingWorkspace.headCommit,
+      });
+      await assertWorktreeIsolated(directory, configured.localPath);
+      await db.verificationWorkspace.update({
+        where: { id: workspace.id },
+        data: { workspacePath: directory, branchName: created.branchName, status: "ACTIVE" },
+      });
+    } catch (error) {
+      await db.verificationWorkspace.update({
+        where: { id: workspace.id },
+        data: { workspacePath: directory, status: "FAILED" },
+      });
       await db.verificationSession.update({
         where: { id: session.id },
         data: {
           status: "FAILED",
-          failureClass,
-          verdictReason: existing?.verdictReason || failureReason(failureClass),
+          failureClass: "VERIFICATION_SETUP_FAILED",
+          failureStage: "WORKSPACE_SETUP" satisfies VerificationFailureStage,
+          failureDetail: sanitizeFailureDetail(error instanceof Error ? error.message : String(error)),
+          verdictReason: failureReason("VERIFICATION_SETUP_FAILED"),
+        },
+      });
+      throw new DomainError(
+        `The verification workspace could not be created. The coding workspace and main working tree were not modified. ${error instanceof Error ? error.message : ""}`,
+      );
+    }
+    await db.verificationContract.create({
+      data: { sessionId: session.id, ...draft },
+    });
+    for (const nfr of nfrs) {
+      await db.verificationNfrResult.create({
+        data: {
+          sessionId: session.id,
+          nfrId: nfr.id,
+          title: nfr.title,
+          status: "NOT_TESTED",
+          note: initialNfrEvidenceNote(nfr),
         },
       });
     }
-    throw error;
+    await recordActivity({
+      productId,
+      type: "VERIFICATION_STARTED",
+      description: `Started verification for commit ${codingWorkspace.headCommit.slice(0, 12)}.`,
+      actor: AGENT_CATALOG.TESTING.name,
+    });
+    let stage: VerificationFailureStage = "AGENT_PLAN";
+    try {
+      await executeAgent({
+        productId,
+        workItemId: task.workItemId ?? undefined,
+        agentType: "TESTING",
+        input: { phase: "plan", sessionId: session.id, taskId },
+      });
+      stage = "AGENT_EXECUTE";
+      await executeAgent({
+        productId,
+        workItemId: task.workItemId ?? undefined,
+        agentType: "TESTING",
+        input: { phase: "execute", sessionId: session.id, taskId },
+      });
+    } catch (error) {
+      const existing = await db.verificationSession.findUnique({
+        where: { id: session.id },
+        select: { failureClass: true, failureStage: true, failureDetail: true, overallVerdict: true, verdictReason: true },
+      });
+      if (!existing?.overallVerdict) {
+        const failureClass =
+          existing?.failureClass && isVerificationFailureClass(existing.failureClass)
+            ? existing.failureClass
+            : classifyVerificationFailure(error);
+        await db.verificationSession.update({
+          where: { id: session.id },
+          data: {
+            // A snapshot mismatch or a blocking escalation is a blocked verification, not a failed one.
+            status: BLOCKING_VERIFICATION_FAILURES.has(failureClass) ? "BLOCKED" : "FAILED",
+            failureClass,
+            failureStage: existing?.failureStage || stage,
+            failureDetail: existing?.failureDetail || sanitizeFailureDetail(error instanceof Error ? error.message : String(error)),
+            verdictReason: existing?.verdictReason || failureReason(failureClass),
+          },
+        });
+      }
+      throw error;
+    }
+  } finally {
+    markAttemptInactive(session.id);
   }
   return getVerificationSession(productId, session.id);
+}
+
+/**
+ * A person recovers an attempt that stopped without finishing. It releases the temporary resources the attempt recorded
+ * (database, runtime directory, process groups), marks the attempt FAILED as an interrupted attempt, and keeps every
+ * execution and evidence record. It never starts a new attempt; that remains a separate, explicit human action.
+ */
+export async function recoverInterruptedVerification(productId: string, sessionId: string, options?: { actorName?: string }) {
+  const actor = options?.actorName ?? getCurrentActor().name;
+  assertHuman(actor);
+  const session = await db.verificationSession.findFirst({ where: { id: sessionId, productId } });
+  if (!session) throw new DomainError("The verification session was not found.", "NOT_FOUND");
+  if (session.demo || !(OPEN_ATTEMPT_STATUSES as readonly string[]).includes(session.status)) {
+    throw new DomainError("Only an attempt that stopped before it finished can be recovered.");
+  }
+  if (isAttemptActive(session.id)) {
+    throw new DomainError("This attempt is still running in this server, so it is not interrupted. Wait for it to finish.");
+  }
+  const state = recordOf(session.runState);
+  const released = await releaseRecordedResources(parseTrackedResources(state.resources));
+  const detail = [
+    "The attempt stopped before it finished, so nothing about the product was judged.",
+    ...released.notes,
+  ].join(" ");
+  const recoveredAt = new Date();
+  await db.verificationSession.update({
+    where: { id: session.id },
+    data: {
+      status: "FAILED",
+      failureClass: "VERIFICATION_INTERRUPTED",
+      failureStage: session.failureStage || "AGENT_EXECUTE",
+      failureDetail: sanitizeFailureDetail(detail),
+      verdictReason: failureReason("VERIFICATION_INTERRUPTED"),
+      completedAt: recoveredAt,
+      // Resources that could not be released stay recorded so a person can see them. Released entries are removed.
+      runState: {
+        ...state,
+        resources: released.kept,
+        recovery: {
+          recoveredAt: recoveredAt.toISOString(),
+          recoveredBy: actor,
+          releasedCount: released.released.length,
+          keptCount: released.kept.length,
+          notes: released.notes.map((note) => sanitizeFailureDetail(note)),
+        },
+      } as unknown as object,
+    },
+  });
+  await db.verificationWorkspace.updateMany({
+    where: { sessionId: session.id, status: "CREATING" },
+    data: { status: "FAILED" },
+  });
+  await recordActivity({
+    productId,
+    type: "VERIFICATION_RECOVERED",
+    description: `${actor} recovered an interrupted verification attempt. Released ${released.released.length} temporary resource(s); ${released.kept.length} remain recorded.`,
+    actor,
+  });
+  return getVerificationSession(productId, sessionId);
 }
 
 export async function approveVerification(productId: string, sessionId: string, options?: { actorName?: string }) {
@@ -444,6 +575,9 @@ export async function rerunFailedTests(productId: string, sessionId: string) {
         outputSummary: ran.output,
         startedAt: new Date(),
         completedAt: new Date(),
+        // A re-run stays tied to the approved snapshot and the adapter that ran the original test.
+        adapterId: execution.adapterId || "node-test-mjs",
+        snapshotCommit: session.workspace.baseCommit,
       },
     });
   }
@@ -507,7 +641,7 @@ export async function getProveView(productId: string) {
         },
       })
     : [];
-  const sessions = await db.verificationSession.findMany({
+  const sessionRows = await db.verificationSession.findMany({
     where: { productId },
     orderBy: { createdAt: "desc" },
     include: {
@@ -524,6 +658,11 @@ export async function getProveView(productId: string) {
       approvals: { orderBy: { createdAt: "desc" } },
     },
   });
+  // "Interrupted" is computed here, on the server, from the in-process registry. It is never taken from the client.
+  const sessions = sessionRows.map((session) => ({
+    ...session,
+    interrupted: (OPEN_ATTEMPT_STATUSES as readonly string[]).includes(session.status) && !isAttemptActive(session.id),
+  }));
   const integrated = await db.integratedVerificationSession.findMany({
     where: { productId },
     orderBy: { createdAt: "desc" },
@@ -535,6 +674,8 @@ export async function getProveView(productId: string) {
       title: task.title,
       status: task.status,
       blockers: await verificationEntryBlockers(productId, task.id),
+      // The approved criteria are the source of truth for the coverage report. They are read, never changed here.
+      criteria: (task.workItem?.acceptanceCriteria ?? []).map((item) => ({ id: item.id, description: item.description })),
       trace: traceFor(task),
       featureConcern: featureConcernFor(task),
       commitSha: task.workspaces[0]?.headCommit ?? "",

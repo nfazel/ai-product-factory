@@ -29,6 +29,7 @@ function task(patch: Partial<TaskSnapshot> = {}): TaskSnapshot {
     providerBlocked: false,
     repairAvailable: false,
     persistenceRecovery: false,
+    validateExistingAvailable: false,
     planIncomplete: false,
     implementationIncomplete: false,
     outOfScope: false,
@@ -325,11 +326,17 @@ describe("next action", () => {
 
   it("maps every Build next action to a control that exists on the page", () => {
     const buildPage = readFileSync(resolve("src/app/(app)/products/[id]/build/page.tsx"), "utf8");
+    const buildOverview = readFileSync(resolve("src/components/build/build-overview.tsx"), "utf8");
+    const codingControls = readFileSync(resolve("src/components/build/coding-controls.tsx"), "utf8");
+    const validateExisting = readFileSync(resolve("src/modules/coding/validate-existing.ts"), "utf8");
     const controls = readFileSync(resolve("src/components/build/controls.tsx"), "utf8");
     const governance = readFileSync(resolve("src/components/build/governance-panel.tsx"), "utf8");
     const testing = readFileSync(resolve("src/app/(app)/products/[id]/testing/page.tsx"), "utf8");
     const guidanceUi = readFileSync(resolve("src/components/guidance/guidance-ui.tsx"), "utf8");
-    const surfaces = `${buildPage}\n${controls}\n${governance}\n${testing}`;
+    const proveTabs = readFileSync(resolve("src/components/prove/prove-tabs.tsx"), "utf8");
+    const surfaces = `${buildPage}\n${buildOverview}\n${codingControls}\n${validateExisting}\n${controls}\n${governance}\n${testing}\n${proveTabs}`;
+    expect(codingControls).toContain("ValidateExistingImplementationButton");
+    expect(validateExisting).toContain("Validate Existing Implementation");
     const cases: Array<[Partial<GuidanceSnapshot>, string, string]> = [
       [{ developmentContext: "UNSET" }, "choose-development-context", "#context"],
       [{ developmentContext: "EXISTING_SYSTEM", codebaseCaptured: false }, "add-codebase-context", "#context"],
@@ -352,6 +359,7 @@ describe("next action", () => {
       [{ design: designed, review: reviewed, repositoryReady: true, tasks: [task({ status: "IN_PROGRESS", workspace: "OPEN", executionPlan: "APPROVED", codingRun: "WAITING" })] }, "resolve-coding-blocker", "#coding-progress"],
       [{ design: designed, review: reviewed, repositoryReady: true, tasks: [task({ status: "IN_PROGRESS", workspace: "OPEN", executionPlan: "APPROVED", codingRun: "FAILED", repairAvailable: true, planIncomplete: true })] }, "revise-execution-plan", "#execution-plan"],
       [{ design: designed, review: reviewed, repositoryReady: true, tasks: [task({ status: "IN_PROGRESS", workspace: "OPEN", executionPlan: "APPROVED", codingRun: "FAILED", repairAvailable: true, persistenceRecovery: true })] }, "record-repair-result", "#coding-progress"],
+      [{ design: designed, review: reviewed, repositoryReady: true, tasks: [task({ status: "IN_PROGRESS", workspace: "OPEN", executionPlan: "APPROVED", codingRun: "FAILED", validateExistingAvailable: true, repairAvailable: true })] }, "validate-existing-implementation", "#coding-progress"],
       [{ design: designed, review: reviewed, repositoryReady: true, tasks: [task({ status: "IN_PROGRESS", workspace: "OPEN", executionPlan: "APPROVED", codingRun: "FAILED", repairAvailable: true })] }, "repair-implementation", "#coding-progress"],
       [{ design: designed, review: reviewed, repositoryReady: true, tasks: [task({ status: "IN_PROGRESS", workspace: "OPEN", executionPlan: "APPROVED", codingRun: "FAILED", providerBlocked: true })] }, "retry-coding", "#coding-progress"],
       [{ design: designed, review: reviewed, repositoryReady: true, tasks: [task({ status: "IN_PROGRESS", workspace: "OPEN", executionPlan: "APPROVED", codingRun: "FAILED" })] }, "review-coding-failure", "#coding-progress"],
@@ -361,11 +369,11 @@ describe("next action", () => {
       [{ design: designed, review: reviewed, tasks: [task({ status: "IN_PROGRESS", workspace: "OPEN", codeApproval: "CURRENT" })] }, "create-commit", "#code"],
       [{ design: designed, review: reviewed, tasks: [task({ status: "CODE_REVIEW", workspace: "OPEN", executionPlan: "COMPLETED", codingRun: "COMPLETED", codeApproval: "CURRENT" })] }, "create-commit", "#code"],
       [{ design: designed, review: reviewed, tasks: [task({ status: "COMPLETED", codeApproval: "CURRENT" })] }, "start-check", "#check"],
-      [{ design: designed, review: reviewed, tasks: [task({ status: "COMPLETED", codeApproval: "CURRENT", verification: "RUNNING" })] }, "view-verification", "#check"],
+      [{ design: designed, review: reviewed, tasks: [task({ status: "COMPLETED", codeApproval: "CURRENT", verification: "RUNNING" })] }, "view-verification", "#verification-tabs"],
       [{ design: designed, review: reviewed, tasks: [task({ status: "COMPLETED", codeApproval: "CURRENT", verification: "RETRYABLE" })] }, "retry-verification", "#check"],
-      [{ design: designed, review: reviewed, tasks: [task({ status: "COMPLETED", codeApproval: "CURRENT", verification: "REVIEW" })] }, "review-verification", "#check"],
-      [{ design: designed, review: reviewed, tasks: [task({ status: "COMPLETED", codeApproval: "CURRENT", verification: "AWAITING" })] }, "approve-verification", "#check"],
-      [{ design: designed, review: reviewed, tasks: [task({ status: "COMPLETED", codeApproval: "CURRENT", verification: "FAILED" })] }, "review-verification-findings", "#check"],
+      [{ design: designed, review: reviewed, tasks: [task({ status: "COMPLETED", codeApproval: "CURRENT", verification: "REVIEW" })] }, "review-verification", "#verification-tabs"],
+      [{ design: designed, review: reviewed, tasks: [task({ status: "COMPLETED", codeApproval: "CURRENT", verification: "AWAITING" })] }, "approve-verification", "#verification-tabs"],
+      [{ design: designed, review: reviewed, tasks: [task({ status: "COMPLETED", codeApproval: "CURRENT", verification: "FAILED" })] }, "review-verification-findings", "#verification-tabs"],
       [{ design: designed, review: reviewed, githubConnected: true, tasks: [task({ status: "COMPLETED", codeApproval: "CURRENT", verification: "APPROVED" })] }, "publish-branch", "#publish"],
       [{ design: designed, review: reviewed, tasks: [task({ status: "COMPLETED", codeApproval: "CURRENT", verification: "APPROVED", published: true, remoteMain: "MISSING" })] }, "initialize-remote-main", "#publish"],
       [{ design: designed, review: reviewed, tasks: [task({ status: "COMPLETED", codeApproval: "CURRENT", verification: "APPROVED", published: true })] }, "create-pr", "#publish"],
@@ -430,6 +438,7 @@ describe("next action", () => {
       "/definition": walk(resolve("src/app/(app)/products/[id]/definition")) + walk(resolve("src/components/definition")) + readFileSync(resolve("src/components/intake/requirements-panel.tsx"), "utf8"),
       "/build": walk(resolve("src/app/(app)/products/[id]/build")) + walk(resolve("src/components/build")),
       "/testing": walk(resolve("src/app/(app)/products/[id]/testing")) + walk(resolve("src/components/prove")) + walk(resolve("src/components/source-control")),
+      "/testing/tasks": walk(resolve("src/app/(app)/products/[id]/testing/tasks")) + walk(resolve("src/components/prove")),
       "/releases": walk(resolve("src/app/(app)/products/[id]/releases")) + walk(resolve("src/components/release")),
       "/metrics": walk(resolve("src/app/(app)/products/[id]/metrics")) + walk(resolve("src/components/release")),
       "/settings": readFileSync(resolve("src/app/(app)/settings/page.tsx"), "utf8"),

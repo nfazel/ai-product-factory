@@ -18,8 +18,16 @@ import {
 export type VerificationToolRequest =
   | { action: "READ_FILE"; path: string }
   | { action: "WRITE_FILE"; path: string; content: string }
-  | { action: "RUN_COMMAND"; command: string };
+  /**
+   * `environment` is built by the framework (for example the managed application's base URL for HTTP tests). It is
+   * never taken from the Verification Agent, and it cannot change which command runs.
+   */
+  | { action: "RUN_COMMAND"; command: string; environment?: Record<string, string> };
 
+/**
+ * `timedOut` is true when the process was stopped by a signal, most often the time limit. An interrupted run is
+ * not a result: the caller must classify it as blocked, never as a product failure.
+ */
 export async function executeVerificationTool(
   input: { sessionId: string; productId: string; workspacePath: string },
   request: VerificationToolRequest,
@@ -28,12 +36,17 @@ export async function executeVerificationTool(
     const approved = approveVerificationCommand(request.command);
     if (!approved.ok) {
       await deny(input, "RUN_COMMAND", approved.reason, "", request.command);
-      return { allowed: false, reason: approved.reason, exitCode: null as number | null, output: "" };
+      return { allowed: false, reason: approved.reason, exitCode: null as number | null, output: "", timedOut: false };
     }
     const started = new Date();
     const environment = validationProcessEnvironment(approved.command, process.env.DATABASE_URL, input.workspacePath);
-    const result = await runProcess(approved.argv, input.workspacePath, 120_000, environment.env);
-    const output = [environment.note, safeCommandOutput(result.stdout, result.stderr)].filter(Boolean).join("\n\n");
+    const result = await runProcess(approved.argv, input.workspacePath, 120_000, {
+      ...environment.env,
+      ...(request.environment ?? {}),
+    });
+    const timedOut = result.signal !== null && result.signal !== undefined;
+    const interruption = timedOut ? `The command was stopped by signal ${result.signal} before it finished.` : "";
+    const output = [environment.note, interruption, safeCommandOutput(result.stdout, result.stderr)].filter(Boolean).join("\n\n");
     const unavailable = commandUnavailable(output, result.code) || (result.code !== 0 && commandFailureIsEnvironment(output));
     await db.verificationEvidence.create({
       data: {
@@ -41,7 +54,8 @@ export async function executeVerificationTool(
         type: commandEvidenceType(approved.command),
         source: "COMMAND_RUNNER",
         description: approved.command,
-        result: result.code === 0 ? "EXECUTED" : unavailable ? "UNAVAILABLE" : "FAILED",
+        // An interrupted run did not produce a result, so it is never recorded as a failed command.
+        result: result.code === 0 && !timedOut ? "EXECUTED" : unavailable || timedOut ? "UNAVAILABLE" : "FAILED",
         command: approved.command,
         exitCode: result.code,
       },
@@ -57,6 +71,7 @@ export async function executeVerificationTool(
       reason: "",
       exitCode: result.code,
       output,
+      timedOut,
       started,
       completed: new Date(),
       command: approved.command,
@@ -68,7 +83,11 @@ export async function executeVerificationTool(
       ? classifyVerificationRead(input.workspacePath, request.path)
       : classifyVerificationWrite(input.workspacePath, request.path);
   if (!located.ok) {
-    const type = located.reason.includes("Secret") ? "SECRET_ACCESS" : located.reason.includes("production") ? "IMPLEMENTATION_CHANGE" : "OTHER";
+    const type = located.reason.includes("Secret")
+      ? "SECRET_ACCESS"
+      : located.reason.includes("production")
+        ? "IMPLEMENTATION_CHANGE"
+        : "OTHER";
     await deny(input, request.action, located.reason, request.path, "");
     await db.verificationEscalation.create({
       data: {
@@ -78,11 +97,11 @@ export async function executeVerificationTool(
         reason: request.path,
       },
     });
-    return { allowed: false, reason: located.reason, exitCode: null, output: "" };
+    return { allowed: false, reason: located.reason, exitCode: null, output: "", timedOut: false };
   }
   if (request.action === "READ_FILE") {
     if (!fs.existsSync(located.absolute) || !fs.statSync(located.absolute).isFile()) {
-      return { allowed: false, reason: "The file was not found.", exitCode: null, output: "" };
+      return { allowed: false, reason: "The file was not found.", exitCode: null, output: "", timedOut: false };
     }
     const content = fs.readFileSync(located.absolute, "utf8");
     await recordActivity({
@@ -91,7 +110,7 @@ export async function executeVerificationTool(
       description: `Verification read ${located.relative}.`,
       actor: "Testing & Verification Agent",
     });
-    return { allowed: true, reason: "", exitCode: null, output: content.slice(0, 8000) };
+    return { allowed: true, reason: "", exitCode: null, output: content.slice(0, 8000), timedOut: false };
   }
   fs.mkdirSync(path.dirname(located.absolute), { recursive: true });
   fs.writeFileSync(located.absolute, request.content);
@@ -101,7 +120,7 @@ export async function executeVerificationTool(
     description: `Verification created ${located.relative}.`,
     actor: "Testing & Verification Agent",
   });
-  return { allowed: true, reason: "", exitCode: null, output: located.relative };
+  return { allowed: true, reason: "", exitCode: null, output: located.relative, timedOut: false };
 }
 
 function commandEvidenceType(command: string) {

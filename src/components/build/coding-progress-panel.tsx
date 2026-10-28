@@ -1,9 +1,11 @@
-import { ProposeContractPlanButton, RecordRepairResultButton, RepairImplementationButton, ScopeResolution, StartApprovedCodingButton } from "@/components/build/coding-controls";
+import { ApprovePlanButton, ProposeContractPlanButton, RecordRepairResultButton, RepairImplementationButton, RepairPlanCoverageButton, ScopeResolution, StartApprovedCodingButton, ValidateExistingImplementationButton } from "@/components/build/coding-controls";
+import { assessPlanConsistency } from "@/modules/coding/bootstrap";
 import { REPAIR_RECORD_MESSAGE } from "@/modules/coding/diff";
+import { VALIDATE_EXISTING_LABEL } from "@/modules/coding/validate-existing";
 import { ClarificationHold } from "@/components/clarification/keep-version";
 import { describedProviderFailure, isProviderFailureCategory } from "@/modules/ai/failures";
 import { compileExecutionContract, parsePlannedCommands } from "@/modules/coding/commands";
-import { isGeneratedReviewPath } from "@/modules/coding/review";
+import { isGeneratedReviewPath } from "@/modules/coding/generated-paths";
 import { asStrings } from "@/modules/coding/strings";
 import { approvedPlanWasExecuted, describeCodingProgress, type CodingLifecycle } from "@/modules/coding/progress";
 import { failureRecordKey } from "@/modules/coding/repair";
@@ -33,6 +35,7 @@ type Workspace = {
   retryOffer?: boolean;
   repairOffer?: boolean;
   recordRepairOffer?: boolean;
+  validateExistingOffer?: boolean;
   repairRuns?: { id: string; status: string; attempt: number | null; planVersion: number | null; startedAt: Date | null }[];
   commitOffer?: boolean;
   codeReview?: {
@@ -181,6 +184,19 @@ export function CodingProgressPanel({
   });
   const last = [...progress.log].reverse().find((entry) => entry.at);
   const started = currentPlanExecuted ? latestRun?.startedAt ?? null : null;
+  const existingImplementation = workspace.status === "READY_FOR_REVIEW" || workspace.status === "COMPLETED";
+  const proposedPlanNeedsApproval = (workspace.plan?.status === "PROPOSED" || workspace.plan?.status === "ESCALATED")
+    && progress.lifecycle === "WAITING_FOR_HUMAN"
+    && existingImplementation;
+  const proposedCoverageGaps = workspace.plan && (workspace.plan.status === "PROPOSED" || workspace.plan.status === "ESCALATED")
+    ? assessPlanConsistency({
+      files: asStrings(workspace.plan.filesExpectedToChange),
+      steps: asStrings(workspace.plan.steps),
+      validationCommands: parsePlannedCommands(workspace.plan.validationCommands),
+      validationPlan: workspace.plan.validationPlan,
+    }).unproducedFiles
+    : [];
+  const proposedNeedsCoverageRepair = proposedCoverageGaps.length > 0;
   const historyRows = [
     ...implementRuns.flatMap((run, index) => {
       if (workspace.plan?.version != null && run.planVersion !== workspace.plan.version) return [];
@@ -210,11 +226,47 @@ export function CodingProgressPanel({
       <dl className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
         <Fact label="Status" value={LIFECYCLE_LABEL[progress.lifecycle]} />
         <Fact label="Execution plan" value={workspace.plan ? `v${workspace.plan.version} — ${workspace.planIncomplete ? "APPROVED · INCOMPLETE" : workspace.plan.status === "APPROVED" && compiled?.ready ? "APPROVED · VALIDATED" : workspace.plan.status}` : "None"} />
-        <Fact label="Current step" value={progress.currentStep ? `${progress.currentStep.index} of ${progress.steps.length} — ${progress.currentStep.text}` : "No step is in progress"} />
-        <Fact label="Started" value={currentPlanExecuted ? when(started) : "Not started for this plan"} />
+        <Fact
+          label="Current step"
+          value={proposedPlanNeedsApproval
+            ? "Plan approval required — coding is not restarting"
+            : progress.currentStep
+              ? `${progress.currentStep.index} of ${progress.steps.length} — ${progress.currentStep.text}`
+              : "No step is in progress"}
+        />
+        <Fact
+          label="Started"
+          value={proposedPlanNeedsApproval
+            ? "Existing implementation retained"
+            : currentPlanExecuted
+              ? when(started)
+              : "Not started for this plan"}
+        />
         <Fact label="Last activity" value={when(last?.at ?? workspace.agentRun?.completedAt)} />
-        <Fact label="Next action" value={workspace.status === "COMPLETED" ? "Start Independent Verification" : workspace.commitOffer ? "Create Commit" : workspace.plan?.status === "PROPOSED" ? "Review Execution Plan" : workspace.stale || workspace.planIncomplete ? "Revise Execution Plan" : workspace.revisedPlanReady ? "Start Coding" : workspace.recordRepairOffer ? "Record repair result" : workspace.repairOffer ? "Repair Implementation" : workspace.retryOffer ? "Retry Coding" : workspace.codeReview?.outOfScope.length ? "Restore Unapproved Change" : workspace.codeReview && progress.lifecycle === "COMPLETED" ? "Review Code Changes" : NEXT_LABEL[progress.lifecycle]} />
+        <Fact label="Next action" value={workspace.status === "COMPLETED" && workspace.plan?.status !== "PROPOSED" && workspace.plan?.status !== "ESCALATED" ? "Start Independent Verification" : workspace.commitOffer ? "Create Commit" : workspace.plan?.status === "PROPOSED" || workspace.plan?.status === "ESCALATED" ? "Approve Execution Plan" : workspace.stale || workspace.planIncomplete ? "Revise Execution Plan" : workspace.revisedPlanReady ? "Start Coding" : workspace.recordRepairOffer ? "Record repair result" : workspace.validateExistingOffer ? VALIDATE_EXISTING_LABEL : workspace.repairOffer ? "Repair Implementation" : workspace.retryOffer ? "Retry Coding" : workspace.codeReview?.outOfScope.length ? "Restore Unapproved Change" : workspace.codeReview && progress.lifecycle === "COMPLETED" ? "Review Code Changes" : NEXT_LABEL[progress.lifecycle]} />
       </dl>
+      {proposedPlanNeedsApproval && proposedNeedsCoverageRepair ? (
+        <div className="rounded-lg bg-amber-50 px-3 py-3 text-sm text-amber-950">
+          <p className="font-medium">Execution plan v{workspace.plan?.version} needs work-item coverage</p>
+          <p className="mt-1">
+            Authorised files without covering work items: {proposedCoverageGaps.join(", ")}. Repair proposes a new version. It does not approve the plan or restart coding.
+          </p>
+          <div className="mt-3">
+            <RepairPlanCoverageButton productId={productId} workspaceId={workspaceId} />
+          </div>
+        </div>
+      ) : null}
+      {proposedPlanNeedsApproval && !proposedNeedsCoverageRepair ? (
+        <div className="rounded-lg bg-amber-50 px-3 py-3 text-sm text-amber-950">
+          <p className="font-medium">Execution plan v{workspace.plan?.version} is proposed and needs approval</p>
+          <p className="mt-1">
+            An implementation already exists in this workspace. Approving this revision authorises the updated scope. It does not discard earlier evidence or start a new coding run.
+          </p>
+          <div className="mt-3">
+            <ApprovePlanButton productId={productId} workspaceId={workspaceId} />
+          </div>
+        </div>
+      ) : null}
       <p className="text-sm leading-6 text-muted-foreground">
         Coding runs inside the request that starts it and saves each file write, command, and check as it happens. This page reads those saved events. It does not estimate a percentage, and a refresh shows the latest saved event.
         {workspace.plan?.approvedBy ? ` Version ${workspace.plan.version} was approved by ${workspace.plan.approvedBy}${workspace.plan.approvedAt ? ` on ${when(workspace.plan.approvedAt)}` : ""}.` : ""}
@@ -446,6 +498,17 @@ export function CodingProgressPanel({
           <p className="mt-1">{REPAIR_RECORD_MESSAGE}</p>
           <div className="mt-3">
             <RecordRepairResultButton productId={productId} workspaceId={workspaceId} />
+          </div>
+        </div>
+      ) : null}
+      {workspace.validateExistingOffer && !workspace.recordRepairOffer ? (
+        <div className="rounded-lg border border-stone-200 bg-stone-50 px-3 py-3 text-sm text-stone-900">
+          <p className="font-medium">{VALIDATE_EXISTING_LABEL}</p>
+          <p className="mt-1 text-muted-foreground">
+            Use this when the implementation already exists in the workspace (including manual repairs) and you want to re-run the approved checks without another AI coding run.
+          </p>
+          <div className="mt-3">
+            <ValidateExistingImplementationButton productId={productId} workspaceId={workspaceId} />
           </div>
         </div>
       ) : null}

@@ -2017,8 +2017,13 @@ model VerificationSession {
   proposedVerdict       String                     @default("")
   verdictReason         String                     @default("")
   failureClass          String                     @default("")
+  failureStage          String                     @default("")
+  failureDetail         String                     @default("")
   existingTestNotes     String                     @default("")
   aiSummary             String                     @default("")
+  fixturePlan           Json                       @default("{}")
+  /** Temporary resources the attempt created (database name, runtime directory, process groups) for recovery. */
+  runState              Json                       @default("{}")
   stale                 Boolean                    @default(false)
   staleReason           String                     @default("")
   staleFlaggedAt        DateTime?
@@ -2105,6 +2110,10 @@ model VerificationTestCase {
   status                 VerificationTestStatus @default(PROPOSED)
   filePath               String                 @default("")
   body                   String                 @default("")
+  manualReason           String                 @default("")
+  adapterId              String                 @default("")
+  targetSurface          String                 @default("")
+  requiredCapabilities   Json                   @default("[]")
   createdAt              DateTime               @default(now())
   updatedAt              DateTime               @updatedAt
 
@@ -2160,6 +2169,11 @@ model VerificationExecution {
   status      VerificationExecutionStatus @default(NOT_RUN)
   exitCode    Int?
   outputSummary String                    @default("")
+  adapterId       String                    @default("")
+  failureCategory String                    @default("")
+  snapshotCommit  String                    @default("")
+  durationMs      Int                       @default(0)
+  observations    Json                      @default("[]")
   startedAt   DateTime?
   completedAt DateTime?
   createdAt   DateTime                    @default(now())
@@ -2183,6 +2197,9 @@ model VerificationEvidence {
   command                String                     @default("")
   exitCode               Int?
   artifactReference      String                     @default("")
+  adapterId              String                     @default("")
+  executionId            String                     @default("")
+  snapshotCommit         String                     @default("")
   createdAt              DateTime                   @default(now())
 
   session  VerificationSession   @relation(fields: [sessionId], references: [id], onDelete: Cascade)

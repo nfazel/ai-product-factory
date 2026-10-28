@@ -36,6 +36,7 @@ export type TaskSnapshot = {
   providerBlocked: boolean;
   repairAvailable: boolean;
   persistenceRecovery: boolean;
+  validateExistingAvailable: boolean;
   planIncomplete: boolean;
   implementationIncomplete: boolean;
   outOfScope: boolean;
@@ -45,7 +46,7 @@ export type TaskSnapshot = {
   remoteMain?: "READY" | "MISSING" | "OTHER_DEFAULT";
   pullRequest: "NONE" | "OPEN" | "MERGED" | "DEMO";
   pullRequestNext?: { key: string; label: string; why: string };
-  verification: "NONE" | "RUNNING" | "RETRYABLE" | "REVIEW" | "AWAITING" | "FAILED" | "APPROVED" | "STALE" | "DEMO";
+  verification: "NONE" | "RUNNING" | "INTERRUPTED" | "RETRYABLE" | "REVIEW" | "AWAITING" | "FAILED" | "APPROVED" | "STALE" | "DEMO";
   updatedAt: string | null;
 };
 

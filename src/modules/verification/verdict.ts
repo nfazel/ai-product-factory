@@ -41,18 +41,24 @@ export function judgeObligations(input: {
   if (functional.length > 0 && functional.every((item) => item.status === "NOT_APPLICABLE")) {
     return { verdict: "INCONCLUSIVE", reason: "Functional acceptance criteria were marked not applicable. That is not a pass." };
   }
+  // A blocking escalation (for example a change to the approved snapshot) means the run cannot judge what was
+  // approved. That is a blocked verification, not a product failure, so it never produces FAIL.
+  if (input.blockingEscalation) {
+    return {
+      verdict: "INCONCLUSIVE",
+      reason: "Verification is blocked by an unresolved escalation. The product was not judged until a person resolves it.",
+    };
+  }
   if (mandatory.length === 0) {
     return { verdict: "INCONCLUSIVE", reason: "No approved verification obligations apply to this task." };
   }
   const failed = mandatory.filter((item) => item.status === "FAILED");
-  if (failed.length > 0 || high || input.blockingEscalation) {
+  if (failed.length > 0 || high) {
     return {
       verdict: "FAIL",
       reason: high
         ? "A critical or high defect is unresolved."
-        : input.blockingEscalation
-          ? "Verification is blocked by an unresolved escalation."
-          : `An approved obligation failed: ${failed[0]?.title ?? "a required check"}.`,
+        : `An approved obligation failed: ${failed[0]?.title ?? "a required check"}.`,
     };
   }
   const blocked = mandatory.filter((item) => item.status === "BLOCKED");

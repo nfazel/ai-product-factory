@@ -20,6 +20,8 @@ import {
 import { buildContractDraft, type ContractDraft } from "@/modules/coding/contract";
 import {
   alignExecutionPlan,
+  assessPlanConsistency,
+  repairPlanWorkItemCoverage,
   assessBootstrapCompleteness,
   designFactsFromSources,
   executionPlanRevisionText,
@@ -35,20 +37,25 @@ import { recoverApprovedPlansAfterProviderFailure, restoreApprovedPlanAfterValid
 import {
   assessImplementationCompleteness,
   classifyCodingFailure,
+  implementationGapText,
   initialSchemaContext,
   readPlannedImplementationFiles,
   repairsForCurrentImplementation,
 } from "@/modules/coding/implementation";
 import { REPAIR_RECORD_MESSAGE, repairResultNeedsRecording } from "@/modules/coding/diff";
 import { storeWorkspaceResult } from "@/modules/coding/diff-store";
+import { validateExistingOffer } from "@/modules/coding/validate-existing";
 import { MAX_VALIDATION_REPAIRS, requiredValidationCommands, validationRepairDecision } from "@/modules/coding/repair";
 import {
+  CHECKS_BLOCK_APPROVAL,
+  CHECKS_STALE,
   classifyPlanDiff,
   codeApprovalDecision,
   effectiveCommandResults,
   executionPlanScopeRevision,
   OUT_OF_SCOPE_BLOCK,
   reviewableDiffFiles,
+  validationSnapshotDrifted,
 } from "@/modules/coding/review";
 import { codingRetryDecision } from "@/modules/coding/retry";
 import { isAIConfigured, prepareAI } from "@/modules/ai/provider";
@@ -58,15 +65,17 @@ import { resolveProductRepository, productRepositoryReady, REPOSITORY_NOT_CONFIG
 import { assertCodingEntry, codingEntryBlockers } from "@/modules/coding/gates";
 import {
   assertWorktreeIsolated,
+  BASELINE_UNRESOLVED,
   branchNameFor,
   commitApprovedSnapshot,
   createWorktree,
   captureWorkspaceDiff,
   ensureWorktreeLink,
+  repositoryStatus,
   restoreBaselineFile,
   workspaceDirectory,
 } from "@/modules/coding/git";
-import { classifyWrite, filesOutsideContract, hashText } from "@/modules/coding/policy";
+import { classifyWrite, filesBlockingPlanApproval, hashText } from "@/modules/coding/policy";
 import {
   findOccupyingWorkspace,
   findWorkspace,
@@ -82,7 +91,7 @@ import {
   upsertRepository,
 } from "@/modules/coding/repository";
 import { asStrings } from "@/modules/coding/strings";
-import { executeRepositoryTool } from "@/modules/coding/tools";
+import { executeRepositoryTool, type ToolContext } from "@/modules/coding/tools";
 import { assessCodingReadiness } from "@/modules/governance/coding-readiness";
 import { getCurrentActor } from "@/modules/identity/actor";
 import { DomainError } from "@/modules/shared/errors";
@@ -252,20 +261,20 @@ export async function approveExecutionPlan(productId: string, workspaceId: strin
   if (!workspace.plan || !["PROPOSED", "ESCALATED"].includes(workspace.plan.status)) {
     throw new DomainError("There is no execution plan waiting for approval.");
   }
-  const outside = filesOutsideContract(
+  const outside = filesBlockingPlanApproval(
     asStrings(workspace.plan.filesExpectedToChange),
     asStrings(workspace.contract?.allowedPaths),
     asStrings(workspace.contract?.restrictedPaths),
   );
   if (outside.length > 0) {
     throw new DomainError(
-      `This execution plan names files outside the coding rules: ${outside.join(", ")}. Request changes before it can be approved. Coding has not started.`,
+      `This execution plan names files outside the coding rules: ${outside.join(", ")}. Request changes before it can be approved.`,
     );
   }
   const maxFiles = workspace.contract?.maxFiles ?? 8;
   if (asStrings(workspace.plan.filesExpectedToChange).length > maxFiles) {
     throw new DomainError(
-      `This execution plan names more than ${maxFiles} files. Request changes before it can be approved. Coding has not started.`,
+      `This execution plan names more than ${maxFiles} files. Request changes before it can be approved.`,
     );
   }
   const planSteps = asStrings(workspace.plan.steps);
@@ -277,10 +286,18 @@ export async function approveExecutionPlan(productId: string, workspaceId: strin
     });
     workspace.plan = { ...workspace.plan, steps: healedSteps };
   }
+  const allowedPaths = withPlanAuthorisedPaths(
+    asStrings(workspace.contract?.allowedPaths),
+    asStrings(workspace.plan.filesExpectedToChange),
+  );
+  if (workspace.contract && allowedPaths.join("\0") !== asStrings(workspace.contract.allowedPaths).join("\0")) {
+    await replaceContract(workspaceId, { allowedPaths });
+    workspace.contract = { ...workspace.contract, allowedPaths };
+  }
   const flight = compileExecutionContract({
     planVersion: workspace.plan.version,
     files: workspace.plan.filesExpectedToChange,
-    allowedPaths: workspace.contract?.allowedPaths,
+    allowedPaths,
     restrictedPaths: workspace.contract?.restrictedPaths,
     setupCommands: workspace.plan.setupCommands,
     validationCommands: workspace.plan.validationCommands,
@@ -304,13 +321,27 @@ export async function approveExecutionPlan(productId: string, workspaceId: strin
   if (workspace.status === "ABANDONED") {
     await saveWorkspace(workspaceId, { status: "ACTIVE", completedAt: null });
   }
+  const existingImplementation = workspace.status === "READY_FOR_REVIEW" || workspace.status === "COMPLETED";
   await recordActivity({
     productId,
     type: "CODING_PLAN_APPROVED",
-    description: `${actor} approved execution plan version ${workspace.plan.version}. Coding has not started.`,
+    description: existingImplementation
+      ? `${actor} approved execution plan version ${workspace.plan.version}. The existing implementation was kept. Coding was not restarted.`
+      : `${actor} approved execution plan version ${workspace.plan.version}. Coding has not started.`,
     actor,
   });
   return findWorkspace(productId, workspaceId);
+}
+
+function withPlanAuthorisedPaths(allowedPaths: string[], planFiles: string[]) {
+  const next = [...allowedPaths];
+  for (const file of planFiles) {
+    const normalized = file.replaceAll("\\", "/");
+    if (!normalized || next.includes(normalized)) continue;
+    if (classifyWrite(normalized, next, []).ok) continue;
+    next.push(normalized);
+  }
+  return next;
 }
 
 export async function requestExecutionPlanChanges(productId: string, workspaceId: string, changeRequest: string, actorName?: string) {
@@ -677,12 +708,15 @@ function planAuthorised(status: string | null | undefined) {
   return status === "APPROVED" || status === "COMPLETED";
 }
 
-function codeReviewFor(workspace: {
-  workspacePath: string;
-  plan: { status?: string; version?: number; setupCommands: unknown; validationCommands: unknown; filesExpectedToChange?: unknown; steps?: unknown } | null;
-  evidence: { command: string; result: string; exitCode: number | null; createdAt: Date; completedAt: Date | null }[];
-  diff: { files: unknown } | null;
-}) {
+function codeReviewFor(
+  workspace: {
+    workspacePath: string;
+    plan: { status?: string; version?: number; setupCommands: unknown; validationCommands: unknown; filesExpectedToChange?: unknown; steps?: unknown } | null;
+    evidence: { command: string; result: string; exitCode: number | null; createdAt: Date; completedAt: Date | null }[];
+    diff: { files: unknown } | null;
+  },
+  options: { snapshotDrifted?: boolean; baselineUnresolved?: boolean } = {},
+) {
   const files = reviewFiles(workspace.diff?.files);
   const coverage = classifyPlanDiff({
     files,
@@ -696,12 +730,14 @@ function codeReviewFor(workspace: {
     evidence: workspace.evidence.map((item) => ({ command: item.command, result: item.result, exitCode: item.exitCode, at: item.completedAt ?? item.createdAt })),
     sourceFiles: sourceStamps(workspace.workspacePath, files),
   });
+  const checksStale = commands.stale || Boolean(options.snapshotDrifted);
   const decision = codeApprovalDecision({
     sourceFileCount: files.length,
-    checksPassed: commands.passed,
-    checksStale: commands.stale,
+    checksPassed: commands.passed && !options.snapshotDrifted,
+    checksStale,
     outOfScope: coverage.filter((file) => file.classification === "OUT_OF_SCOPE"),
     planAuthorised: planAuthorised(workspace.plan?.status),
+    baselineUnresolved: options.baselineUnresolved,
   });
   return {
     ...decision,
@@ -713,9 +749,21 @@ function codeReviewFor(workspace: {
     outOfScope: coverage.filter((file) => file.classification === "OUT_OF_SCOPE"),
     planVersion: workspace.plan?.version ?? null,
     setup: commands.setup,
-    checks: commands.required,
+    checks: options.snapshotDrifted
+      ? commands.required.map((item) => (item.passed ? { ...item, passed: false, stale: true, result: "STALE" } : item))
+      : commands.required,
     notApplicable: commands.notApplicable,
   };
+}
+
+async function captureReviewDiff(
+  workspace: { workspacePath: string; baseCommit: string },
+  repositoryPath?: string | null,
+) {
+  return captureWorkspaceDiff(workspace.workspacePath, repositoryPath ?? undefined, {
+    baseCommit: workspace.baseCommit,
+    requireBaselineWhenClean: true,
+  });
 }
 
 function sourceStamps(root: string, files: { path: string }[]) {
@@ -744,7 +792,25 @@ export async function approveCodeChanges(productId: string, workspaceId: string,
     throw new DomainError("Resolve open escalations before approving code changes.");
   }
   const repository = await db.repository.findUnique({ where: { productId }, select: { localPath: true } });
-  const diff = await captureWorkspaceDiff(workspace.workspacePath, repository?.localPath);
+  let diff;
+  try {
+    diff = await captureReviewDiff(workspace, repository?.localPath);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (message === BASELINE_UNRESOLVED) throw new DomainError(BASELINE_UNRESOLVED);
+    throw error;
+  }
+  const status = await repositoryStatus(workspace.workspacePath);
+  if (
+    validationSnapshotDrifted({
+      recordedHeadCommit: workspace.headCommit,
+      currentHeadCommit: status.head,
+      baseCommit: workspace.baseCommit,
+      workingTreeDirty: status.dirty,
+    })
+  ) {
+    throw new DomainError(CHECKS_STALE);
+  }
   const files = reviewFiles(diff.files);
   const coverage = classifyPlanDiff({
     files,
@@ -784,7 +850,7 @@ export async function approveCodeChanges(productId: string, workspaceId: string,
       implementationTaskId: workspace.implementationTaskId,
       workspaceId,
       baseCommit: workspace.baseCommit,
-      headCommit: "",
+      headCommit: status.dirty ? "" : status.head,
       diffHash: digest,
     },
   });
@@ -793,7 +859,7 @@ export async function approveCodeChanges(productId: string, workspaceId: string,
     implementationTaskId: workspace.implementationTaskId,
     type: "HUMAN_CONFIRMATION",
     source: "HUMAN",
-    description: `${actor} approved the code change.`,
+    description: `${actor} approved the code change${!status.dirty && status.head ? ` at ${status.head}` : ""}.`,
     result: "APPROVED",
   });
   await recordActivity({
@@ -814,7 +880,14 @@ export async function restoreUnapprovedChange(productId: string, workspaceId: st
   }
   const repository = await db.repository.findUnique({ where: { productId }, select: { localPath: true } });
   if (repository?.localPath) ensureWorktreeLink(workspace.workspacePath, repository.localPath);
-  const before = await captureWorkspaceDiff(workspace.workspacePath, repository?.localPath);
+  let before;
+  try {
+    before = await captureReviewDiff(workspace, repository?.localPath);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (message === BASELINE_UNRESOLVED) throw new DomainError(BASELINE_UNRESOLVED);
+    throw error;
+  }
   const coverage = classifyPlanDiff({
     files: reviewFiles(before.files),
     approvedFiles: asStrings(workspace.plan?.filesExpectedToChange),
@@ -825,7 +898,7 @@ export async function restoreUnapprovedChange(productId: string, workspaceId: st
   if (!target) throw new DomainError("That file is not an unapproved change in the current source diff.");
   const oldHash = hashText(before.fullPatch);
   await restoreBaselineFile(workspace.workspacePath, workspace.baseCommit, target.path, target.status);
-  const diff = await captureWorkspaceDiff(workspace.workspacePath, repository?.localPath);
+  const diff = await captureReviewDiff(workspace, repository?.localPath);
   await db.codingDiff.upsert({
     where: { workspaceId },
     create: {
@@ -889,6 +962,10 @@ export async function proposeOutOfScopePlan(productId: string, workspaceId: stri
     status: target.status,
   });
   const history = Array.isArray(plan.history) ? plan.history : [];
+  const allowedPaths = withPlanAuthorisedPaths(asStrings(workspace.contract?.allowedPaths), revision.files);
+  if (workspace.contract && allowedPaths.join("\0") !== asStrings(workspace.contract.allowedPaths).join("\0")) {
+    await replaceContract(workspaceId, { allowedPaths });
+  }
   await db.codingExecutionPlan.update({
     where: { workspaceId },
     data: {
@@ -898,7 +975,7 @@ export async function proposeOutOfScopePlan(productId: string, workspaceId: stri
       approvedAt: null,
       filesExpectedToChange: revision.files,
       steps: revision.steps,
-      changeRequest: `Authorise the unapproved ${target.verb} of ${target.path}. This version is not approved. Execution plan v${plan.version} remains in history.`,
+      changeRequest: `Authorise the unapproved ${target.verb} of ${target.path}. This version is not approved. Execution plan v${plan.version} remains in history. Existing implementation evidence was kept.`,
       history: [
         ...history,
         {
@@ -923,7 +1000,80 @@ export async function proposeOutOfScopePlan(productId: string, workspaceId: stri
   await recordActivity({
     productId,
     type: "CODING_PLAN_REVISED",
-    description: `${actor} proposed execution plan version ${revision.version} to authorise ${target.verb} ${target.path}. Version ${plan.version} was kept in history and was not edited. The new version is not approved.`,
+    description: `${actor} proposed execution plan version ${revision.version} to authorise ${target.verb} ${target.path}. Version ${plan.version} was kept in history and was not edited. The new version is not approved. Existing implementation evidence was kept.`,
+    actor,
+  });
+  return findWorkspace(productId, workspaceId);
+}
+
+/**
+ * Repair a proposed plan that authorised files without covering work items.
+ * Creates a new proposed version; does not approve the plan or run the Coding Agent.
+ */
+export async function repairProposedPlanCoverage(productId: string, workspaceId: string) {
+  const actor = getCurrentActor().name;
+  assertHuman(actor);
+  const workspace = await requireActiveContract(productId, workspaceId);
+  const plan = workspace.plan;
+  if (!plan || !["PROPOSED", "ESCALATED"].includes(plan.status)) {
+    throw new DomainError("Only a proposed execution plan can have its work-item coverage repaired.");
+  }
+  const files = asStrings(plan.filesExpectedToChange);
+  const steps = asStrings(plan.steps);
+  const consistency = assessPlanConsistency({
+    files,
+    steps,
+    validationCommands: parsePlannedCommands(plan.validationCommands),
+    validationPlan: plan.validationPlan,
+  });
+  if (consistency.unproducedFiles.length === 0) {
+    throw new DomainError("This execution plan already has work-item coverage for every authorised file.");
+  }
+  const fileStatus: Record<string, string> = {};
+  for (const file of reviewableDiffFiles(workspace.diff?.files)) {
+    fileStatus[file.path] = file.status;
+  }
+  const repaired = repairPlanWorkItemCoverage({ files, steps, fileStatus });
+  if (repaired.added.length === 0) {
+    throw new DomainError("This execution plan already has work-item coverage for every authorised file.");
+  }
+  const nextVersion = plan.version + 1;
+  const history = Array.isArray(plan.history) ? plan.history : [];
+  await db.codingExecutionPlan.update({
+    where: { workspaceId },
+    data: {
+      version: nextVersion,
+      status: "PROPOSED",
+      approvedBy: "",
+      approvedAt: null,
+      filesExpectedToChange: repaired.files,
+      steps: repaired.steps,
+      changeRequest: `Repair work-item coverage for ${consistency.unproducedFiles.join(", ")}. Previous proposed version ${plan.version} remains in history. This version is not approved. Existing implementation evidence was kept.`,
+      history: [
+        ...history,
+        {
+          version: plan.version,
+          status: plan.status,
+          summary: plan.summary,
+          analysisNote: plan.analysisNote,
+          filesExpectedToChange: plan.filesExpectedToChange,
+          steps: plan.steps,
+          risks: plan.risks,
+          validationPlan: plan.validationPlan,
+          setupCommands: plan.setupCommands,
+          validationCommands: plan.validationCommands,
+          changeRequest: plan.changeRequest,
+          approvedBy: plan.approvedBy,
+          approvedAt: plan.approvedAt?.toISOString() ?? null,
+          recordedAt: new Date().toISOString(),
+        },
+      ],
+    },
+  });
+  await recordActivity({
+    productId,
+    type: "CODING_PLAN_REVISED",
+    description: `${actor} proposed execution plan version ${nextVersion} to add work-item coverage for ${consistency.unproducedFiles.join(", ")}. Version ${plan.version} was kept in history and was not edited. The new version is not approved. Existing implementation evidence was kept.`,
     actor,
   });
   return findWorkspace(productId, workspaceId);
@@ -1039,7 +1189,25 @@ export async function createCodingCommit(productId: string, workspaceId: string)
     throw new DomainError("Create the approved commit while the workspace is ready for review.");
   }
   const repository = await db.repository.findUnique({ where: { productId }, select: { localPath: true } });
-  const diff = await captureWorkspaceDiff(workspace.workspacePath, repository?.localPath);
+  let diff;
+  try {
+    diff = await captureReviewDiff(workspace, repository?.localPath);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (message === BASELINE_UNRESOLVED) throw new DomainError(BASELINE_UNRESOLVED);
+    throw error;
+  }
+  const status = await repositoryStatus(workspace.workspacePath);
+  if (
+    validationSnapshotDrifted({
+      recordedHeadCommit: workspace.headCommit,
+      currentHeadCommit: status.head,
+      baseCommit: workspace.baseCommit,
+      workingTreeDirty: status.dirty,
+    })
+  ) {
+    throw new DomainError(CHECKS_STALE);
+  }
   const files = reviewFiles(diff.files);
   const coverage = classifyPlanDiff({
     files,
@@ -1077,15 +1245,27 @@ export async function createCodingCommit(productId: string, workspaceId: string)
   const snapshot = coverage
     .filter((file) => file.classification === "APPROVED" || file.classification === "DERIVED")
     .map((file) => ({ path: file.path, status: file.status }));
+  const alreadyCommitted =
+    !status.dirty
+    && /^[0-9a-f]{40}$/.test(status.head)
+    && status.head === workspace.headCommit
+    && status.head !== workspace.baseCommit
+    && snapshot.length > 0;
   let sha: string;
-  try {
-    sha = await commitApprovedSnapshot(
-      workspace.workspacePath,
-      snapshot,
-      `feat: ${workspace.task.title.replace(/\s+/g, " ").trim()}\n\nAI Product Factory Task: ${workspace.implementationTaskId}`,
-    );
-  } catch (error) {
-    throw new DomainError(error instanceof Error ? error.message : "The approved snapshot could not be committed.");
+  let reusedExistingCommit = false;
+  if (alreadyCommitted) {
+    sha = status.head;
+    reusedExistingCommit = true;
+  } else {
+    try {
+      sha = await commitApprovedSnapshot(
+        workspace.workspacePath,
+        snapshot,
+        `feat: ${workspace.task.title.replace(/\s+/g, " ").trim()}\n\nAI Product Factory Task: ${workspace.implementationTaskId}`,
+      );
+    } catch (error) {
+      throw new DomainError(error instanceof Error ? error.message : "The approved snapshot could not be committed.");
+    }
   }
   await saveWorkspace(workspaceId, {
     headCommit: sha,
@@ -1101,7 +1281,9 @@ export async function createCodingCommit(productId: string, workspaceId: string)
     data: { headCommit: sha },
   });
   await noteVerificationCommitChanged(workspace.implementationTaskId, sha);
-  const description = `Local commit ${sha} locks approved snapshot ${digest} for execution plan v${workspace.plan?.version ?? "unknown"}. Code change approval ${approval.id}.${workspace.agentRunId ? ` Coding run ${workspace.agentRunId}.` : ""} The commit was not pushed.`;
+  const description = reusedExistingCommit
+    ? `Existing validated commit ${sha} was recorded as the approved source snapshot ${digest} for execution plan v${workspace.plan?.version ?? "unknown"}. Code change approval ${approval.id}.${workspace.agentRunId ? ` Coding run ${workspace.agentRunId}.` : ""} No duplicate commit was created. The commit was not pushed.`
+    : `Local commit ${sha} locks approved snapshot ${digest} for execution plan v${workspace.plan?.version ?? "unknown"}. Code change approval ${approval.id}.${workspace.agentRunId ? ` Coding run ${workspace.agentRunId}.` : ""} The commit was not pushed.`;
   await recordEvidence({
     workspaceId,
     implementationTaskId: workspace.implementationTaskId,
@@ -1116,7 +1298,7 @@ export async function createCodingCommit(productId: string, workspaceId: string)
     description,
     actor: getCurrentActor().name,
   });
-  return { sha, workspace: await findWorkspace(productId, workspaceId) };
+  return { sha, workspace: await findWorkspace(productId, workspaceId), reusedExistingCommit };
 }
 
 export async function retryCodingTask(productId: string, workspaceId: string) {
@@ -1213,7 +1395,10 @@ export async function recordRepairResult(productId: string, workspaceId: string)
   if (workspace.status === "ACTIVE") throw new DomainError("A repair is already running. No further repair has been started.");
   if (!(await unrecordedRepairResult(productId, workspace))) throw new DomainError("There is no unrecorded repair result to save.");
   const repository = await db.repository.findUnique({ where: { productId }, select: { localPath: true } });
-  const diff = await captureWorkspaceDiff(workspace.workspacePath, repository?.localPath);
+  const diff = await captureWorkspaceDiff(workspace.workspacePath, repository?.localPath, {
+    baseCommit: workspace.baseCommit,
+    requireBaselineWhenClean: true,
+  });
   await storeWorkspaceResult({
     workspaceId,
     implementationTaskId: workspace.implementationTaskId,
@@ -1237,6 +1422,251 @@ export async function recordRepairResult(productId: string, workspaceId: string)
     actor: getCurrentActor().name,
   });
   return findWorkspace(productId, workspaceId);
+}
+
+/**
+ * Re-run approved setup and validation against the current workspace without starting the Coding Agent.
+ * Use when implementation was completed or repaired manually after a failed AI coding run.
+ */
+export async function validateExistingImplementation(productId: string, workspaceId: string) {
+  const actor = getCurrentActor().name;
+  assertHuman(actor);
+  const workspace = await requireActiveContract(productId, workspaceId);
+  const pathExists = fs.existsSync(/*turbopackIgnore: true*/ workspace.workspacePath);
+  const offered = validateExistingOffer({
+    workspaceStatus: workspace.status,
+    planStatus: workspace.plan?.status ?? null,
+    workspacePathExists: pathExists,
+    stale: workspace.executionContractStale || Boolean(workspace.contract?.stale),
+    planIncomplete: false,
+    busy: workspace.status === "ACTIVE" || workspace.status === "CHECKING",
+  });
+  if (!pathExists) {
+    throw new DomainError("The coding workspace path is missing. Restore the worktree before validating the existing implementation.");
+  }
+  if (!offered) {
+    if (workspace.status !== "FAILED") {
+      throw new DomainError("Validate Existing Implementation is available when the coding workspace has failed and still holds the implementation.");
+    }
+    if (!workspace.plan || (workspace.plan.status !== "APPROVED" && workspace.plan.status !== "COMPLETED")) {
+      throw new DomainError("An approved execution plan is required before validating the existing implementation.");
+    }
+    throw new DomainError("Validate Existing Implementation is not available for this workspace.");
+  }
+  const assessment = await assessmentForWorkspace(productId, workspace);
+  if (!assessment.ready) {
+    throw new DomainError(
+      assessment.blockers[0]?.message
+        ?? "The approved execution plan is incomplete. Revise the plan before validating the existing implementation.",
+    );
+  }
+
+  const compiled = compileExecutionContract({
+    planVersion: workspace.plan!.version,
+    files: workspace.plan!.filesExpectedToChange,
+    allowedPaths: workspace.contract?.allowedPaths,
+    restrictedPaths: workspace.contract?.restrictedPaths,
+    setupCommands: workspace.plan!.setupCommands,
+    validationCommands: workspace.plan!.validationCommands,
+  });
+  if (!compiled.ready) {
+    throw new DomainError(
+      compiled.blockers[0]?.message
+        ?? "Execution Plan cannot be validated because a required operation is not permitted by the current coding contract.",
+    );
+  }
+
+  await saveWorkspace(workspaceId, { status: "CHECKING" });
+  await recordEvidence({
+    workspaceId,
+    implementationTaskId: workspace.implementationTaskId,
+    type: "HUMAN_CONFIRMATION",
+    source: "HUMAN",
+    description: "Validate Existing Implementation started. The Coding Agent was not called.",
+    result: "PASS",
+  });
+  await recordActivity({
+    productId,
+    type: "CODING_CHECKS_COMPLETED",
+    description: `${actor} started Validate Existing Implementation. The Coding Agent was not called.`,
+    actor,
+  });
+
+  const context: ToolContext = {
+    workspaceId: workspace.id,
+    productId: workspace.productId,
+    workspacePath: workspace.workspacePath,
+    allowedPaths: asStrings(workspace.contract?.allowedPaths),
+    restrictedPaths: asStrings(workspace.contract?.restrictedPaths),
+    allowFileDelete: workspace.contract?.allowFileDelete ?? false,
+    maxFiles: workspace.contract?.maxFiles ?? 8,
+    policyCommands: compiled.contract.executableCommands,
+    stale: false,
+  };
+
+  try {
+    const steps = asStrings(workspace.plan?.steps);
+    const implementation = assessImplementationCompleteness({
+      steps,
+      files: readPlannedImplementationFiles(context.workspacePath, steps),
+    });
+    if (!implementation.complete) {
+      for (const gap of implementation.gaps) {
+        await recordEvidence({
+          workspaceId,
+          implementationTaskId: workspace.implementationTaskId,
+          type: "STATIC_ANALYSIS",
+          source: "REPOSITORY",
+          description: implementationGapText(gap),
+          result: "FAIL",
+        });
+      }
+      for (const command of [
+        ...compiled.contract.setupCommands,
+        ...compiled.contract.validationCommands.map((item) => item.command),
+      ]) {
+        await recordEvidence({
+          workspaceId,
+          implementationTaskId: workspace.implementationTaskId,
+          type: evidenceTypeForCommand(command),
+          source: "COMMAND_RUNNER",
+          description: `${command}. Not run because the implementation is incomplete.`,
+          result: "NOT RUN",
+          command,
+          exitCode: null,
+          startedAt: new Date(),
+          completedAt: new Date(),
+        });
+      }
+      const repository = await db.repository.findUnique({ where: { productId }, select: { localPath: true } });
+      const diff = await captureWorkspaceDiff(workspace.workspacePath, repository?.localPath, {
+        baseCommit: workspace.baseCommit,
+        requireBaselineWhenClean: true,
+      });
+      await storeWorkspaceResult({
+        workspaceId,
+        implementationTaskId: workspace.implementationTaskId,
+        hasPlan: Boolean(workspace.plan),
+        approvedPlan: true,
+        outcome: "FAILED",
+        diff,
+      });
+      await syncWorkspaceHead(workspaceId, workspace.workspacePath);
+      return findWorkspace(productId, workspaceId);
+    }
+
+    let checksOk = true;
+    for (const command of compiled.contract.setupCommands) {
+      const passed = await runValidationCommand(workspace, context, command);
+      if (!passed) {
+        checksOk = false;
+        break;
+      }
+    }
+    if (checksOk) {
+      for (const check of compiled.contract.notApplicableChecks) {
+        await recordEvidence({
+          workspaceId,
+          implementationTaskId: workspace.implementationTaskId,
+          type: evidenceTypeForCommand(check.command),
+          source: "COMMAND_RUNNER",
+          description: `NOT APPLICABLE. ${check.command}. ${check.reason}`,
+          result: "NOT APPLICABLE",
+          command: "",
+          exitCode: null,
+          startedAt: new Date(),
+          completedAt: new Date(),
+        });
+      }
+      for (const check of compiled.contract.validationCommands) {
+        const passed = await runValidationCommand(workspace, context, check.command);
+        if (!passed && check.applicability === "REQUIRED") checksOk = false;
+      }
+    }
+
+    const repository = await db.repository.findUnique({ where: { productId }, select: { localPath: true } });
+    const diff = await captureWorkspaceDiff(workspace.workspacePath, repository?.localPath, {
+      baseCommit: workspace.baseCommit,
+      requireBaselineWhenClean: true,
+    });
+    const outcome = checksOk ? "COMPLETED" : "FAILED";
+    await storeWorkspaceResult({
+      workspaceId,
+      implementationTaskId: workspace.implementationTaskId,
+      hasPlan: Boolean(workspace.plan),
+      approvedPlan: true,
+      outcome,
+      diff,
+    });
+    await syncWorkspaceHead(workspaceId, workspace.workspacePath);
+    if (checksOk && diff.headCommit) {
+      await recordEvidence({
+        workspaceId,
+        implementationTaskId: workspace.implementationTaskId,
+        type: "HUMAN_CONFIRMATION",
+        source: "HUMAN",
+        description: `Validated source snapshot ${diff.headCommit} against baseline ${workspace.baseCommit}. Successful validation is bound to this commit.`,
+        result: "PASS",
+      });
+    }
+    await recordActivity({
+      productId,
+      type: checksOk ? "CODING_READY_FOR_REVIEW" : "CODING_CHECKS_COMPLETED",
+      description: checksOk
+        ? `${actor} validated the existing implementation${diff.headCommit ? ` at ${diff.headCommit}` : ""}. Required checks passed. Ready for human code review. The Coding Agent was not called.`
+        : `${actor} validated the existing implementation. Required checks did not pass. The Coding Agent was not called.`,
+      actor,
+    });
+    return findWorkspace(productId, workspaceId);
+  } catch (error) {
+    await saveWorkspace(workspaceId, { status: "FAILED" });
+    throw error;
+  }
+}
+
+async function runValidationCommand(
+  workspace: NonNullable<Awaited<ReturnType<typeof findWorkspace>>>,
+  context: ToolContext,
+  command: string,
+) {
+  const startedAt = new Date();
+  const result = await executeRepositoryTool(context, { action: "RUN_COMMAND", command });
+  const exitCode = typeof result.metadata.exitCode === "number" ? result.metadata.exitCode : null;
+  const passed = result.allowed && exitCode === 0;
+  await recordEvidence({
+    workspaceId: workspace.id,
+    implementationTaskId: workspace.implementationTaskId,
+    type: evidenceTypeForCommand(command),
+    source: "COMMAND_RUNNER",
+    description: command,
+    result: passed ? "PASS" : "FAIL",
+    command,
+    output: typeof result.metadata.output === "string" ? result.metadata.output : "",
+    exitCode,
+    startedAt,
+    completedAt: new Date(),
+  });
+  return passed;
+}
+
+async function syncWorkspaceHead(workspaceId: string, workspacePath: string) {
+  try {
+    const status = await repositoryStatus(workspacePath);
+    if (/^[0-9a-f]{40}$/.test(status.head)) {
+      await saveWorkspace(workspaceId, { headCommit: status.head });
+    }
+  } catch {
+    // Head sync is best-effort; validation evidence remains authoritative.
+  }
+}
+
+function evidenceTypeForCommand(command: string) {
+  const lower = command.toLowerCase();
+  if (lower.includes("typecheck")) return "TYPECHECK" as const;
+  if (lower.includes("lint")) return "LINT" as const;
+  if (lower.includes("build")) return "BUILD" as const;
+  if (lower.includes("test")) return "TEST_RESULT" as const;
+  return "STATIC_ANALYSIS" as const;
 }
 
 async function unrecordedRepairResult(
@@ -1520,37 +1950,50 @@ export async function getCodingView(productId: string) {
     orderBy: { createdAt: "asc" },
   });
   const repository = await db.repository.findUnique({ where: { productId }, select: { localPath: true } });
+  const reviewMeta = new Map<string, { snapshotDrifted: boolean; baselineUnresolved: boolean }>();
   for (const workspace of workspaces) {
-    if (workspace.status !== "READY_FOR_REVIEW" || !repository?.localPath) continue;
-    const storedCount = Array.isArray(workspace.diff?.files) ? workspace.diff.files.length : 0;
-    if (storedCount === 0) {
-      ensureWorktreeLink(workspace.workspacePath, repository.localPath);
-      try {
-        const diff = await captureWorkspaceDiff(workspace.workspacePath, repository.localPath);
-        if (diff.files.length > 0) {
-          workspace.diff = await db.codingDiff.upsert({
-            where: { workspaceId: workspace.id },
-            create: {
-              workspaceId: workspace.id,
-              files: diff.files,
-              additions: diff.additions,
-              deletions: diff.deletions,
-              patch: diff.patch,
-              truncated: diff.truncated,
-            },
-            update: {
-              files: diff.files,
-              additions: diff.additions,
-              deletions: diff.deletions,
-              patch: diff.patch,
-              truncated: diff.truncated,
-            },
-          });
-        }
-      } catch {
-        // The review stays closed until the worktree diff can be read.
+    if (workspace.status !== "READY_FOR_REVIEW") continue;
+    let snapshotDrifted = false;
+    let baselineUnresolved = false;
+    if (repository?.localPath) ensureWorktreeLink(workspace.workspacePath, repository.localPath);
+    try {
+      const status = await repositoryStatus(workspace.workspacePath);
+      snapshotDrifted = validationSnapshotDrifted({
+        recordedHeadCommit: workspace.headCommit,
+        currentHeadCommit: status.head,
+        baseCommit: workspace.baseCommit,
+        workingTreeDirty: status.dirty,
+      });
+      const diff = await captureWorkspaceDiff(workspace.workspacePath, repository?.localPath, {
+        baseCommit: workspace.baseCommit,
+        requireBaselineWhenClean: true,
+      });
+      if (diff.files.length > 0) {
+        workspace.diff = await db.codingDiff.upsert({
+          where: { workspaceId: workspace.id },
+          create: {
+            workspaceId: workspace.id,
+            files: diff.files,
+            additions: diff.additions,
+            deletions: diff.deletions,
+            patch: diff.patch,
+            truncated: diff.truncated,
+          },
+          update: {
+            files: diff.files,
+            additions: diff.additions,
+            deletions: diff.deletions,
+            patch: diff.patch,
+            truncated: diff.truncated,
+          },
+        });
       }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "";
+      if (message === BASELINE_UNRESOLVED) baselineUnresolved = true;
+      // Otherwise the review stays closed until the worktree diff can be read.
     }
+    reviewMeta.set(workspace.id, { snapshotDrifted, baselineUnresolved });
     await recordOutOfScopeFindings(productId, workspace);
   }
   const repositoryConfigured = await productRepositoryReady(productId);
@@ -1611,9 +2054,14 @@ export async function getCodingView(productId: string) {
       const revisedPlanReady = Boolean(
         workspace?.plan?.status === "APPROVED"
         && assessment?.ready
-        && planSupersedes(workspace.plan.version, implementedVersion),
+        && planSupersedes(workspace.plan.version, implementedVersion)
+        // Approving a revision on an already-implemented workspace authorises scope; it must not offer a fresh coding start.
+        && workspace.status !== "READY_FOR_REVIEW"
+        && workspace.status !== "COMPLETED",
       );
-      const codeReview = workspace ? codeReviewFor(workspace) : null;
+      const codeReview = workspace
+        ? codeReviewFor(workspace, reviewMeta.get(workspace.id) ?? {})
+        : null;
       const policyFlight = workspace?.plan ? compileExecutionContract({
         planVersion: workspace.plan.version,
         files: workspace.plan.filesExpectedToChange,
@@ -1698,6 +2146,20 @@ export async function getCodingView(productId: string) {
               missingScope: assessment?.missingFiles ?? [],
               revisedPlanReady,
               retryOffer: workspaceRetryOffer(workspace, agentRuns),
+              validateExistingOffer: validateExistingOffer({
+                workspaceStatus: workspace.status,
+                planStatus: workspace.plan?.status ?? null,
+                workspacePathExists: fs.existsSync(/*turbopackIgnore: true*/ workspace.workspacePath),
+                stale: workspace.executionContractStale || Boolean(workspace.contract?.stale),
+                planIncomplete: Boolean(assessment && !assessment.ready && workspace.plan?.status === "APPROVED"),
+                busy: workspace.status === "ACTIVE" || workspace.status === "CHECKING",
+                checksNeedRefresh: Boolean(
+                  codeReview
+                  && !codeReview.approvable
+                  && codeReview.outOfScope.length === 0
+                  && (codeReview.checks.some((check) => check.stale || !check.passed) || codeReview.reason === CHECKS_STALE || codeReview.reason === CHECKS_BLOCK_APPROVAL),
+                ),
+              }),
               recordRepairOffer: repairResultNeedsRecording({
                 runs: agentRuns,
                 workspaceId: workspace.id,

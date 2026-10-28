@@ -13,6 +13,7 @@ import { updateArchitectureSummary } from "@/modules/architecture/service";
 import { runGit } from "@/modules/coding/git";
 import type { CompiledExecutionContract } from "@/modules/coding/commands";
 import { executionContractsMatch } from "@/modules/coding/retry";
+import { asStrings } from "@/modules/coding/strings";
 import { DomainError } from "@/modules/shared/errors";
 import {
   applyCodingTool,
@@ -22,12 +23,14 @@ import {
   getCodingView,
   proposeCoherentExecutionPlan,
   requestExecutionPlanChanges,
+  repairProposedPlanCoverage,
   repairCodingTask,
   resumeCodingTask,
   retryCodingTask,
   reviseExecutionPlan,
   requestCodingChanges,
   startCodingTask,
+  validateExistingImplementation,
 } from "@/modules/coding/service";
 
 const products: string[] = [];
@@ -482,6 +485,56 @@ describe("coding execution", () => {
     await expect(approveExecutionPlan(setup.product.id, workspace!.id)).rejects.toThrow(/EXECUTION CONTRACT STALE/);
   });
 
+  it("repairs proposed plan coverage for a modified file without starting coding", async () => {
+    useRepo();
+    const setup = await readyProduct({ mode: "SUPERVISED", risk: "MEDIUM" });
+    setAIProviderForTests(provider(writeChange));
+    const workspace = await startCodingTask(setup.product.id, setup.task.id);
+    const plan = await db.codingExecutionPlan.findUnique({ where: { workspaceId: workspace!.id } });
+    const files = Array.isArray(plan?.filesExpectedToChange) ? [...plan.filesExpectedToChange as string[]] : [];
+    const steps = Array.isArray(plan?.steps) ? [...plan.steps as string[]] : [];
+    files.push(".gitignore");
+    await db.codingExecutionPlan.update({
+      where: { workspaceId: workspace!.id },
+      data: {
+        status: "PROPOSED",
+        filesExpectedToChange: files,
+        steps,
+        approvedBy: "",
+        approvedAt: null,
+      },
+    });
+    await db.codingDiff.upsert({
+      where: { workspaceId: workspace!.id },
+      create: {
+        workspaceId: workspace!.id,
+        files: [{ path: ".gitignore", status: "modified" }],
+        additions: 2,
+        deletions: 0,
+        patch: "",
+        truncated: false,
+      },
+      update: {
+        files: [{ path: ".gitignore", status: "modified" }],
+        additions: 2,
+        deletions: 0,
+      },
+    });
+    const beforeRuns = await db.agentRun.count({ where: { productId: setup.product.id, agentType: "CODING" } });
+    await expect(approveExecutionPlan(setup.product.id, workspace!.id)).rejects.toThrow(/no work item creates/);
+    const repaired = await repairProposedPlanCoverage(setup.product.id, workspace!.id);
+    expect(repaired?.plan?.version).toBe((plan?.version ?? 1) + 1);
+    expect(repaired?.plan?.status).toBe("PROPOSED");
+    expect(asStrings(repaired?.plan?.steps).some((step) => step.includes(".gitignore"))).toBe(true);
+    expect(asStrings(repaired?.plan?.steps).slice(0, steps.length)).toEqual(steps);
+    const history = Array.isArray(repaired?.plan?.history) ? repaired.plan.history : [];
+    expect((history.at(-1) as { version?: number }).version).toBe(plan?.version);
+    const approved = await approveExecutionPlan(setup.product.id, workspace!.id);
+    expect(approved?.plan?.status).toBe("APPROVED");
+    expect(asStrings(approved?.plan?.filesExpectedToChange)).toContain(".gitignore");
+    expect(await db.agentRun.count({ where: { productId: setup.product.id, agentType: "CODING" } })).toBe(beforeRuns);
+  });
+
   it("requires a new approval after execution plan changes", async () => {
     useRepo();
     const setup = await readyProduct({ mode: "SUPERVISED", risk: "MEDIUM" });
@@ -561,8 +614,45 @@ describe("coding execution", () => {
     expect(workspace?.plan?.version).toBe(1);
     const view = await getCodingView(setup.product.id);
     expect(view?.tasks.find((task) => task.id === setup.task.id)?.workspace?.repairOffer).toBe(true);
+    expect(view?.tasks.find((task) => task.id === setup.task.id)?.workspace?.validateExistingOffer).toBe(true);
     await expect(resumeCodingTask(setup.product.id, workspace!.id)).rejects.toThrow(/Repair it inside the approved execution plan/);
     expect(fs.existsSync(workspace!.workspacePath)).toBe(true);
+  });
+
+  it("validates an existing manual repair without calling the Coding Agent", async () => {
+    const repo = useRepo(false);
+    fs.writeFileSync(
+      path.join(repo, "package.json"),
+      JSON.stringify({
+        name: "demo-claims",
+        scripts: {
+          test: "node -e \"const fs=require('fs'); const text=fs.readFileSync('src/claims/submit.ts','utf8'); if(!text.includes('manual-fix')){console.error('validation failed'); process.exit(1)}\"",
+        },
+      }),
+    );
+    execFileSync("git", ["-c", "commit.gpgsign=false", "add", "package.json"], { cwd: repo });
+    execFileSync("git", ["-c", "commit.gpgsign=false", "-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-m", "failing check"], { cwd: repo });
+    const setup = await readyProduct();
+    setAIProviderForTests(provider(writeChange));
+    const failed = await startCodingTask(setup.product.id, setup.task.id);
+    expect(failed?.status).toBe("FAILED");
+    const offered = await getCodingView(setup.product.id);
+    expect(offered?.tasks.find((task) => task.id === setup.task.id)?.workspace?.validateExistingOffer).toBe(true);
+
+    const target = path.join(failed!.workspacePath, "src/claims/submit.ts");
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, "export const claim = 'manual-fix';\n");
+    execFileSync("git", ["-c", "commit.gpgsign=false", "add", "src/claims/submit.ts"], { cwd: failed!.workspacePath });
+    execFileSync("git", ["-c", "commit.gpgsign=false", "-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-m", "manual repair"], { cwd: failed!.workspacePath });
+    const beforeRuns = await db.agentRun.count({ where: { productId: setup.product.id, agentType: "CODING" } });
+
+    const validated = await validateExistingImplementation(setup.product.id, failed!.id);
+    expect(validated?.status).toBe("READY_FOR_REVIEW");
+    expect(validated?.evidence.some((item) => item.command === "npm test" && item.result === "PASS")).toBe(true);
+    expect(validated?.evidence.some((item) => item.type === "HUMAN_CONFIRMATION" && item.description.includes("Validate Existing Implementation"))).toBe(true);
+    expect(await db.agentRun.count({ where: { productId: setup.product.id, agentType: "CODING" } })).toBe(beforeRuns);
+    const task = await db.implementationTask.findUnique({ where: { id: setup.task.id } });
+    expect(task?.status).toBe("CODE_REVIEW");
   });
 
   it("stops before setup when a required Prisma schema has no model", async () => {

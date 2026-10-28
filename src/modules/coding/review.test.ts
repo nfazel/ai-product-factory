@@ -11,6 +11,7 @@ import {
   executionPlanScopeRevision,
   isGeneratedReviewPath,
   OUT_OF_SCOPE_BLOCK,
+  validationSnapshotDrifted,
 } from "@/modules/coding/review";
 
 const evidence = [
@@ -79,6 +80,45 @@ describe("effective coding review", () => {
     });
   });
 
+  it("blocks approval when the coding baseline cannot be resolved", () => {
+    expect(codeApprovalDecision({
+      sourceFileCount: 0,
+      checksPassed: true,
+      checksStale: false,
+      baselineUnresolved: true,
+    }).reason).toMatch(/baseline commit/i);
+  });
+
+  it("detects drift when HEAD moves or the worktree becomes dirty after a committed validation", () => {
+    const base = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const head = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    const next = "cccccccccccccccccccccccccccccccccccccccc";
+    expect(validationSnapshotDrifted({
+      recordedHeadCommit: base,
+      currentHeadCommit: base,
+      baseCommit: base,
+      workingTreeDirty: true,
+    })).toBe(false);
+    expect(validationSnapshotDrifted({
+      recordedHeadCommit: head,
+      currentHeadCommit: head,
+      baseCommit: base,
+      workingTreeDirty: false,
+    })).toBe(false);
+    expect(validationSnapshotDrifted({
+      recordedHeadCommit: head,
+      currentHeadCommit: next,
+      baseCommit: base,
+      workingTreeDirty: false,
+    })).toBe(true);
+    expect(validationSnapshotDrifted({
+      recordedHeadCommit: head,
+      currentHeadCommit: head,
+      baseCommit: base,
+      workingTreeDirty: true,
+    })).toBe(true);
+  });
+
   it("classifies approved, derived, generated, and out-of-scope changes", () => {
     const files = classifyPlanDiff({
       files: [
@@ -86,6 +126,7 @@ describe("effective coding review", () => {
         { path: "src/lib/db.ts", status: "modified" },
         { path: "src/old.ts", status: "deleted" },
         { path: "package-lock.json", status: "added" },
+        { path: ".gitignore", status: "modified" },
         { path: ".next/cache.js", status: "added" },
         { path: "notes.txt", status: "added" },
         { path: "src/auth/security.ts", status: "modified" },
@@ -100,6 +141,7 @@ describe("effective coding review", () => {
       ["src/lib/db.ts", "APPROVED"],
       ["src/old.ts", "APPROVED"],
       ["package-lock.json", "DERIVED"],
+      [".gitignore", "DERIVED"],
       [".next/cache.js", "GENERATED_IGNORED"],
       ["notes.txt", "OUT_OF_SCOPE"],
       ["src/auth/security.ts", "OUT_OF_SCOPE"],
@@ -150,6 +192,27 @@ describe("effective coding review", () => {
       files: ["src/app/page.tsx", "README.md"],
     });
     expect(revision.steps.at(-1)).toBe("Delete README.md.");
+  });
+
+  it("adds a modify work item when authorising an existing file change", () => {
+    const approved = [
+      "src/app/api/discovery/feed/route.ts",
+      "src/app/api/discovery/action/route.ts",
+      "src/app/discovery/page.tsx",
+    ];
+    const steps = approved.map((file) => `Create ${file}.`);
+    const revision = executionPlanScopeRevision({
+      version: 2,
+      files: approved,
+      steps,
+      path: ".gitignore",
+      status: "modified",
+    });
+    expect(approved).toHaveLength(3);
+    expect(steps).toHaveLength(3);
+    expect(revision.files).toEqual([...approved, ".gitignore"]);
+    expect(revision.steps.slice(0, 3)).toEqual(steps);
+    expect(revision.steps.at(-1)).toBe("Modify .gitignore to exclude generated files from version control.");
   });
 
   it("excludes generated artefacts and keeps a stable snapshot of the source diff", () => {

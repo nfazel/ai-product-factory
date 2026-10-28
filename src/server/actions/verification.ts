@@ -10,8 +10,10 @@ import {
   recordManualResult,
   rejectVerification,
   requestMoreTesting,
+  recoverInterruptedVerification,
   rerunFailedTests,
   retryVerification,
+  startNewVerificationAttempt,
   startVerification,
 } from "@/modules/verification/service";
 import { actionFailure, formValues, refreshWorkspace } from "@/server/action-helpers";
@@ -50,6 +52,33 @@ export async function retryVerificationAction(_prev: ActionState, formData: Form
   }
 }
 
+export async function startNewVerificationAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const parsed = ids.safeParse(formValues(formData));
+  if (!parsed.success) return invalidState(parsed.error.issues);
+  try {
+    await startNewVerificationAttempt(parsed.data.productId, parsed.data.taskId);
+    return done(
+      parsed.data.productId,
+      "A new verification attempt ran and is the current attempt. The previous attempt, its executions, evidence and decisions are kept in History.",
+    );
+  } catch (error) {
+    refreshWorkspace(parsed.data.productId);
+    return actionFailure(error);
+  }
+}
+
+export async function recoverVerificationAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const parsed = z.object({ productId: z.string().min(1), sessionId: z.string().min(1) }).safeParse(formValues(formData));
+  if (!parsed.success) return invalidState(parsed.error.issues);
+  try {
+    await recoverInterruptedVerification(parsed.data.productId, parsed.data.sessionId);
+    return done(parsed.data.productId, "The interrupted attempt was recovered and marked failed. Earlier records stay in History. Retry is separate and only starts when you choose it.");
+  } catch (error) {
+    refreshWorkspace(parsed.data.productId);
+    return actionFailure(error);
+  }
+}
+
 export async function approveVerificationAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
   const parsed = z.object({ productId: z.string().min(1), sessionId: z.string().min(1) }).safeParse(formValues(formData));
   if (!parsed.success) return invalidState(parsed.error.issues);
@@ -68,7 +97,10 @@ export async function requestTestingAction(_prev: ActionState, formData: FormDat
   if (!parsed.success) return invalidState(parsed.error.issues);
   try {
     await requestMoreTesting(parsed.data.productId, parsed.data.sessionId, parsed.data.note);
-    return done(parsed.data.productId, "More testing was requested. Previous evidence was kept.");
+    return done(
+      parsed.data.productId,
+      "Your request for more testing was recorded. No verification has run. To run a new attempt, use Start New Verification Attempt.",
+    );
   } catch (error) {
     return actionFailure(error);
   }

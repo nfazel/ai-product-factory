@@ -133,7 +133,7 @@ function action(
     throw new Error(`Next action ${input.key} must open ${destination.path}${destination.hash ? `#${destination.hash}` : ""}.`);
   }
   const execution = destination.execution ?? "navigate";
-  if (execution === "command" && !input.subjectId) {
+  if ((execution === "command" || destination.tab) && !input.subjectId) {
     throw new Error(`Next action ${input.key} needs the task it will run.`);
   }
   return {
@@ -146,7 +146,9 @@ function action(
     href:
       destination.kind === "settings"
         ? `/settings${destination.hash ? `#${destination.hash}` : ""}`
-        : link(snapshot.productId, destination.path, destination.hash || undefined),
+        : destination.tab && input.subjectId
+          ? `/products/${snapshot.productId}/testing/tasks/${input.subjectId}?tab=${destination.tab}#${destination.hash}`
+          : link(snapshot.productId, destination.path, destination.hash || undefined),
     waitingSince: input.waitingSince ?? null,
     subjectId: input.subjectId ?? null,
     execution,
@@ -1193,6 +1195,22 @@ function taskStep(snapshot: GuidanceSnapshot): { action: NextAction | null; bloc
       blocker: null,
     };
   }
+  if (task.workspace === "OPEN" && task.codingRun === "FAILED" && task.validateExistingAvailable && task.executionPlan === "APPROVED") {
+    return {
+      action: action(snapshot, {
+        key: "validate-existing-implementation",
+        label: "Validate Existing Implementation",
+        why: `${task.title} still has a failed coding run on record. If the implementation already exists in the workspace, validate it with the approved checks without starting another AI coding run.`,
+        role: ENGINEERING,
+        stage: "BUILD",
+        decision: false,
+        path: "/build",
+        hash: "coding-progress",
+        waitingSince: task.updatedAt,
+      }),
+      blocker: null,
+    };
+  }
   if (task.workspace === "OPEN" && task.codingRun === "FAILED" && task.repairAvailable && task.executionPlan === "APPROVED") {
     return {
       action: action(snapshot, {
@@ -1340,6 +1358,7 @@ function taskStep(snapshot: GuidanceSnapshot): { action: NextAction | null; bloc
   }
   const verification = verificationAction(task.verification);
   if (verification && task.verification !== "APPROVED") {
+    const destination = nextActionDestination(verification.key);
     return {
       action: action(snapshot, {
         key: verification.key,
@@ -1348,8 +1367,8 @@ function taskStep(snapshot: GuidanceSnapshot): { action: NextAction | null; bloc
         role: ENGINEERING,
         stage: "PROVE",
         decision: verification.decision,
-        path: "/testing",
-        hash: "check",
+        path: destination.path,
+        hash: destination.hash,
         waitingSince: verification.decision ? task.updatedAt : null,
         subjectId: task.id,
       }),
@@ -1474,6 +1493,7 @@ function verificationWhy(task: TaskSnapshot) {
   if (task.verification === "DEMO") return "The recorded check is sample data. A real independent check is still required.";
   if (task.verification === "NONE") return `${task.title} is complete. The author of the code does not approve the check.`;
   if (task.verification === "RUNNING") return `${task.title} has an independent check in progress.`;
+  if (task.verification === "INTERRUPTED") return `${task.title}'s independent check stopped before it finished. A person must recover it before another attempt starts.`;
   if (task.verification === "RETRYABLE") return `${task.title} did not finish Independent Verification. The product was not judged. Retry uses the same approved commit.`;
   if (task.verification === "REVIEW") return `${task.title} has a verification result that still needs a person's review.`;
   if (task.verification === "AWAITING") return "The independent check passed. A person decides whether it is enough.";

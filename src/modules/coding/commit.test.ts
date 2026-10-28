@@ -244,4 +244,97 @@ describe("createCodingCommit", () => {
     const approval = await db.codeChangeApproval.findFirstOrThrow({ where: { workspaceId: setup.workspace.id } });
     expect(approval.stale).toBe(true);
   });
+
+  it("reuses an already-committed validated HEAD instead of creating a duplicate commit", async () => {
+    const { repo, work, base } = makeRepo();
+    writeApproved(work);
+    git(work, ["add", ...approvedPaths]);
+    git(work, ["commit", "-m", "implementation"]);
+    const validated = git(work, ["rev-parse", "HEAD"]).trim();
+    expect(git(work, ["status", "--porcelain"]).trim()).toBe("");
+
+    const product = await db.product.create({
+      data: {
+        name: `Commit reuse ${crypto.randomUUID()}`,
+        description: "Temporary",
+        vision: "Friends can match.",
+        problemStatement: "Discovery is manual.",
+        targetUsers: "Friends",
+        status: "ACTIVE",
+        currentStage: "BUILD",
+      },
+    });
+    products.push(product.id);
+    const architecture = await db.solutionArchitecture.create({
+      data: { productId: product.id, version: 1, status: "APPROVED", summary: "A small app." },
+    });
+    const plan = await db.implementationPlan.create({
+      data: { productId: product.id, solutionArchitectureId: architecture.id, version: 1, status: "APPROVED" },
+    });
+    const task = await db.implementationTask.create({
+      data: { implementationPlanId: plan.id, title: "Initialize the app", status: "CODE_REVIEW" },
+    });
+    const repository = await db.repository.create({
+      data: { productId: product.id, name: "betmyfriend", localPath: repo, defaultBranch: "main", status: "CONFIGURED" },
+    });
+    const workspace = await db.repositoryWorkspace.create({
+      data: {
+        repositoryId: repository.id,
+        productId: product.id,
+        implementationTaskId: task.id,
+        workspacePath: work,
+        branchName: "ai-factory/task-test",
+        baseCommit: base,
+        headCommit: validated,
+        status: "READY_FOR_REVIEW",
+      },
+    });
+    await db.codingExecutionContract.create({
+      data: {
+        implementationTaskId: task.id,
+        workspaceId: workspace.id,
+        objective: "Initialize the app.",
+        requiredChecks: ["npm test"],
+        executionMode: "SUPERVISED",
+        riskLevel: "LOW",
+      },
+    });
+    await db.codingExecutionPlan.create({
+      data: {
+        workspaceId: workspace.id,
+        summary: "Execution plan v4",
+        version: 4,
+        status: "COMPLETED",
+        filesExpectedToChange: approvedPaths.filter((file) => file !== "package-lock.json"),
+        steps: ["Create the application files"],
+        setupCommands: ["npm install"],
+        validationCommands: [{ command: "npm test", kind: "VALIDATION", applicability: "REQUIRED", reason: "The plan requires a test." }],
+        approvedBy: "Local user",
+        approvedAt: new Date("2026-10-14T13:12:17.272Z"),
+      },
+    });
+    await db.codingEvidence.create({
+      data: {
+        workspaceId: workspace.id,
+        implementationTaskId: task.id,
+        type: "TEST_RESULT",
+        source: "COMMAND_RUNNER",
+        description: "npm test",
+        command: "npm test",
+        result: "PASS",
+        exitCode: 0,
+        completedAt: new Date(Date.now() + 60_000),
+      },
+    });
+    await approveCodeChanges(product.id, workspace.id, { actorName: "Local user" });
+    const before = git(work, ["rev-parse", "HEAD"]).trim();
+    const committed = await createCodingCommit(product.id, workspace.id);
+    expect(committed.sha).toBe(validated);
+    expect(committed.reusedExistingCommit).toBe(true);
+    expect(git(work, ["rev-parse", "HEAD"]).trim()).toBe(before);
+    expect(git(repo, ["rev-parse", "main"]).trim()).toBe(base);
+    const evidence = await db.codingEvidence.findFirst({ where: { workspaceId: workspace.id, result: "COMMITTED" } });
+    expect(evidence?.description).toContain("No duplicate commit was created");
+    expect(evidence?.description).toContain(validated);
+  });
 });

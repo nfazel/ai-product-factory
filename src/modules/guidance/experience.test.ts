@@ -163,6 +163,7 @@ function task(patch: Partial<TaskSnapshot> = {}): TaskSnapshot {
     providerBlocked: false,
     repairAvailable: false,
     persistenceRecovery: false,
+    validateExistingAvailable: false,
     planIncomplete: false,
     implementationIncomplete: false,
     outOfScope: false,

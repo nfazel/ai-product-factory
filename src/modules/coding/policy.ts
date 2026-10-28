@@ -113,9 +113,26 @@ export function pathMatches(relativePath: string, patterns: string[]) {
   return patterns.some((pattern) => matchGlob(pattern, relativePath));
 }
 
+/**
+ * Verification-only files belong to the Testing & Verification Agent. The Coding Agent may not write or read
+ * them, so the verification that judges an implementation cannot be shaped by the implementation's author.
+ * This is deliberately not in ALWAYS_RESTRICTED, which the verification policy also consults.
+ */
+export function isVerificationReservedPath(relativePath: string) {
+  const posix = toPosix(relativePath).replace(/^\.\//, "");
+  return posix === "verification" || posix.startsWith("verification/");
+}
+
 export function classifyWrite(relativePath: string, allowed: string[], restricted: string[]) {
   if (isSecretPath(relativePath)) {
     return { ok: false as const, kind: "secret" as const, reason: "Secret files cannot be read or modified." };
+  }
+  if (isVerificationReservedPath(relativePath)) {
+    return {
+      ok: false as const,
+      kind: "restricted" as const,
+      reason: "Verification files are reserved for the Testing & Verification Agent.",
+    };
   }
   if (isSecurityConfig(relativePath) || pathMatches(relativePath, restricted) || pathMatches(relativePath, ALWAYS_RESTRICTED)) {
     return {
@@ -136,6 +153,20 @@ export function classifyWrite(relativePath: string, allowed: string[], restricte
 
 export function filesOutsideContract(files: string[], allowed: string[], restricted: string[]) {
   return files.filter((file) => !classifyWrite(file, allowed, restricted).ok);
+}
+
+/**
+ * Paths that block execution-plan approval when outside the coding contract.
+ * Tooling metadata such as `.gitignore` can be named in a plan revision without widening the contract first.
+ */
+export function filesBlockingPlanApproval(files: string[], allowed: string[], restricted: string[]) {
+  return filesOutsideContract(files, allowed, restricted).filter((file) => {
+    const normalized = file.replaceAll("\\", "/");
+    return normalized !== ".gitignore"
+      && !normalized.endsWith("/.gitignore")
+      && normalized !== ".gitattributes"
+      && normalized !== ".editorconfig";
+  });
 }
 
 export function outsideApprovedPlan(file: string, expected: string[]) {

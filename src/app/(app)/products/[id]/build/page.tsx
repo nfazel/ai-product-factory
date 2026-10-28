@@ -18,9 +18,10 @@ import {
   TaskEditor,
   TechnologyEditor,
 } from "@/components/build/controls";
-import { CodingPanel } from "@/components/build/coding-panel";
+import { BuildOverview } from "@/components/build/build-overview";
 import { RepositoryPanel } from "@/components/build/repository-panel";
 import { BuildReadiness, GovernancePanel } from "@/components/build/governance-panel";
+import { buildOverviewSummary } from "@/modules/build/task-status";
 import { CODING_EXECUTION_LABEL, CODING_RISK_DISPOSITION_LABEL, CODING_RISK_LABEL } from "@/domain/constants";
 import { PageSkeleton } from "@/components/feedback/states";
 import {
@@ -120,12 +121,20 @@ async function Build({
   const tasks = workspace.plan?.tasks ?? [];
   const slices = groupBy(tasks, (task) => task.verticalSlice || "Unassigned");
   const context = workspace.context;
+  const codingTasks = workspace.codingExecution?.tasks ?? [];
+  const verificationSnapshots =
+    prove?.sessions.map((session) => ({
+      implementationTaskId: session.implementationTaskId,
+      status: session.status,
+      overallVerdict: session.overallVerdict,
+    })) ?? [];
+  const overview = buildOverviewSummary(codingTasks, verificationSnapshots);
 
   return (
     <div className="space-y-6">
       <header className="rounded-2xl border bg-card p-4 sm:p-5">
         <p className="text-xs font-medium tracking-[0.14em] text-muted-foreground uppercase">
-          Build
+          Build overview
         </p>
         <div className="mt-2 grid gap-4 lg:grid-cols-3">
           <Status
@@ -183,6 +192,13 @@ async function Build({
       {guidance.stage === "BUILD" || guidance.action?.stage === "BUILD" ? <NextActionPanel guidance={guidance} /> : null}
 
       <BuildReadiness coding={workspace.coding} />
+
+      <BuildOverview
+        productId={id}
+        summary={overview}
+        readinessLabel={workspace.coding.label}
+        repositoryReady={Boolean(workspace.codingExecution?.repositoryConfigured)}
+      />
 
       <section className="rounded-2xl border bg-card p-4 sm:p-5">
         <h2 className="text-base font-semibold">Technical readiness</h2>
@@ -740,7 +756,13 @@ async function Build({
                   <li key={task.id} className="rounded-xl border p-3 text-sm leading-6">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <p className="font-medium">
-                        {task.sequence}. {task.title}
+                        {task.sequence}.{" "}
+                        <Link
+                          href={`/products/${id}/build/tasks/${task.id}`}
+                          className="text-indigo-800 hover:underline"
+                        >
+                          {task.title}
+                        </Link>
                       </p>
                       <p className="text-xs">
                         {task.status} · {task.complexity}
@@ -803,27 +825,12 @@ async function Build({
           <RepositoryPanel productId={id} repository={repository} installationRepositories={installationRepositories} />
         ) : null}
       </section>
-      <section id="execution-plan" tabIndex={-1} className="scroll-mt-20 space-y-3 rounded-2xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
-      <section id="code" tabIndex={-1} className="scroll-mt-20 space-y-3 rounded-2xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
-        <h2 className="text-lg font-semibold">Code</h2>
-        <p className="text-sm text-muted-foreground">One approved task at a time. The coding assistant cannot approve its own change.</p>
-        <section id="coding-progress" tabIndex={-1} className="scroll-mt-20 space-y-3 rounded-2xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
-        {workspace.codingExecution ? (
-          <CodingPanel productId={id} coding={workspace.codingExecution} />
-        ) : (
-          <p className="text-sm leading-6 text-muted-foreground">
-            Coding has not started. Approve the design, the delivery plan, the engineering review, and a coding task first.
-          </p>
-        )}
-      </section>
-      </section>
-      </section>
       <section className="rounded-2xl border bg-card p-5">
         <p className="text-xs font-medium tracking-wide text-indigo-700">VERIFICATION</p>
-        <h2 className="text-lg font-semibold">Task verification</h2>
+        <h2 className="text-lg font-semibold">Independent verification</h2>
         <p className="mt-2 text-sm leading-6 text-muted-foreground">
           {prove?.readiness.label ?? "NOT VERIFIED"}
-          {prove?.readiness.reasons[0] ? `. ${prove.readiness.reasons[0]}` : ""}
+          {prove?.readiness.reasons[0] ? `. ${prove.readiness.reasons[0]}` : ""} Verification status for each task is also shown in the implementation list above.
         </p>
         <Link href={`/products/${id}/testing`} className="mt-3 inline-block text-sm font-medium text-indigo-800">
           Open Prove

@@ -3,6 +3,7 @@ import { isVerificationFailureClass, RETRYABLE_VERIFICATION_FAILURES } from "@/m
 export type VerificationProgress =
   | "NONE"
   | "RUNNING"
+  | "INTERRUPTED"
   | "RETRYABLE"
   | "REVIEW"
   | "AWAITING"
@@ -23,11 +24,17 @@ export function verificationProgress(input: {
   } | null;
   approvalStale: boolean;
   approved: boolean;
+  /**
+   * True when the session is still marked running but no process in this server is running it. That means the
+   * attempt stopped without finishing, so it needs a person to recover it. Computed by the server, never by the UI.
+   */
+  interrupted?: boolean;
 }): VerificationProgress {
   const session = input.session;
   if (!session) return "NONE";
   if (session.demo) return "DEMO";
   if (session.stale || input.approvalStale) return "STALE";
+  if (input.interrupted && RUNNING.has(session.status)) return "INTERRUPTED";
   if (
     input.approved &&
     (session.overallVerdict === "PASS" || session.overallVerdict === "PASS_WITH_CONCERNS")
@@ -38,11 +45,16 @@ export function verificationProgress(input: {
   if (session.overallVerdict === "PASS" || session.overallVerdict === "PASS_WITH_CONCERNS") return "AWAITING";
   if (session.overallVerdict === "FAIL") return "FAILED";
   const failureClass = session.failureClass ?? "";
+  // A blocked snapshot is not a product verdict. A new attempt starts again from the approved commit.
+  if (failureClass === "VERIFICATION_SNAPSHOT_MISMATCH") return "RETRYABLE";
   if (isVerificationFailureClass(failureClass) && RETRYABLE_VERIFICATION_FAILURES.has(failureClass) && session.overallVerdict !== "INCONCLUSIVE") {
     return "RETRYABLE";
   }
   if (session.overallVerdict === "INCONCLUSIVE") {
-    return failureClass === "VERIFICATION_COMMAND_UNAVAILABLE" || failureClass === "VERIFICATION_EVIDENCE_INSUFFICIENT"
+    // A required check or verification test that could not run in this environment may succeed on retry.
+    // Missing acceptance evidence is different: the process finished, so a person decides whether more
+    // testing is needed.
+    return failureClass === "VERIFICATION_COMMAND_UNAVAILABLE" || failureClass === "VERIFICATION_TEST_ENVIRONMENT_FAILED"
       ? "RETRYABLE"
       : "REVIEW";
   }
@@ -57,6 +69,8 @@ export function verificationAction(progress: VerificationProgress) {
       return { key: "start-check" as const, label: "Start Independent Verification", decision: false };
     case "RUNNING":
       return { key: "view-verification" as const, label: "View Verification Progress", decision: false };
+    case "INTERRUPTED":
+      return { key: "recover-verification" as const, label: "Recover Interrupted Attempt", decision: true };
     case "RETRYABLE":
       return { key: "retry-verification" as const, label: "Retry Independent Verification", decision: false };
     case "REVIEW":
@@ -116,6 +130,7 @@ export function describeVerificationAttempt(input: {
     session: { ...session, demo: session.demo ?? false, stale: session.stale ?? false },
     approvalStale: false,
     approved: session.approvals.some((item) => !item.stale),
+    interrupted: false,
   });
   const action = verificationAction(progress);
   return {
@@ -141,6 +156,7 @@ function verificationLabel(
   progress: VerificationProgress,
 ) {
   if (progress === "RUNNING") return "Running";
+  if (progress === "INTERRUPTED") return "Interrupted";
   if (progress === "RETRYABLE") return "Execution failed";
   if (session.overallVerdict === "PASS") return "Passed";
   if (session.overallVerdict === "PASS_WITH_CONCERNS") return "Passed with concerns";

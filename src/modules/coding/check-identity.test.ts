@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { ChecksAndEvidence } from "@/components/build/coding-panel";
 import {
   approvedPlanWindows,
+  codingChecksReadyForVerification,
   codeReviewGuidance,
   evaluatePlanChecks,
   type CheckEvidenceInput,
@@ -156,6 +157,18 @@ describe("plan check identity", () => {
     expect(decision.required[0].result).toBe("NOT RUN");
   });
 
+  it("reuses prior approved-plan evidence after a scope-only revision when acceptPriorEvidence is set", () => {
+    const decision = evaluatePlanChecks({
+      planVersion: 4,
+      windows,
+      checks: [{ command: "npm run build", applicability: "REQUIRED" }],
+      evidence: [evidence({ command: "npm run build", result: "PASS", at: earlier, planVersion: 2 })],
+      acceptPriorEvidence: true,
+    });
+    expect(decision.ready).toBe(true);
+    expect(decision.required[0]).toMatchObject({ result: "PASS", passed: true });
+  });
+
   it("attributes untagged evidence to the approved plan whose window contains it", () => {
     const derived = approvedPlanWindows({
       version: 4,
@@ -176,6 +189,139 @@ describe("plan check identity", () => {
       ],
     });
     expect(decision.ready).toBe(true);
+  });
+});
+
+describe("verification coding-check eligibility", () => {
+  const history = [
+    { version: 2, status: "APPROVED", approvedAt: "2026-10-13T15:37:48.365Z" },
+    { version: 3, status: "PROPOSED", approvedAt: null },
+  ];
+
+  it("allows verification after a scope-only plan revision when earlier required checks passed", () => {
+    const decision = codingChecksReadyForVerification({
+      planVersion: 4,
+      planStatus: "APPROVED",
+      planApprovedAt: v4Start,
+      planHistory: history,
+      checks: v4Checks,
+      evidence: [
+        evidence({ command: "npx prisma validate", result: "PASS", at: earlier, planVersion: 2 }),
+        evidence({ command: "npm run build", result: "PASS", at: earlier, planVersion: 2 }),
+        evidence({ command: "npm test", result: "FAIL", at: earlier, planVersion: 2 }),
+      ],
+    });
+    expect(decision.ready).toBe(true);
+    expect(decision.required.every((check) => check.passed)).toBe(true);
+  });
+
+  it("keeps historical failures recorded but uses the latest recovery pass", () => {
+    const decision = codingChecksReadyForVerification({
+      planVersion: 4,
+      planStatus: "APPROVED",
+      planApprovedAt: v4Start,
+      planHistory: history,
+      checks: v4Checks,
+      evidence: [
+        evidence({ command: "npx prisma validate", result: "FAIL", at: earlier, planVersion: 2 }),
+        evidence({ command: "npm run build", result: "FAIL", at: earlier, planVersion: 2 }),
+        evidence({ command: "npx prisma validate", result: "PASS", at: duringV4, planVersion: 2 }),
+        evidence({ command: "npm run build", result: "PASS", at: later, planVersion: 2 }),
+      ],
+    });
+    expect(decision.ready).toBe(true);
+  });
+
+  it("still blocks verification when the latest evidence failed", () => {
+    const decision = codingChecksReadyForVerification({
+      planVersion: 4,
+      planStatus: "APPROVED",
+      planApprovedAt: v4Start,
+      planHistory: history,
+      checks: v4Checks,
+      evidence: [
+        evidence({ command: "npx prisma validate", result: "PASS", at: earlier, planVersion: 2 }),
+        evidence({ command: "npm run build", result: "PASS", at: earlier, planVersion: 2 }),
+        evidence({ command: "npm run build", result: "FAIL", at: later, planVersion: 2 }),
+      ],
+    });
+    expect(decision.ready).toBe(false);
+    expect(decision.required.find((check) => check.checkId === "BUILD")?.result).toBe("FAIL");
+  });
+
+  it("blocks verification when a newly required check has no evidence", () => {
+    const decision = codingChecksReadyForVerification({
+      planVersion: 4,
+      planStatus: "APPROVED",
+      planApprovedAt: v4Start,
+      planHistory: history,
+      checks: [
+        ...v4Checks,
+        { command: "npm run typecheck", applicability: "REQUIRED", label: "Typecheck" },
+      ],
+      evidence: [
+        evidence({ command: "npx prisma validate", result: "PASS", at: earlier, planVersion: 2 }),
+        evidence({ command: "npm run build", result: "PASS", at: earlier, planVersion: 2 }),
+      ],
+    });
+    expect(decision.ready).toBe(false);
+    expect(decision.required.find((check) => check.checkId === "TYPECHECK")?.result).toBe("NOT RUN");
+  });
+
+  it("blocks verification when required checks never passed", () => {
+    const decision = codingChecksReadyForVerification({
+      planVersion: 4,
+      planStatus: "COMPLETED",
+      planApprovedAt: v4Start,
+      planHistory: history,
+      checks: v4Checks,
+      evidence: [],
+    });
+    expect(decision.ready).toBe(false);
+  });
+
+  it("ignores stale validation evidence recorded outside any approved plan window", () => {
+    const decision = codingChecksReadyForVerification({
+      planVersion: 4,
+      planStatus: "APPROVED",
+      planApprovedAt: v4Start,
+      planHistory: history,
+      checks: v4Checks,
+      evidence: [
+        evidence({
+          command: "npx prisma validate",
+          result: "PASS",
+          at: new Date("2026-10-01T12:00:00.000Z"),
+        }),
+        evidence({
+          command: "npm run build",
+          result: "PASS",
+          at: new Date("2026-10-01T12:01:00.000Z"),
+        }),
+      ],
+    });
+    expect(decision.ready).toBe(false);
+    expect(decision.required.every((check) => check.result === "NOT RUN")).toBe(true);
+  });
+
+  it("remains eligible after an already-committed approved snapshot when prior checks passed", () => {
+    const decision = codingChecksReadyForVerification({
+      planVersion: 4,
+      planStatus: "APPROVED",
+      planApprovedAt: v4Start,
+      planHistory: history,
+      checks: v4Checks,
+      evidence: [
+        evidence({ command: "npx prisma validate", result: "PASS", at: earlier, planVersion: 2 }),
+        evidence({ command: "npm run build", result: "PASS", at: earlier, planVersion: 2 }),
+      ],
+    });
+    expect(decision.ready).toBe(true);
+    expect(codeReviewGuidance({
+      status: "COMPLETED",
+      headCommit: "7badef42504c88ec8d27de47d8f2f804ae757bee",
+      baseCommit: "a201aaf20a5bdfd6224899e01f21f6517d98446f",
+    })).toBe("Approved source snapshot committed. Ready for Independent Verification.");
   });
 });
 

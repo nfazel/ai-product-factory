@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { TEST_SURFACES } from "@/modules/verification/adapters/types";
+
 const SOURCES = [
   "ACCEPTANCE_CRITERION",
   "NFR",
@@ -48,6 +50,37 @@ export const verificationPlanSchema = z
     summary: z.string().trim().min(1).max(2000),
     existingTestNotes: z.string().trim().max(2000),
     untestedAreas: z.array(z.string().trim().max(300)).max(8),
+    // Test accounts and setup requests for HTTP acceptance tests. The framework validates every path against the
+    // approved routes, so an empty plan is the safe default.
+    authentication: z
+      .object({
+        required: z.boolean(),
+        signupPath: z.string().trim().max(200),
+        loginPath: z.string().trim().max(200),
+        accountKeys: z
+          .array(
+            z
+              .string()
+              .trim()
+              .max(24)
+              .describe("Lowercase letters, digits and hyphens only, starting with a letter, at most 24 characters, for example viewer."),
+          )
+          .max(3),
+      })
+      .strict(),
+    fixtureSteps: z
+      .array(
+        z
+          .object({
+            account: z.string().trim().max(24),
+            method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE"]),
+            path: z.string().trim().max(200),
+            body: z.string().max(4000),
+            purpose: z.string().trim().max(300),
+          })
+          .strict(),
+      )
+      .max(12),
   })
   .strict();
 
@@ -67,8 +100,14 @@ export const testCaseSchema = z
             source: z.enum(SOURCES),
             acceptanceCriterionId: z.string().trim().max(80),
             automated: z.boolean(),
+            // The adapter that would run the case. Empty means the agent proposes none; the framework validates any name.
+            adapterId: z.string().trim().max(80),
+            targetSurface: z.enum(TEST_SURFACES),
+            // Capability ids the case needs from its adapter. The framework refuses any that the adapter does not provide.
+            requiredCapabilities: z.array(z.string().trim().min(1).max(80)).max(8),
             filePath: z.string().trim().max(240),
             body: z.string().max(20_000),
+            manualReason: z.string().trim().max(600),
           })
           .strict(),
       )

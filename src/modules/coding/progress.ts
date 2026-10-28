@@ -87,13 +87,20 @@ export function classifyCodingRun(input: Pick<
     || input.workspaceStatus === "CHECKING"
   );
   if (running) return "RUNNING";
-  if (input.planStatus === "APPROVED" && input.currentPlanExecuted === false) return "READY";
+  const recovered = input.workspaceStatus === "READY_FOR_REVIEW" || input.workspaceStatus === "COMPLETED" || input.planStatus === "COMPLETED";
+  if (input.planStatus === "APPROVED" && input.currentPlanExecuted === false && !recovered) return "READY";
+  // A proposed revision on an already-implemented workspace is waiting for plan approval, not a fresh coding start.
+  if (
+    (input.planStatus === "PROPOSED" || input.planStatus === "CHANGES_REQUESTED" || input.planStatus === "ESCALATED")
+    && recovered
+  ) {
+    return "WAITING_FOR_HUMAN";
+  }
   if ((input.planStatus === "PROPOSED" || input.planStatus === "CHANGES_REQUESTED") && input.currentPlanExecuted === false) return "NONE";
   const wrote = input.events.some((event) => event.action === "CREATE_FILE" || event.action === "WRITE_FILE" || event.action === "DELETE_FILE");
   const checks = input.evidence.some((item) => item.command || item.result === "FAIL" || item.result === "PASS" || item.result === "NOT RUN");
   const attempted = implement || wrote || checks;
   if (input.workspaceStatus === "FAILED") return "FAILED";
-  const recovered = input.workspaceStatus === "READY_FOR_REVIEW" || input.workspaceStatus === "COMPLETED" || input.planStatus === "COMPLETED";
   if (implement && failedRun && !recovered) return "FAILED";
   if (attempted && input.openEscalations.length > 0) return "WAITING_FOR_HUMAN";
   if (attempted && input.evidence.some((item) => item.result === "FAIL" || (item.exitCode != null && item.exitCode !== 0))) {

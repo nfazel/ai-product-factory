@@ -2,10 +2,39 @@ import "server-only";
 
 import { db } from "@/lib/db";
 import { asStrings } from "@/modules/coding/strings";
-import { demonstratesCriterion } from "@/modules/verification/policy";
-import { failureClassForVerdict } from "@/modules/verification/failure";
+import { sanitizeFailureDetail } from "@/modules/verification/diagnostics";
+import { failureClassForEscalation, failureClassForVerdict } from "@/modules/verification/failure";
+import { executionIsCredible } from "@/modules/verification/adapters/registry";
 import { deriveObligations, inspectWorkspace, type ObligationStatus } from "@/modules/verification/obligations";
 import { decideVerdict, evidenceAreas, sessionStatusFor } from "@/modules/verification/verdict";
+import { assessTestStructure } from "@/modules/verification/test-binding";
+import { assessHttpEvidence } from "@/modules/verification/evidence-adequacy";
+import type { HttpObservation } from "@/modules/verification/http/guard";
+
+/**
+ * Re-judges a recorded passing execution against its stored evidence. Only HTTP black-box records carry observed
+ * requests, so only they are re-checked. Other records keep their existing binding rules.
+ */
+function evidenceSufficient(
+  testCase: { body: string; requiredCapabilities: unknown },
+  execution: { adapterId: string; observations: unknown },
+  loginPath: string,
+) {
+  if (execution.adapterId !== "http-blackbox") return true;
+  const observations = Array.isArray(execution.observations) ? (execution.observations as HttpObservation[]) : [];
+  return assessHttpEvidence({
+    body: testCase.body,
+    requiredCapabilities: asStrings(testCase.requiredCapabilities),
+    observations,
+    loginPath,
+  }).adequate;
+}
+
+/** The sign-in route the session's approved fixture plan names, or empty when the plan has none. */
+function loginPathOf(value: unknown) {
+  const record = value && typeof value === "object" && !Array.isArray(value) ? (value as { authentication?: { loginPath?: unknown } }) : null;
+  return typeof record?.authentication?.loginPath === "string" ? record.authentication.loginPath : "";
+}
 
 export async function recomputeSession(sessionId: string) {
   const session = await db.verificationSession.findUnique({
@@ -18,27 +47,55 @@ export async function recomputeSession(sessionId: string) {
       nfrResults: true,
       defectLinks: { include: { workItem: true } },
       evidence: true,
+      workspace: true,
     },
   });
   if (!session) return null;
+  // The approved snapshot is the commit the verification workspace was prepared from.
+  const approvedSnapshot = session.workspace?.baseCommit ?? "";
   for (const coverage of session.coverages) {
     const cases = session.testCases.filter((item) => item.acceptanceCriterionId === coverage.acceptanceCriterionId);
     const executions = session.executions.filter((item) =>
       cases.some((testCase) => testCase.id === item.testCaseId),
     );
     const failed = executions.some((item) => item.status === "FAILED");
+    // An automated pass verifies the criterion only when the test is bound to product code and asserts on it, and
+    // the execution came from an adapter that can run, against the approved snapshot. Passing a test that does not
+    // meet these is a process success, not evidence.
     const verifiedAutomatic = cases.some(
       (testCase) =>
         testCase.automated &&
         testCase.provenance === "VERIFICATION_AGENT" &&
-        demonstratesCriterion(testCase.body, coverage.acceptanceCriterionId) &&
-        executions.some((item) => item.testCaseId === testCase.id && item.status === "PASSED"),
+        assessTestStructure(testCase.body, coverage.acceptanceCriterionId, {
+          filePath: testCase.filePath,
+          adapterId: testCase.adapterId,
+          targetSurface: testCase.targetSurface,
+        }).ok &&
+        executions.some(
+          (item) =>
+            item.testCaseId === testCase.id &&
+            item.status === "PASSED" &&
+            executionIsCredible(
+              {
+                adapterId: item.adapterId,
+                command: item.command,
+                snapshotCommit: item.snapshotCommit,
+                observationCount: Array.isArray(item.observations) ? item.observations.length : 0,
+              },
+              approvedSnapshot,
+            ) &&
+            // Independent re-check: a recorded PASS is not enough. The observed evidence must still demonstrate the
+            // criterion. Legacy and non-HTTP records are not affected by this check.
+            evidenceSufficient(testCase, item, loginPathOf(session.fixturePlan)),
+        ),
     );
     const verifiedManual = cases.some((testCase) => !testCase.automated && testCase.status === "PASSED");
+    const blocked = executions.some((item) => item.status === "BLOCKED");
     let status: "VERIFIED" | "FAILED" | "NOT_TESTED" | "BLOCKED" | "NOT_APPLICABLE" = "NOT_TESTED";
     if (failed) status = "FAILED";
     else if (verifiedAutomatic || verifiedManual) status = "VERIFIED";
     else if (coverage.humanConfirmed && coverage.status === "NOT_APPLICABLE") status = "NOT_APPLICABLE";
+    else if (blocked) status = "BLOCKED";
     if (coverage.status !== status || (status === "VERIFIED" && coverage.rationale === "")) {
       await db.verificationCoverage.update({
         where: { id: coverage.id },
@@ -51,7 +108,9 @@ export async function recomputeSession(sessionId: string) {
                 : "An independent verification test demonstrated this criterion."
               : status === "FAILED"
                 ? "A linked verification test failed."
-                : coverage.rationale,
+                : status === "BLOCKED"
+                  ? "A linked verification test could not run in this environment. This is not a product failure."
+                  : coverage.rationale,
         },
       });
     }
@@ -72,9 +131,10 @@ export async function recomputeSession(sessionId: string) {
     },
   });
   if (!fresh) return null;
-  const blocking = fresh.escalations.some(
+  const blockingEscalation = fresh.escalations.find(
     (item) => item.status === "OPEN" && (item.type === "IMPLEMENTATION_CHANGE" || item.type === "SECRET_ACCESS"),
   );
+  const blocking = Boolean(blockingEscalation);
   const evaluated = await evaluateObligations(fresh);
   const decision = decideVerdict({
     coverages: fresh.coverages.map((item) => ({ status: item.status, humanConfirmed: item.humanConfirmed })),
@@ -96,14 +156,30 @@ export async function recomputeSession(sessionId: string) {
       },
     });
   }
+  // A blocking escalation is recorded as its own class and is never reported as a product failure. It is
+  // recomputed from the open escalation on every recompute, so the class survives later recomputation.
+  const escalationClass = blockingEscalation ? failureClassForEscalation(blockingEscalation.type) : "";
   const status = sessionStatusFor(decision.verdict);
+  const failureClass = escalationClass || failureClassForVerdict(decision.verdict, fresh.executions);
+  // The classified reason for a blocked verification test is stored as evidence. That is the detail to show.
+  const environmentDetail =
+    failureClass === "VERIFICATION_TEST_ENVIRONMENT_FAILED"
+      ? fresh.evidence.find(
+          (item) => item.result === "BLOCKED" && item.type === "TEST_RESULT" && item.source === "COMMAND_RUNNER",
+        )
+      : undefined;
   await db.verificationSession.update({
     where: { id: sessionId },
     data: {
       overallVerdict: decision.verdict,
       verdictReason: decision.reason,
-      failureClass: failureClassForVerdict(decision.verdict, fresh.executions),
-      status,
+      failureClass,
+      failureStage: escalationClass || environmentDetail ? "AGENT_EXECUTE" : "",
+      failureDetail: escalationClass && blockingEscalation
+        ? sanitizeFailureDetail(blockingEscalation.description)
+        : environmentDetail ? sanitizeFailureDetail(environmentDetail.description) : "",
+      // A blocked session stays BLOCKED rather than FAILED: it is not a product failure and needs a person.
+      status: escalationClass ? "BLOCKED" : status,
       completedAt: new Date(),
     },
   });

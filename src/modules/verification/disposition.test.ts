@@ -19,7 +19,7 @@ describe("verification disposition", () => {
     expect(verificationAction(progress)?.key).not.toBe("approve-verification");
   });
 
-  it("offers retry for an inconclusive session that lacks evidence", () => {
+  it("routes an inconclusive session that lacks evidence to human review, not to retry", () => {
     const progress = verificationProgress({
       session: {
         status: "BLOCKED",
@@ -31,8 +31,26 @@ describe("verification disposition", () => {
       approvalStale: false,
       approved: false,
     });
-    expect(verificationAction(progress)?.label).toBe("Retry Independent Verification");
+    expect(progress).toBe("REVIEW");
+    expect(verificationAction(progress)?.label).toBe("Review Verification Result");
+    expect(verificationAction(progress)?.key).not.toBe("retry-verification");
     expect(verificationAction(progress)?.key).not.toBe("approve-verification");
+  });
+
+  it("keeps retry for an inconclusive session whose required check could not run", () => {
+    const progress = verificationProgress({
+      session: {
+        status: "BLOCKED",
+        overallVerdict: "INCONCLUSIVE",
+        failureClass: "VERIFICATION_COMMAND_UNAVAILABLE",
+        demo: false,
+        stale: false,
+      },
+      approvalStale: false,
+      approved: false,
+    });
+    expect(progress).toBe("RETRYABLE");
+    expect(verificationAction(progress)?.label).toBe("Retry Independent Verification");
   });
 
   it("offers approval only after a passing verdict", () => {

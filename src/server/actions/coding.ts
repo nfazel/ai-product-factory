@@ -17,11 +17,13 @@ import {
   recordRepairResult,
   restoreUnapprovedChange,
   proposeOutOfScopePlan,
+  repairProposedPlanCoverage,
   repairCodingTask,
   resumeCodingTask,
   retryCodingTask,
   reviseExecutionPlan,
   startCodingTask,
+  validateExistingImplementation,
 } from "@/modules/coding/service";
 import { actionFailure, formValues, refreshWorkspace } from "@/server/action-helpers";
 
@@ -187,6 +189,20 @@ export async function restoreUnapprovedChangeAction(_prev: ActionState, formData
   }
 }
 
+export async function repairProposedPlanCoverageAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const parsed = workspaceIds.safeParse(formValues(formData));
+  if (!parsed.success) return invalidState(parsed.error.issues);
+  try {
+    await repairProposedPlanCoverage(parsed.data.productId, parsed.data.workspaceId);
+    return done(
+      parsed.data.productId,
+      "A new execution plan version was proposed with work-item coverage for every authorised file. It is not approved.",
+    );
+  } catch (error) {
+    return actionFailure(error);
+  }
+}
+
 export async function proposeOutOfScopePlanAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
   const parsed = workspaceIds.extend({ path: z.string().trim().min(1).max(240) }).safeParse(formValues(formData));
   if (!parsed.success) return invalidState(parsed.error.issues);
@@ -204,6 +220,26 @@ export async function recordRepairResultAction(_prev: ActionState, formData: For
   try {
     await recordRepairResult(parsed.data.productId, parsed.data.workspaceId);
     return done(parsed.data.productId, "The existing repair result was recorded. The model was not called again.");
+  } catch (error) {
+    return actionFailure(error);
+  }
+}
+
+export async function validateExistingImplementationAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const parsed = workspaceIds.safeParse(formValues(formData));
+  if (!parsed.success) return invalidState(parsed.error.issues);
+  try {
+    const workspace = await validateExistingImplementation(parsed.data.productId, parsed.data.workspaceId);
+    if (workspace?.status === "READY_FOR_REVIEW") {
+      return done(
+        parsed.data.productId,
+        "Existing implementation validated. Required checks passed. Ready for human code review. The Coding Agent was not called.",
+      );
+    }
+    return done(
+      parsed.data.productId,
+      "Existing implementation was validated. Required checks did not pass. The Coding Agent was not called.",
+    );
   } catch (error) {
     return actionFailure(error);
   }

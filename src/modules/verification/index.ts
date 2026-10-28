@@ -7,6 +7,7 @@ export {
   getProveView,
   recordManualResult,
   rerunFailedTests,
+  startNewVerificationAttempt,
   startVerification,
   verificationEntryBlockers,
 } from "@/modules/verification/service";

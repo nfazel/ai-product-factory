@@ -169,6 +169,25 @@ describe("coding progress", () => {
     }))).toBe("NONE");
   });
 
+  it("treats a proposed revision on an implemented workspace as waiting for plan approval", () => {
+    expect(classifyCodingRun(input({
+      workspaceStatus: "READY_FOR_REVIEW",
+      planStatus: "PROPOSED",
+      planVersion: 3,
+      currentPlanExecuted: false,
+      agentPhase: null,
+      agentRunStatus: null,
+    }))).toBe("WAITING_FOR_HUMAN");
+    expect(classifyCodingRun(input({
+      workspaceStatus: "COMPLETED",
+      planStatus: "ESCALATED",
+      planVersion: 3,
+      currentPlanExecuted: false,
+      agentPhase: null,
+      agentRunStatus: null,
+    }))).toBe("WAITING_FOR_HUMAN");
+  });
+
   it("keeps an earlier failed run from blocking a newer approved plan", () => {
     expect(approvedPlanWasExecuted(
       { status: "APPROVED", version: 2, approvedAt: "2026-10-13T14:37:48.365Z" },

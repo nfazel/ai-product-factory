@@ -103,8 +103,18 @@ export function evaluatePlanChecks(input: {
   windows: PlanVersionWindow[];
   checks: PlannedCheckInput[];
   evidence: CheckEvidenceInput[];
+  /**
+   * When a newer plan was approved only to authorise existing scope (no new coding run),
+   * prior evidence from earlier approved plan windows remains the current validation snapshot.
+   */
+  acceptPriorEvidence?: boolean;
 }) {
-  const applicable = input.evidence.filter((item) => attributedVersion(item, input.windows) === input.planVersion);
+  const applicable = input.evidence.filter((item) => {
+    const version = attributedVersion(item, input.windows);
+    if (version === input.planVersion) return true;
+    if (input.acceptPriorEvidence && version != null && version < input.planVersion) return true;
+    return false;
+  });
   const latest = new Map<CheckId, CheckEvidenceInput>();
   for (const item of [...applicable].sort((left, right) => left.at.getTime() - right.at.getTime())) {
     const id = checkIdForCommand(item.command);
@@ -118,6 +128,33 @@ export function evaluatePlanChecks(input: {
     notApplicable,
     ready: required.length > 0 && required.every((check) => check.passed),
   };
+}
+
+/**
+ * Independent Verification asks whether the approved source snapshot has passing required coding checks.
+ * Scope-only plan revisions must not orphan earlier valid PASS evidence, but later FAIL evidence still wins,
+ * and newly required commands without evidence stay blocked.
+ */
+export function codingChecksReadyForVerification(input: {
+  planVersion: number;
+  planStatus: string;
+  planApprovedAt: Date | null;
+  planHistory: unknown;
+  checks: PlannedCheckInput[];
+  evidence: CheckEvidenceInput[];
+}) {
+  return evaluatePlanChecks({
+    planVersion: input.planVersion,
+    windows: approvedPlanWindows({
+      version: input.planVersion,
+      status: input.planStatus,
+      approvedAt: input.planApprovedAt,
+      history: input.planHistory,
+    }),
+    checks: input.checks,
+    evidence: input.evidence,
+    acceptPriorEvidence: true,
+  });
 }
 
 export function codeReviewGuidance(input: {

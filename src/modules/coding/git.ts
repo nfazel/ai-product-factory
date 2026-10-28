@@ -4,10 +4,14 @@ import os from "node:os";
 import path from "node:path";
 
 import { binaryPatchNote, boundedDiffCount, sanitizeStoredPatch } from "@/modules/coding/diff";
-import { isGeneratedReviewPath } from "@/modules/coding/review";
+import { isGeneratedReviewPath } from "@/modules/coding/generated-paths";
 import { isSecretPath, PATCH_LIMIT } from "@/modules/coding/policy";
 
-export type GitResult = { code: number; stdout: string; stderr: string };
+/**
+ * `signal` is set when the process was terminated by a signal, for example when the timeout fired.
+ * Callers use it to tell an interrupted run from a run that reported a failing result.
+ */
+export type GitResult = { code: number; stdout: string; stderr: string; signal?: string | null };
 
 const SAFE_ENV = ["PATH", "HOME", "TMPDIR", "TEMP", "TMP", "LANG", "LC_ALL", "SYSTEMROOT"];
 
@@ -57,8 +61,8 @@ export function runProcess(
     child.on("error", (error) => {
       resolve({ code: 1, stdout, stderr: error.message });
     });
-    child.on("close", (code) => {
-      resolve({ code: code ?? 1, stdout, stderr });
+    child.on("close", (code, signal) => {
+      resolve({ code: code ?? 1, stdout, stderr, signal: signal ?? null });
     });
   });
 }
@@ -182,33 +186,77 @@ export function ensureWorktreeLink(workspacePath: string, repositoryPath: string
   return false;
 }
 
-export async function captureWorkspaceDiff(workspacePath: string, repositoryPath?: string) {
+export type WorkspaceDiff = {
+  files: DiffFile[];
+  additions: number;
+  deletions: number;
+  patch: string;
+  fullPatch: string;
+  truncated: boolean;
+  /** When set, the diff includes committed changes from baseCommit..HEAD. */
+  comparedToBase?: string | null;
+  headCommit?: string | null;
+};
+
+export const BASELINE_UNRESOLVED =
+  "The coding baseline commit is missing or cannot be resolved. Reconcile the workspace baseline before code review can continue.";
+
+export type CaptureWorkspaceDiffOptions = {
+  /** Task coding baseline (workspace.baseCommit). Required to surface already-committed implementation changes. */
+  baseCommit?: string | null;
+  /**
+   * When the working tree is clean, refuse an empty reviewable diff if the baseline cannot be used.
+   * Review and approval paths should set this so a missing baseline is a blocker, not a silent empty review.
+   */
+  requireBaselineWhenClean?: boolean;
+};
+
+export async function captureWorkspaceDiff(
+  workspacePath: string,
+  repositoryPath?: string,
+  options: CaptureWorkspaceDiffOptions = {},
+): Promise<WorkspaceDiff> {
   if (repositoryPath) ensureWorktreeLink(workspacePath, repositoryPath);
-  const nameStatus = await runGit(workspacePath, ["diff", "HEAD", "--name-status"]);
-  const numstat = await runGit(workspacePath, ["diff", "HEAD", "--numstat"]);
-  const patchResult = await runGit(workspacePath, ["diff", "HEAD", "--patch"]);
+  const working = await readWorkingTreeDiff(workspacePath);
+  const head = await runGit(workspacePath, ["rev-parse", "HEAD"]);
+  if (head.code !== 0 || !/^[0-9a-f]{40}$/.test(head.stdout.trim())) {
+    throw new Error(head.stderr.trim() || "The workspace HEAD commit could not be read.");
+  }
+  const headCommit = head.stdout.trim();
+  const base = typeof options.baseCommit === "string" ? options.baseCommit.trim() : "";
+
+  let committed: WorkspaceDiff = emptyDiff();
+  if (base) {
+    if (!/^[0-9a-f]{40}$/.test(base)) throw new Error(BASELINE_UNRESOLVED);
+    if (!(await commitExists(workspacePath, base))) throw new Error(BASELINE_UNRESOLVED);
+    if (base !== headCommit) {
+      committed = await readCommitRangeDiff(workspacePath, base, headCommit);
+    }
+  } else if (options.requireBaselineWhenClean && working.files.length === 0) {
+    throw new Error(BASELINE_UNRESOLVED);
+  }
+
+  const merged = mergeWorkspaceDiffs(committed, working);
+  return {
+    ...merged,
+    comparedToBase: base || null,
+    headCommit,
+  };
+}
+
+function emptyDiff(): WorkspaceDiff {
+  return { files: [], additions: 0, deletions: 0, patch: "", fullPatch: "", truncated: false };
+}
+
+async function readWorkingTreeDiff(workspacePath: string): Promise<WorkspaceDiff> {
+  const nameStatus = await runGit(workspacePath, ["diff", "--no-renames", "HEAD", "--name-status"]);
+  const numstat = await runGit(workspacePath, ["diff", "--no-renames", "HEAD", "--numstat"]);
+  const patchResult = await runGit(workspacePath, ["diff", "--no-renames", "HEAD", "--patch"]);
   const untracked = await runGit(workspacePath, ["ls-files", "--others", "--exclude-standard"]);
   if (nameStatus.code !== 0 || untracked.code !== 0) {
     throw new Error(nameStatus.stderr.trim() || untracked.stderr.trim() || "The workspace diff could not be read because the worktree is not a Git repository.");
   }
-  const counts = new Map<string, { additions: number; deletions: number }>();
-  for (const line of numstat.stdout.split("\n")) {
-    if (!line.trim()) continue;
-    const [added, removed, filePath] = line.split("\t");
-    counts.set(filePath ?? "", {
-      additions: Number(added) || 0,
-      deletions: Number(removed) || 0,
-    });
-  }
-  const files: DiffFile[] = [];
-  for (const line of nameStatus.stdout.split("\n")) {
-    if (!line.trim()) continue;
-    const [status, filePath] = line.split("\t");
-    const kind = status === "A" ? "added" : status === "D" ? "deleted" : "modified";
-    const count = counts.get(filePath ?? "") ?? { additions: 0, deletions: 0 };
-    if (isGeneratedReviewPath(filePath ?? "")) continue;
-    files.push({ path: filePath ?? "", status: kind, ...count });
-  }
+  const files = parseNameStatus(nameStatus.stdout, numstat.stdout);
   let fullPatch = patchResult.stdout;
   for (const filePath of untracked.stdout.split("\n").map((line) => line.trim()).filter(Boolean)) {
     if (files.some((file) => file.path === filePath) || isGeneratedReviewPath(filePath)) continue;
@@ -232,6 +280,56 @@ export async function captureWorkspaceDiff(workspacePath: string, repositoryPath
     files.push({ path: filePath, status: "added", additions, deletions: 0 });
     fullPatch += `\ndiff --git a/${filePath} b/${filePath}\n--- /dev/null\n+++ b/${filePath}\n${text}`;
   }
+  return finaliseDiff(files, fullPatch);
+}
+
+async function readCommitRangeDiff(workspacePath: string, baseCommit: string, headCommit: string): Promise<WorkspaceDiff> {
+  const nameStatus = await runGit(workspacePath, ["diff", "--no-renames", "--name-status", baseCommit, headCommit]);
+  const numstat = await runGit(workspacePath, ["diff", "--no-renames", "--numstat", baseCommit, headCommit]);
+  const patchResult = await runGit(workspacePath, ["diff", "--no-renames", "--patch", baseCommit, headCommit]);
+  if (nameStatus.code !== 0 || numstat.code !== 0 || patchResult.code !== 0) {
+    throw new Error(
+      nameStatus.stderr.trim()
+        || numstat.stderr.trim()
+        || patchResult.stderr.trim()
+        || "The committed implementation diff could not be read.",
+    );
+  }
+  return finaliseDiff(parseNameStatus(nameStatus.stdout, numstat.stdout), patchResult.stdout);
+}
+
+function parseNameStatus(nameStatus: string, numstat: string): DiffFile[] {
+  const counts = new Map<string, { additions: number; deletions: number }>();
+  for (const line of numstat.split("\n")) {
+    if (!line.trim()) continue;
+    const [added, removed, filePath] = line.split("\t");
+    counts.set(filePath ?? "", {
+      additions: Number(added) || 0,
+      deletions: Number(removed) || 0,
+    });
+  }
+  const files: DiffFile[] = [];
+  for (const line of nameStatus.split("\n")) {
+    if (!line.trim()) continue;
+    const [status, filePath] = line.split("\t");
+    const kind = status === "A" ? "added" : status === "D" ? "deleted" : "modified";
+    const count = counts.get(filePath ?? "") ?? { additions: 0, deletions: 0 };
+    if (isGeneratedReviewPath(filePath ?? "") || !filePath) continue;
+    files.push({ path: filePath, status: kind, ...count });
+  }
+  return files;
+}
+
+function mergeWorkspaceDiffs(committed: WorkspaceDiff, working: WorkspaceDiff): WorkspaceDiff {
+  const byPath = new Map<string, DiffFile>();
+  for (const file of committed.files) byPath.set(file.path, file);
+  for (const file of working.files) byPath.set(file.path, file);
+  const files = [...byPath.values()].sort((left, right) => left.path.localeCompare(right.path));
+  const fullPatch = [committed.fullPatch, working.fullPatch].filter(Boolean).join("\n");
+  return finaliseDiff(files, fullPatch);
+}
+
+function finaliseDiff(files: DiffFile[], fullPatch: string): WorkspaceDiff {
   const safe = sanitizeStoredPatch(fullPatch);
   const truncated = safe.patch.length > PATCH_LIMIT;
   const patch = truncated ? safe.patch.slice(0, PATCH_LIMIT) : safe.patch;

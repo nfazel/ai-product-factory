@@ -6,6 +6,7 @@ import path from "node:path";
 import { isProviderFailureCategory } from "@/modules/ai/failures";
 import { assessBootstrapCompleteness, designFactsFromSources, NEXT_ENTRY_CANDIDATES } from "@/modules/coding/bootstrap";
 import { repairResultNeedsRecording } from "@/modules/coding/diff";
+import { validateExistingOffer } from "@/modules/coding/validate-existing";
 import { assessImplementationCompleteness, classifyCodingFailure, initialSchemaContext, readPlannedImplementationFiles, repairsForCurrentImplementation } from "@/modules/coding/implementation";
 import { asStrings } from "@/modules/coding/strings";
 import { compileExecutionContract, parsePlannedCommands } from "@/modules/coding/commands";
@@ -338,6 +339,14 @@ export async function loadSnapshots(productId?: string): Promise<GuidanceSnapsho
             entities: approvedArchitecture?.dataEntities,
           }).named,
         ),
+        validateExistingAvailable: Boolean(workspace && validateExistingOffer({
+          workspaceStatus: workspace.status,
+          planStatus: workspace.plan?.status ?? null,
+          workspacePathExists: fs.existsSync(/*turbopackIgnore: true*/ workspace.workspacePath),
+          stale: Boolean(workspace.executionContractStale || workspace.contract?.stale),
+          planIncomplete,
+          busy: workspace.status === "ACTIVE" || workspace.status === "CHECKING",
+        })),
         planIncomplete,
         implementationIncomplete: classifyCodingFailure({
           planReady: !planIncomplete,

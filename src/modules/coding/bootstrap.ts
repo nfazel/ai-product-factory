@@ -273,6 +273,47 @@ export function creationStepFor(file: string, mode: "create" | "update" = "creat
   return `Create ${target}.`;
 }
 
+/**
+ * Work-item text that authorises an existing or planned file change for plan-scope revisions.
+ * Keeps file-to-work-item traceability without inventing unrelated implementation work.
+ */
+export function authorisationStepFor(file: string, verb: "created" | "modified" | "deleted") {
+  const target = normalise(file);
+  if (verb === "deleted") return `Delete ${target}.`;
+  const toolingIgnore = target === ".gitignore" || target.endsWith("/.gitignore");
+  if (toolingIgnore) {
+    return verb === "modified"
+      ? `Modify ${target} to exclude generated files from version control.`
+      : `Create ${target} to exclude generated files from version control.`;
+  }
+  if (verb === "modified") return creationStepFor(target, "update");
+  return creationStepFor(target, "create");
+}
+
+/** Add missing work items for authorised files. Preserves existing steps; does not invent unrelated work. */
+export function repairPlanWorkItemCoverage(input: {
+  files: string[];
+  steps: string[];
+  fileStatus?: Record<string, string>;
+}) {
+  const files = input.files.map(normalise);
+  const steps = [...input.steps];
+  const added: string[] = [];
+  for (const file of files) {
+    if (workItemProduces(steps, file)) continue;
+    const status = (input.fileStatus?.[file] ?? "modified").toLowerCase();
+    const verb = status === "deleted" || status === "removed"
+      ? "deleted" as const
+      : status === "modified" || status === "changed"
+        ? "modified" as const
+        : "created" as const;
+    const step = authorisationStepFor(file, verb);
+    steps.push(step);
+    added.push(step);
+  }
+  return { files, steps, added };
+}
+
 /** Install step text must not name package.json — fileMentions would treat it as out-of-scope. */
 export const INSTALL_DEPENDENCIES_STEP = "Install dependencies with npm install.";
 
