@@ -3,6 +3,7 @@ import "server-only";
 import { getAIProvider, isAIConfigured, prepareAI } from "@/modules/ai/provider";
 import { recordActivity } from "@/modules/activity/service";
 import { classifyWrite } from "@/modules/coding/policy";
+import { verificationApprovalIsCurrent } from "@/modules/verification/integrity";
 import { asStrings } from "@/modules/coding/strings";
 import { getCurrentActor } from "@/modules/identity/actor";
 import { db } from "@/lib/db";
@@ -915,7 +916,12 @@ const taskInclude = {
   },
   verificationSessions: {
     orderBy: { createdAt: "desc" as const },
-    include: { approvals: true, executions: true, defectLinks: { include: { workItem: true } } },
+    include: {
+      approvals: { include: { approval: true } },
+      executions: true,
+      coverages: true,
+      defectLinks: { include: { workItem: true } },
+    },
   },
 };
 
@@ -953,7 +959,7 @@ async function presentTask(
       !session.demo &&
       !session.stale &&
       (session.overallVerdict === "PASS" || session.overallVerdict === "PASS_WITH_CONCERNS") &&
-      session.approvals.some((item) => !item.stale),
+    session.approvals.some((item) => verificationApprovalIsCurrent(item, session)),
   );
   const readiness = !pull
     ? { label: "NOT READY" as const, ready: false, reasons: ["No pull request has been created."], approvals: undefined }
@@ -1053,7 +1059,7 @@ async function pullRequestTrace(productId: string, taskId: string, commitSha: st
 }
 
 async function currentVerification(productId: string, taskId: string, commitSha: string) {
-  return db.verificationSession.findFirst({
+  const session = await db.verificationSession.findFirst({
     where: {
       productId,
       implementationTaskId: taskId,
@@ -1061,11 +1067,15 @@ async function currentVerification(productId: string, taskId: string, commitSha:
       demo: false,
       stale: false,
       overallVerdict: { in: ["PASS", "PASS_WITH_CONCERNS"] },
-      approvals: { some: { stale: false } },
     },
-    include: { executions: true },
+    include: {
+      approvals: { include: { approval: true } },
+      executions: true,
+      coverages: true,
+    },
     orderBy: { createdAt: "desc" },
   });
+  return session?.approvals.some((item) => verificationApprovalIsCurrent(item, session)) ? session : null;
 }
 
 async function governanceIsCurrent(productId: string) {

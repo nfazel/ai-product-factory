@@ -8,6 +8,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { db } from "@/lib/db";
 import { setAIProviderForTests, type AIProvider } from "@/modules/ai/provider";
 import { noteVerificationCommitChanged } from "@/modules/verification/impact";
+import { verificationEvidenceFingerprint } from "@/modules/verification/integrity";
 import { createFakeSourceControl } from "@/modules/source-control/fake";
 import { setInstallationDirectoryForTests } from "@/modules/source-control/github-account";
 import { setSourceControlProviderForTests } from "@/modules/source-control/registry";
@@ -129,10 +130,20 @@ async function deliveryFixture() {
   const session = await db.verificationSession.create({
     data: { productId: product.id, implementationTaskId: task.id, repositoryWorkspaceId: workspace.id, commitSha: sha, status: "PASSED", overallVerdict: "PASS" },
   });
-  await db.verificationExecution.create({ data: { sessionId: session.id, command: "npm test", kind: "EXISTING_REGRESSION", status: "PASSED", exitCode: 0 } });
+  const regressionExecution = await db.verificationExecution.create({ data: { sessionId: session.id, command: "npm test", kind: "EXISTING_REGRESSION", status: "PASSED", exitCode: 0 } });
   const verificationApproval = await db.approval.create({ data: { productId: product.id, approvalType: "VERIFICATION", status: "APPROVED", approvedBy: "Local user" } });
   await db.verificationApproval.create({
-    data: { productId: product.id, approvalId: verificationApproval.id, sessionId: session.id, implementationTaskId: task.id, commitSha: sha, evidenceFingerprint: "fingerprint" },
+    data: {
+      productId: product.id,
+      approvalId: verificationApproval.id,
+      sessionId: session.id,
+      implementationTaskId: task.id,
+      commitSha: sha,
+      evidenceFingerprint: verificationEvidenceFingerprint({
+        executions: [{ id: regressionExecution.id, exitCode: regressionExecution.exitCode, status: regressionExecution.status }],
+        coverages: [],
+      }),
+    },
   });
   await db.integratedVerificationSession.create({
     data: { productId: product.id, productSliceId: slice.id, status: "BLOCKED", overallVerdict: "INCONCLUSIVE", planSummary: "No integrated execution environment is available.", evidenceGaps: ["End-to-end behaviour was not executed."] },
@@ -306,7 +317,7 @@ describe("github delivery", () => {
     });
     const approval = await db.approval.create({ data: { productId: setup.product.id, approvalType: "VERIFICATION", status: "APPROVED", approvedBy: "Local user" } });
     await db.verificationApproval.create({
-      data: { productId: setup.product.id, approvalId: approval.id, sessionId: restored.id, implementationTaskId: setup.task.id, commitSha: setup.sha, evidenceFingerprint: "again" },
+      data: { productId: setup.product.id, approvalId: approval.id, sessionId: restored.id, implementationTaskId: setup.task.id, commitSha: setup.sha, evidenceFingerprint: verificationEvidenceFingerprint({ executions: [], coverages: [] }) },
     });
     expect((await getSourceControlView(setup.product.id))?.tasks[0]?.readiness.label).toBe("READY FOR HUMAN MERGE");
     const pull = setup.fake.state.pulls[0];
@@ -343,7 +354,7 @@ describe("github delivery", () => {
     });
     const approval = await db.approval.create({ data: { productId: setup.product.id, approvalType: "VERIFICATION", status: "APPROVED", approvedBy: "Local user" } });
     await db.verificationApproval.create({
-      data: { productId: setup.product.id, approvalId: approval.id, sessionId: session.id, implementationTaskId: setup.task.id, commitSha: next, evidenceFingerprint: "next" },
+      data: { productId: setup.product.id, approvalId: approval.id, sessionId: session.id, implementationTaskId: setup.task.id, commitSha: next, evidenceFingerprint: verificationEvidenceFingerprint({ executions: [], coverages: [] }) },
     });
     const updated = await updatePublishedBranch(setup.product.id, setup.task.id);
     expect(updated.remoteCommitSha).toBe(next);

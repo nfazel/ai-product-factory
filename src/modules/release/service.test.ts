@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { db } from "@/lib/db";
 import { setAIProviderForTests, type AIProvider } from "@/modules/ai/provider";
+import { verificationEvidenceFingerprint } from "@/modules/verification/integrity";
 import {
   acceptReleaseRisk,
   approveDeploymentPlan,
@@ -104,12 +105,22 @@ async function fixture() {
   const session = await db.verificationSession.create({
     data: { productId: product.id, implementationTaskId: task.id, commitSha: sha, status: "PASSED", overallVerdict: "PASS" },
   });
-  await db.verificationCoverage.create({
+  const coverage = await db.verificationCoverage.create({
     data: { sessionId: session.id, acceptanceCriterionId: criterion.id, status: "VERIFIED", rationale: "The reference was returned." },
   });
   const verificationApproval = await db.approval.create({ data: { productId: product.id, approvalType: "VERIFICATION", status: "APPROVED", approvedBy: "Local user" } });
   await db.verificationApproval.create({
-    data: { productId: product.id, approvalId: verificationApproval.id, sessionId: session.id, implementationTaskId: task.id, commitSha: sha, evidenceFingerprint: "fingerprint" },
+    data: {
+      productId: product.id,
+      approvalId: verificationApproval.id,
+      sessionId: session.id,
+      implementationTaskId: task.id,
+      commitSha: sha,
+      evidenceFingerprint: verificationEvidenceFingerprint({
+        executions: [],
+        coverages: [{ acceptanceCriterionId: coverage.acceptanceCriterionId, status: coverage.status }],
+      }),
+    },
   });
   await db.integratedVerificationSession.create({
     data: { productId: product.id, productSliceId: slice.id, status: "BLOCKED", overallVerdict: "INCONCLUSIVE", evidenceGaps: ["End-to-end behaviour was not executed."] },

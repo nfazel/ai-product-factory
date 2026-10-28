@@ -18,13 +18,16 @@ import {
   createIntegratedVerification,
   createVerificationDefect,
   getProveView,
+  getVerificationSession,
   recordManualResult,
+  rerunFailedTests,
   retryVerification,
   startNewVerificationAttempt,
   startVerification,
 } from "@/modules/verification/service";
 import { verificationEntryBlockers } from "@/modules/verification/gates";
 import { recomputeSession } from "@/modules/verification/assess";
+import { verificationEvidenceFingerprint } from "@/modules/verification/integrity";
 
 const products: string[] = [];
 const repos: string[] = [];
@@ -756,6 +759,173 @@ describe("verification execution", () => {
     });
     await expect(startVerification(setup.product.id, setup.task.id)).rejects.toThrow(/approved commit SHA/);
     expect(await db.verificationEvidence.count({ where: { sessionId: session!.id } })).toBe(before);
+    expect((await getVerificationSession(setup.product.id, session!.id))?.approvals[0]?.stale).toBe(true);
+  });
+
+  it("keeps stale sessions read-only for manual and not-applicable evidence", async () => {
+    const setup = await completedTask();
+    setAIProviderForTests(provider({ criterionId: setup.criterion.id }));
+    const session = await startVerification(setup.product.id, setup.task.id);
+    const manual = await db.verificationTestCase.create({
+      data: {
+        sessionId: session!.id,
+        acceptanceCriterionId: setup.criterion.id,
+        title: "Manual claim check",
+        purpose: "A manual confirmation for the claim reference.",
+        expectedResult: "A claim reference is shown.",
+        automated: false,
+        status: "READY",
+      },
+    });
+    await noteVerificationCommitChanged(setup.task.id, "b".repeat(40));
+    const before = await getVerificationSession(setup.product.id, session!.id);
+    const evidenceCount = before!.evidence.length;
+    const executionCount = before!.executions.length;
+    const coverageBefore = before!.coverages[0];
+
+    await expect(recordManualResult({
+      productId: setup.product.id,
+      sessionId: session!.id,
+      testCaseId: manual.id,
+      result: "PASS",
+      comment: "Observed the reference.",
+    })).rejects.toThrow(/RE-VERIFICATION REQUIRED/);
+    await expect(confirmNotApplicable(setup.product.id, session!.id, setup.criterion.id, "Local user"))
+      .rejects.toThrow(/RE-VERIFICATION REQUIRED/);
+
+    const after = await getVerificationSession(setup.product.id, session!.id);
+    expect(after?.coverages[0]).toMatchObject({ status: coverageBefore?.status, humanConfirmed: coverageBefore?.humanConfirmed });
+    expect(after?.evidence).toHaveLength(evidenceCount);
+    expect(after?.executions).toHaveLength(executionCount);
+    expect(after?.overallVerdict).toBe(before?.overallVerdict);
+  });
+
+  it("rejects evidence-producing tool operations on a stale session but keeps reads available", async () => {
+    const setup = await completedTask();
+    setAIProviderForTests(provider({ criterionId: setup.criterion.id }));
+    const session = await startVerification(setup.product.id, setup.task.id);
+    await noteVerificationCommitChanged(setup.task.id, "b".repeat(40));
+    const testPath = "verification/manual/stale.test.mjs";
+    const write = await applyVerificationTool(setup.product.id, session!.id, {
+      action: "WRITE_FILE",
+      path: testPath,
+      content: "// should not be written\n",
+    });
+    expect(write.allowed).toBe(false);
+    expect(write.reason).toMatch(/RE-VERIFICATION REQUIRED/);
+    const command = await applyVerificationTool(setup.product.id, session!.id, {
+      action: "RUN_COMMAND",
+      command: "npm test",
+    });
+    expect(command.allowed).toBe(false);
+    expect(command.reason).toMatch(/RE-VERIFICATION REQUIRED/);
+    const read = await applyVerificationTool(setup.product.id, session!.id, { action: "READ_FILE", path: "package.json" });
+    expect(read.allowed).toBe(true);
+    expect(fs.existsSync(path.join(session!.workspace!.workspacePath, testPath))).toBe(false);
+    expect(await db.activity.count({ where: { productId: setup.product.id, type: "VERIFICATION_POLICY_DENIED" } })).toBe(2);
+  });
+
+  it("rejects manual results, N/A confirmations, and reruns after human approval", async () => {
+    const setup = await completedTask();
+    setAIProviderForTests(provider({ criterionId: setup.criterion.id }));
+    const session = await startVerification(setup.product.id, setup.task.id);
+    const manual = await db.verificationTestCase.create({
+      data: {
+        sessionId: session!.id,
+        acceptanceCriterionId: setup.criterion.id,
+        title: "Manual claim check",
+        purpose: "A manual confirmation for the claim reference.",
+        expectedResult: "A claim reference is shown.",
+        automated: false,
+        status: "READY",
+      },
+    });
+    await approveVerification(setup.product.id, session!.id, { actorName: "Local user" });
+    const before = await getVerificationSession(setup.product.id, session!.id);
+    const evidenceCount = before!.evidence.length;
+    const executionCount = before!.executions.length;
+
+    await expect(recordManualResult({
+      productId: setup.product.id,
+      sessionId: session!.id,
+      testCaseId: manual.id,
+      result: "PASS",
+      comment: "Observed the reference.",
+    })).rejects.toThrow(/approved/);
+    await expect(confirmNotApplicable(setup.product.id, session!.id, setup.criterion.id, "Local user"))
+      .rejects.toThrow(/approved/);
+    await expect(rerunFailedTests(setup.product.id, session!.id)).rejects.toThrow(/approved/);
+    const command = await applyVerificationTool(setup.product.id, session!.id, { action: "RUN_COMMAND", command: "npm test" });
+    expect(command.allowed).toBe(false);
+    expect(command.reason).toMatch(/approved/);
+
+    const after = await getVerificationSession(setup.product.id, session!.id);
+    expect(after?.evidence).toHaveLength(evidenceCount);
+    expect(after?.executions).toHaveLength(executionCount);
+    expect(after?.coverages[0]?.status).toBe(before?.coverages[0]?.status);
+    expect(after?.overallVerdict).toBe(before?.overallVerdict);
+    expect(after?.approvals[0]?.stale).toBe(false);
+  });
+
+  it("does not treat an approval as current when its evidence fingerprint no longer matches", async () => {
+    const setup = await completedTask();
+    setAIProviderForTests(provider({ criterionId: setup.criterion.id }));
+    const session = await startVerification(setup.product.id, setup.task.id);
+    await approveVerification(setup.product.id, session!.id, { actorName: "Local user" });
+    await db.verificationCoverage.updateMany({
+      where: { sessionId: session!.id, acceptanceCriterionId: setup.criterion.id },
+      data: { status: "NOT_TESTED", humanConfirmed: false },
+    });
+
+    const reviewed = await getVerificationSession(setup.product.id, session!.id);
+    expect(reviewed?.approvals[0]?.stale).toBe(true);
+    expect(reviewed?.overallVerdict).toBe("PASS");
+    const view = await getProveView(setup.product.id);
+    expect(view?.sessions.find((item) => item.id === session!.id)?.approvals[0]?.stale).toBe(true);
+    expect(view?.readiness.ready).toBe(false);
+    expect(view?.readiness.reasons.join(" ")).toContain("does not have an approved verification");
+  });
+
+  it("records defects on stale or approved sessions without rewriting their verdict", async () => {
+    const approvedSetup = await completedTask();
+    setAIProviderForTests(provider({ criterionId: approvedSetup.criterion.id }));
+    const approvedSession = await startVerification(approvedSetup.product.id, approvedSetup.task.id);
+    await approveVerification(approvedSetup.product.id, approvedSession!.id, { actorName: "Local user" });
+    const approvedVerdict = approvedSession?.overallVerdict;
+    const approvedDefect = await createVerificationDefect({
+      productId: approvedSetup.product.id,
+      sessionId: approvedSession!.id,
+      title: "Approved snapshot defect",
+      description: "Recorded after approval.",
+      severity: "CRITICAL",
+      acceptanceCriterionId: approvedSetup.criterion.id,
+      condition: "A claim is submitted.",
+      expected: "A reference is returned.",
+      actual: "The reference is missing.",
+    });
+    expect(approvedDefect?.overallVerdict).toBe(approvedVerdict);
+    expect(approvedDefect?.approvals[0]?.stale).toBe(true);
+    expect(approvedDefect?.defectLinks[0]?.commitSha).toBe(approvedSetup.sha);
+    expect(await db.activity.count({ where: { productId: approvedSetup.product.id, type: "VERIFICATION_DEFECT_CREATED" } })).toBe(1);
+
+    const staleSetup = await completedTask();
+    setAIProviderForTests(provider({ criterionId: staleSetup.criterion.id }));
+    const staleSession = await startVerification(staleSetup.product.id, staleSetup.task.id);
+    await noteVerificationCommitChanged(staleSetup.task.id, "c".repeat(40));
+    const staleVerdict = staleSession?.overallVerdict;
+    const staleDefect = await createVerificationDefect({
+      productId: staleSetup.product.id,
+      sessionId: staleSession!.id,
+      title: "Stale snapshot defect",
+      description: "Recorded against the prior commit.",
+      severity: "HIGH",
+      acceptanceCriterionId: staleSetup.criterion.id,
+      condition: "A claim is submitted.",
+      expected: "A reference is returned.",
+      actual: "The reference is missing.",
+    });
+    expect(staleDefect?.overallVerdict).toBe(staleVerdict);
+    expect(staleDefect?.defectLinks[0]?.commitSha).toBe(staleSetup.sha);
   });
 
   it("does not rewrite a historical verification session", async () => {
@@ -1249,7 +1419,7 @@ describe("new attempt governance", () => {
         sessionId: approvedSession.id,
         implementationTaskId: setup.task.id,
         commitSha: setup.sha,
-        evidenceFingerprint: "fingerprint",
+        evidenceFingerprint: verificationEvidenceFingerprint({ executions: [], coverages: [] }),
       },
     });
     await expect(startNewVerificationAttempt(setup.product.id, setup.task.id)).rejects.toThrow(/already approved/);

@@ -6,7 +6,6 @@ import { assertAIReady } from "@/modules/ai/surface";
 import { executeAgent, AgentNotConfiguredError } from "@/modules/agent/service";
 import { recordActivity } from "@/modules/activity/service";
 import { requestApproval, resolveApproval } from "@/modules/approval/service";
-import { hashText } from "@/modules/coding/policy";
 import { resolveProductRepository } from "@/modules/source-control/product-repository";
 import { upsertRepository } from "@/modules/coding/repository";
 import { assertWorktreeIsolated, branchNameFor, createWorktree, workspaceDirectory } from "@/modules/coding/git";
@@ -33,6 +32,12 @@ import { buildVerificationContract } from "@/modules/verification/contract";
 import { verificationEntryBlockers } from "@/modules/verification/gates";
 import { attemptPolicy, attemptStateFor, type AttemptKind } from "@/modules/verification/attempt-policy";
 import { executeVerificationTool } from "@/modules/verification/tools";
+import {
+  assertVerificationEvidenceMutable,
+  hasHumanApprovedVerification,
+  verificationEvidenceFingerprint,
+  withCurrentVerificationApprovals,
+} from "@/modules/verification/integrity";
 import { DomainError } from "@/modules/shared/errors";
 
 const AGENT_NAMES = new Set([
@@ -130,9 +135,13 @@ async function assertAttemptAllowed(productId: string, taskId: string, kind: Att
   const sessions = await db.verificationSession.findMany({
     where: { productId, implementationTaskId: taskId },
     orderBy: { createdAt: "desc" },
-    include: { approvals: { select: { stale: true } } },
+    include: {
+      approvals: { include: { approval: true } },
+      executions: { select: { id: true, exitCode: true, status: true } },
+      coverages: { select: { acceptanceCriterionId: true, status: true } },
+    },
   });
-  const state = attemptStateFor(sessions, { interrupted: false });
+  const state = attemptStateFor(sessions.map(withCurrentVerificationApprovals), { interrupted: false });
   const decision = attemptPolicy({
     kind,
     progress: state.progress,
@@ -375,11 +384,11 @@ export async function approveVerification(productId: string, sessionId: string, 
   const actor = options?.actorName ?? getCurrentActor().name;
   assertHuman(actor);
   const session = await requireSession(productId, sessionId);
-  if (session.stale) throw new DomainError(session.staleReason || "RE-VERIFICATION REQUIRED.");
+  assertVerificationEvidenceMutable(session);
   if (session.overallVerdict !== "PASS" && session.overallVerdict !== "PASS_WITH_CONCERNS") {
     throw new DomainError("Only a passing verification can be approved.");
   }
-  const fingerprint = evidenceFingerprint(session);
+  const fingerprint = verificationEvidenceFingerprint(session);
   const approval = await requestApproval({
     productId,
     workItemId: session.task.workItemId ?? undefined,
@@ -450,7 +459,7 @@ export async function recordManualResult(input: {
   const tester = input.tester ?? getCurrentActor().name;
   assertHuman(tester);
   const session = await requireSession(input.productId, input.sessionId);
-  if (session.stale) throw new DomainError(session.staleReason || "RE-VERIFICATION REQUIRED.");
+  assertVerificationEvidenceMutable(session);
   const testCase = session.testCases.find((item) => item.id === input.testCaseId);
   if (!testCase) throw new DomainError("The test case was not found.", "NOT_FOUND");
   if (testCase.automated) throw new DomainError("Record manual results on manual test cases.");
@@ -493,6 +502,7 @@ export async function confirmNotApplicable(productId: string, sessionId: string,
   const actor = actorName ?? getCurrentActor().name;
   assertHuman(actor);
   const session = await requireSession(productId, sessionId);
+  assertVerificationEvidenceMutable(session);
   const coverage = session.coverages.find((item) => item.acceptanceCriterionId === criterionId);
   if (!coverage) throw new DomainError("That acceptance criterion is not in this verification.");
   await db.verificationCoverage.update({
@@ -551,13 +561,27 @@ export async function createVerificationDefect(input: {
     type: "VERIFICATION_DEFECT_CREATED",
     description: `Recorded defect ${workItem.title}. The Coding Agent was not asked to fix it.`,
   });
-  await recomputeSession(session.id);
+  const approved = hasHumanApprovedVerification(session);
+  if (approved) {
+    const staleReason = "A defect was recorded after verification approval.";
+    await db.verificationApproval.updateMany({
+      where: { sessionId: session.id, stale: false },
+      data: { stale: true, staleReason, staleFlaggedAt: new Date() },
+    });
+    await recordActivity({
+      productId: input.productId,
+      type: "VERIFICATION_STALE",
+      description: `Verification approval for ${session.id} was marked stale because a defect was recorded. The historical verdict was not changed.`,
+    });
+  }
+  if (!session.stale && !approved) await recomputeSession(session.id);
   return getVerificationSession(input.productId, input.sessionId);
 }
 
 export async function rerunFailedTests(productId: string, sessionId: string) {
   const session = await requireSession(productId, sessionId);
-  if (!session.workspace || session.stale) throw new DomainError(session.staleReason || "RE-VERIFICATION REQUIRED.");
+  assertVerificationEvidenceMutable(session);
+  if (!session.workspace) throw new DomainError("Verification workspace not found.", "NOT_FOUND");
   const failed = session.executions.filter((item) => item.kind === "NEW_VERIFICATION" && item.status === "FAILED" && item.command.startsWith("node --test"));
   for (const execution of failed) {
     const ran = await executeVerificationTool(
@@ -655,12 +679,12 @@ export async function getProveView(productId: string) {
       escalations: true,
       nfrResults: true,
       defectLinks: { include: { workItem: true } },
-      approvals: { orderBy: { createdAt: "desc" } },
+      approvals: { orderBy: { createdAt: "desc" }, include: { approval: true } },
     },
   });
   // "Interrupted" is computed here, on the server, from the in-process registry. It is never taken from the client.
   const sessions = sessionRows.map((session) => ({
-    ...session,
+    ...withCurrentVerificationApprovals(session),
     interrupted: (OPEN_ATTEMPT_STATUSES as readonly string[]).includes(session.status) && !isAttemptActive(session.id),
   }));
   const integrated = await db.integratedVerificationSession.findMany({
@@ -685,7 +709,7 @@ export async function getProveView(productId: string) {
 }
 
 export async function getVerificationSession(productId: string, sessionId: string) {
-  return db.verificationSession.findFirst({
+  const session = await db.verificationSession.findFirst({
     where: { id: sessionId, productId },
     include: {
       contract: true,
@@ -698,10 +722,11 @@ export async function getVerificationSession(productId: string, sessionId: strin
       escalations: true,
       nfrResults: true,
       defectLinks: { include: { workItem: true } },
-      approvals: true,
+      approvals: { include: { approval: true } },
       task: true,
     },
   });
+  return session ? withCurrentVerificationApprovals(session) : null;
 }
 
 export async function applyVerificationTool(
@@ -723,14 +748,6 @@ async function requireSession(productId: string, sessionId: string) {
   const session = await getVerificationSession(productId, sessionId);
   if (!session) throw new DomainError("Verification session not found.", "NOT_FOUND");
   return session;
-}
-
-function evidenceFingerprint(session: NonNullable<Awaited<ReturnType<typeof getVerificationSession>>>) {
-  const body = [
-    ...session.executions.map((item) => `${item.id}:${item.exitCode}:${item.status}`),
-    ...session.coverages.map((item) => `${item.acceptanceCriterionId}:${item.status}`),
-  ].sort();
-  return hashText(body.join("|"));
 }
 
 function featureConcernFor(task: {

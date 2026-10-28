@@ -5,6 +5,7 @@ import type { Prisma } from "@/generated/prisma/client";
 import { db } from "@/lib/db";
 import { getAIProvider, isAIConfigured, prepareAI } from "@/modules/ai/provider";
 import { recordActivity } from "@/modules/activity/service";
+import { verificationApprovalIsCurrent } from "@/modules/verification/integrity";
 import { getCurrentActor } from "@/modules/identity/actor";
 import { buildReleasePrompt, RELEASE_REVIEW_PROMPT, releaseNotesSchema, releaseReviewSchema } from "@/modules/release/prompt";
 import {
@@ -94,7 +95,10 @@ export async function loadReleaseFacts(productId: string): Promise<ReleaseFacts>
             orderBy: { sequence: "asc" },
             include: {
               workItem: { include: { acceptanceCriteria: true, parent: { include: { parent: true } } } },
-              verificationSessions: { orderBy: { createdAt: "desc" }, include: { approvals: { include: { approval: true } }, coverages: true } },
+              verificationSessions: {
+                orderBy: { createdAt: "desc" },
+                include: { approvals: { include: { approval: true } }, coverages: true, executions: true },
+              },
               publishedChanges: { orderBy: { createdAt: "desc" }, include: { pullRequest: { include: { checks: true, reviews: true } } } },
             },
           },
@@ -117,7 +121,7 @@ export async function loadReleaseFacts(productId: string): Promise<ReleaseFacts>
     : null;
   const tasks: ReleaseTaskFact[] = (plan?.tasks ?? []).map((task) => {
     const session = task.verificationSessions[0];
-    const verificationApproval = session?.approvals.find((item) => !item.stale && item.approval.status === "APPROVED");
+    const verificationApproval = session?.approvals.find((item) => session && verificationApprovalIsCurrent(item, session));
     const names = chain(task.workItem);
     const published = task.publishedChanges.find((change) => change.pullRequest && !change.pullRequest.demo) ?? task.publishedChanges[0];
     const pull = published?.pullRequest;

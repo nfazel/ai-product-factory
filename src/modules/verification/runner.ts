@@ -54,6 +54,7 @@ import type { HttpObservation } from "@/modules/verification/http/guard";
 import { assertSnapshotUnchanged, changedProductFiles } from "@/modules/verification/snapshot";
 import { assessTestStructure } from "@/modules/verification/test-binding";
 import { assessHttpEvidence } from "@/modules/verification/evidence-adequacy";
+import { assertVerificationEvidenceMutable } from "@/modules/verification/integrity";
 import type { TestRunOutcome } from "@/modules/verification/test-outcome";
 import { DomainError } from "@/modules/shared/errors";
 import { randomUUID } from "node:crypto";
@@ -70,9 +71,14 @@ export const verificationRunner: AgentRunner = {
     const sessionId = text(request.input.sessionId);
     const session = await db.verificationSession.findFirst({
       where: { id: sessionId, productId: request.productId },
+      include: {
+        approvals: { include: { approval: true } },
+        executions: { select: { id: true, exitCode: true, status: true } },
+        coverages: { select: { acceptanceCriterionId: true, status: true } },
+      },
     });
     if (!session) throw new DomainError("Verification requires a session.");
-    if (session.stale) throw new DomainError(session.staleReason || "RE-VERIFICATION REQUIRED.");
+    assertVerificationEvidenceMutable(session);
     const blockers = await verificationEntryBlockers(request.productId, session.implementationTaskId);
     if (blockers.length > 0) throw new DomainError(blockers.join(" "));
   },

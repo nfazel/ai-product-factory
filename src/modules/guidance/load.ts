@@ -23,6 +23,7 @@ import { entryBlockers, learnBlockers, type ReleaseFacts, type ReleaseTaskFact }
 import type { GuidanceSnapshot, TaskSnapshot } from "@/modules/guidance/types";
 import { clarificationReviewFromRecords } from "@/modules/clarification/service";
 import { verificationProgress } from "@/modules/verification/disposition";
+import { verificationApprovalIsCurrent } from "@/modules/verification/integrity";
 import { approvedPublication } from "@/modules/source-control/publication-state";
 import { classifyMergeability, pullRequestNextAction, type PullRequestGate } from "@/modules/source-control/pull-request-gate";
 import { countsAsHumanReviewer, effectiveReviews } from "@/modules/source-control/readiness";
@@ -190,8 +191,20 @@ export async function loadSnapshots(productId?: string): Promise<GuidanceSnapsho
         },
       }),
       db.codeChangeApproval.findMany({ where: { productId: { in: ids } }, orderBy: { createdAt: "desc" } }),
-      db.verificationSession.findMany({ where: { productId: { in: ids } }, orderBy: { createdAt: "desc" } }),
-      db.verificationApproval.findMany({ where: { productId: { in: ids } }, orderBy: { createdAt: "desc" } }),
+      db.verificationSession.findMany({
+        where: { productId: { in: ids } },
+        orderBy: { createdAt: "desc" },
+        include: {
+          approvals: { include: { approval: true } },
+          executions: { select: { id: true, exitCode: true, status: true } },
+          coverages: { select: { acceptanceCriterionId: true, status: true } },
+        },
+      }),
+      db.verificationApproval.findMany({
+        where: { productId: { in: ids } },
+        orderBy: { createdAt: "desc" },
+        include: { approval: true },
+      }),
       db.publishedChange.findMany({ where: { productId: { in: ids } }, orderBy: { createdAt: "desc" } }),
       db.pullRequestRecord.findMany({ where: { productId: { in: ids } }, include: { publishedChange: true, reviews: true } }),
       db.releaseCandidate.findMany({
@@ -277,6 +290,9 @@ export async function loadSnapshots(productId?: string): Promise<GuidanceSnapsho
       const approval = codeApprovals.find((item) => item.implementationTaskId === task.id);
       const session = verifications.find((item) => item.implementationTaskId === task.id && !item.demo) ?? verifications.find((item) => item.implementationTaskId === task.id);
       const verificationApproval = verificationApprovals.find((item) => item.implementationTaskId === task.id && item.sessionId === session?.id);
+      const currentVerificationApproval = Boolean(
+        session && verificationApproval && verificationApprovalIsCurrent(verificationApproval, session),
+      );
       const currentPublication = approvedPublication(
         published.filter((item) => item.implementationTaskId === task.id),
         workspace?.branchName ?? "",
@@ -296,8 +312,8 @@ export async function loadSnapshots(productId?: string): Promise<GuidanceSnapsho
               stale: session.stale,
             }
           : null,
-        approvalStale: Boolean(verificationApproval?.stale),
-        approved: Boolean(session && verificationApproval && !verificationApproval.stale),
+        approvalStale: Boolean(verificationApproval && !currentVerificationApproval),
+        approved: currentVerificationApproval,
       });
       let pullRequest: TaskSnapshot["pullRequest"] = "NONE";
       if (pull?.demo) pullRequest = "DEMO";

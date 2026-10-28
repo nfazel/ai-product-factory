@@ -9,6 +9,7 @@ import { safeCommandOutput } from "@/modules/coding/command-output";
 import { runProcess } from "@/modules/coding/git";
 import { db } from "@/lib/db";
 import { commandUnavailable } from "@/modules/verification/commands";
+import { assertVerificationEvidenceMutable } from "@/modules/verification/integrity";
 import {
   approveVerificationCommand,
   classifyVerificationRead,
@@ -32,6 +33,30 @@ export async function executeVerificationTool(
   input: { sessionId: string; productId: string; workspacePath: string },
   request: VerificationToolRequest,
 ) {
+  if (request.action !== "READ_FILE") {
+    const session = await db.verificationSession.findFirst({
+      where: { id: input.sessionId, productId: input.productId },
+      include: {
+        approvals: { include: { approval: true } },
+        executions: { select: { id: true, exitCode: true, status: true } },
+        coverages: { select: { acceptanceCriterionId: true, status: true } },
+      },
+    });
+    let reason = "Verification session not found.";
+    try {
+      if (session) {
+        assertVerificationEvidenceMutable(session);
+        reason = "";
+      }
+    } catch (error) {
+      reason = error instanceof Error ? error.message : reason;
+    }
+    if (reason) {
+      await deny(input, request.action, reason, "path" in request ? request.path : "", "command" in request ? request.command : "");
+      return { allowed: false, reason, exitCode: null, output: "", timedOut: false };
+    }
+  }
+
   if (request.action === "RUN_COMMAND") {
     const approved = approveVerificationCommand(request.command);
     if (!approved.ok) {

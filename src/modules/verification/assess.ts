@@ -9,6 +9,7 @@ import { deriveObligations, inspectWorkspace, type ObligationStatus } from "@/mo
 import { decideVerdict, evidenceAreas, sessionStatusFor } from "@/modules/verification/verdict";
 import { assessTestStructure } from "@/modules/verification/test-binding";
 import { assessHttpEvidence } from "@/modules/verification/evidence-adequacy";
+import { assertVerificationEvidenceMutable } from "@/modules/verification/integrity";
 import type { HttpObservation } from "@/modules/verification/http/guard";
 
 /**
@@ -48,9 +49,11 @@ export async function recomputeSession(sessionId: string) {
       defectLinks: { include: { workItem: true } },
       evidence: true,
       workspace: true,
+      approvals: { include: { approval: true } },
     },
   });
   if (!session) return null;
+  assertVerificationEvidenceMutable(session);
   // The approved snapshot is the commit the verification workspace was prepared from.
   const approvedSnapshot = session.workspace?.baseCommit ?? "";
   for (const coverage of session.coverages) {
