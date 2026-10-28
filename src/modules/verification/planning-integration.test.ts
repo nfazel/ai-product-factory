@@ -60,6 +60,7 @@ let setAIProviderForTests: typeof import("@/modules/ai/provider").setAIProviderF
 type AIProvider = import("@/modules/ai/provider").AIProvider;
 
 let admin: pg.Client | null = null;
+let databaseCreated = false;
 const tempDirectories: string[] = [];
 
 // ---------- stubbed AI ----------
@@ -198,6 +199,7 @@ function makeRepository() {
   }
   fs.mkdirSync(path.join(dir, "src/claims"), { recursive: true });
   fs.writeFileSync(path.join(dir, "src/claims/submit.mjs"), "export function submitClaim() { return { reference: \"CLM-1001\" }; }\n");
+  fs.writeFileSync(path.join(dir, "src/claims/submit.ts"), "export function submitClaim() { return { reference: \"CLM-1001\" }; }\n");
   fs.writeFileSync(
     path.join(dir, "package.json"),
     JSON.stringify({ name: "it-product", scripts: { build: "node -e \"process.exit(0)\"", start: "node -e \"process.exit(0)\"", test: "node -e \"process.exit(0)\"" } }),
@@ -248,6 +250,7 @@ beforeAll(async () => {
   await admin.connect();
   // Create only the database this run owns. Its name was verified above.
   await admin.query(`CREATE DATABASE "${DB_NAME}"`);
+  databaseCreated = true;
   execFileSync("npx", ["prisma", "migrate", "deploy"], {
     env: { ...process.env, DATABASE_URL: withDatabase(ADMIN_URL, DB_NAME) },
     stdio: "pipe",
@@ -265,7 +268,7 @@ afterAll(async () => {
     await db?.$disconnect();
   } finally {
     if (admin) {
-      await admin.query(`DROP DATABASE IF EXISTS "${DB_NAME}" WITH (FORCE)`);
+      if (databaseCreated) await admin.query(`DROP DATABASE "${DB_NAME}" WITH (FORCE)`);
       await admin.end();
     }
     for (const dir of tempDirectories) fs.rmSync(dir, { recursive: true, force: true });
@@ -509,6 +512,62 @@ describe.skipIf(!RUN)("planning integration (isolated database, production runPl
       expect.stringMatching(/Plan validation INITIAL \(correction requests: 1\)\. Errors:.*AUTH_ACCOUNTS_NOT_READ/),
       expect.stringContaining("Plan validation CORRECTED_PASSED (correction requests: 1). No validation errors."),
     ]);
+  }, 300_000);
+
+  it("scenario 8: an unknown literal account key stays manual and never reaches HTTP execution", async () => {
+    const task = await completedTask();
+    const authentication = { ...VALID_AUTHENTICATION, accountKeys: ["seeker", "target"] };
+    const steps = [{ ...VALID_FIXTURE_STEPS[0]!, account: "seeker" }];
+    const unknownAccount = discoveryBody(task.criterion.id, "line").replace(
+      "JSON.stringify(accounts[0])",
+      'JSON.stringify(accounts.find((item) => item.key === "viewer"))',
+    );
+    const provider = scriptedProvider({
+      verification_conditions: [CONDITIONS],
+      verification_plan: [planResponse(authentication, steps), planResponse(authentication, steps)],
+      verification_test_cases: [
+        { testCases: [httpCase(task.criterion.id, unknownAccount, { requiredCapabilities: ["http-request", "status-assertion", "body-assertion"] })] },
+        { testCases: [httpCase(task.criterion.id, unknownAccount, { requiredCapabilities: ["http-request", "status-assertion", "body-assertion"] })] },
+      ],
+      verification_coverage: [COVERAGE(task.criterion.id)],
+      verification_interpretation: [{ summary: "AI analysis only.", concerns: [] }],
+      verification_defects: [{ defects: [] }],
+      verification_summary: [{ proposedVerdict: "INCONCLUSIVE", rationale: "Unknown account regression." }],
+    });
+    useProvider(provider);
+
+    const { setHttpAcceptanceOverridesForTests } = await import("@/modules/verification/http/acceptance");
+    let httpTestCalls = 0;
+    setHttpAcceptanceOverridesForTests(() => ({
+      writeTest: async () => {
+        httpTestCalls += 1;
+        return { allowed: true, reason: "" };
+      },
+      runTest: async () => {
+        httpTestCalls += 1;
+        return { allowed: true, reason: "", exitCode: 0, output: "", timedOut: false };
+      },
+    }));
+    let session;
+    try {
+      session = requireSession(await startVerification(task.product.id, task.task.id));
+    } finally {
+      setHttpAcceptanceOverridesForTests(null);
+    }
+
+    const cases = await persistedCases(session.id);
+    expect(session.fixturePlan).toMatchObject({ authentication: { accountKeys: ["seeker", "target"] } });
+    expect(cases).toHaveLength(1);
+    expect(cases[0]).toMatchObject({ automated: false, adapterId: "" });
+    expect(cases[0]!.manualReason).toContain('account key "viewer"');
+    expect(cases[0]!.manualReason).toContain("seeker, target");
+    expect(httpTestCalls).toBe(0);
+    expect(provider.requests.filter((item) => item.schemaName === "verification_plan")).toHaveLength(2);
+    expect(provider.requests.filter((item) => item.schemaName === "verification_test_cases")).toHaveLength(2);
+    const audit = await persistedAuditEvidence(session.id);
+    expect(audit[0]?.description).toContain("AUTH_ACCOUNT_KEY_UNKNOWN");
+    expect(audit.at(-1)?.description).toContain("CORRECTED_FAILED");
+    expect(await reviewedVerdict(session.id)).toBe("INCONCLUSIVE");
   }, 300_000);
 
 });

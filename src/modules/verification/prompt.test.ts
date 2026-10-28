@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { VERIFICATION_SYSTEM_PROMPT } from "@/modules/verification/prompt";
+import { VERIFICATION_SYSTEM_PROMPT, withDeclaredAccountKeys } from "@/modules/verification/prompt";
 import { validateFixturePlan } from "@/modules/verification/http/fixtures";
 import { classifyVerificationWrite, isVerificationTestPath, verificationMarker } from "@/modules/verification/policy";
 
@@ -30,9 +30,24 @@ describe("verification test case contract", () => {
 });
 
 describe("HTTP account and capability rules in the planning prompt", () => {
+  it("replaces plan account context with the validated fixture keys, including an empty account set", () => {
+    const original = withDeclaredAccountKeys("Bounded context", { required: true, accountKeys: ["viewer"] });
+    const corrected = withDeclaredAccountKeys(original, { required: true, accountKeys: ["seeker", "target"] });
+    expect(corrected).toContain("Validated verification account keys for this plan");
+    expect(corrected).toContain("- seeker\n- target");
+    expect(corrected).not.toContain("- viewer");
+
+    const none = withDeclaredAccountKeys(corrected, { required: false, accountKeys: [] });
+    expect(none).toContain("(none) - no authentication accounts will be provisioned");
+    expect(none).not.toContain("- seeker");
+  });
+
   it("states the account key format the fixture validator enforces", () => {
     expect(VERIFICATION_SYSTEM_PROMPT).toContain("lowercase letters, digits and hyphens only");
     expect(VERIFICATION_SYSTEM_PROMPT).toContain("viewer or candidate-b");
+    expect(VERIFICATION_SYSTEM_PROMPT).toContain("Format-only examples include viewer or candidate-b");
+    expect(VERIFICATION_SYSTEM_PROMPT).toContain("not available unless they appear in that validated list");
+    expect(VERIFICATION_SYSTEM_PROMPT).toContain("keys retained by fixture validation");
   });
 
   it("tells the agent to declare authenticated-session only when the body signs in", () => {

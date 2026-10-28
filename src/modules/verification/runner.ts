@@ -41,6 +41,7 @@ import {
   runHttpAcceptance,
   type HttpAcceptanceCase,
 } from "@/modules/verification/http/acceptance";
+import { validateFixturePlan } from "@/modules/verification/http/fixtures";
 import { EMPTY_FIXTURE_PLAN, type FixturePlan } from "@/modules/verification/http/fixtures";
 import {
   correctionMessage,
@@ -142,12 +143,16 @@ async function runPlan(session: NonNullable<Awaited<ReturnType<typeof loadSessio
   const evidence: AIRunEvidence[] = [];
   const conditions = await ask(conditionAnalysisSchema, "verification_conditions", "conditions", contract, context, evidence);
   const plan = await ask(verificationPlanSchema, "verification_plan", "plan", contract, context, evidence);
-  // Test cases must see the account keys this plan declared, so they do not invent identifiers the fixture will not provision.
-  const casesContext = withDeclaredAccountKeys(context, plan.authentication);
+  const routes = inspection.profile.routes.map((route) => route.url);
+  const validatedFixtures = validateFixturePlan(
+    { authentication: plan.authentication, steps: plan.fixtureSteps },
+    routes,
+  );
+  // Test generation sees exactly the validated keys that the harness will provision.
+  const casesContext = withDeclaredAccountKeys(context, validatedFixtures.plan.authentication);
   const cases = await ask(testCaseSchema, "verification_test_cases", "test cases", contract, casesContext, evidence);
   const mapping = await ask(coverageMappingSchema, "verification_coverage", "coverage", contract, context, evidence);
   // Validate the whole proposal before accepting it. One correction is allowed, and only for correctable errors.
-  const routes = inspection.profile.routes.map((route) => route.url);
   const known = (id: string) => criterionIds.has(id);
   // Cases that cite no approved criterion are dropped before validation, so each validated case index matches the
   // case that is stored below.
@@ -982,11 +987,20 @@ async function askCorrection(input: {
   context: string;
   evidence: AIRunEvidence[];
   errors: PlanningError[];
+  routes: string[];
 }): Promise<ProposedPlan | null> {
   const message = correctionMessage(input.errors);
   const planResult = await requestCorrected(verificationPlanSchema, "verification_plan", "plan correction", input, message);
   if (!planResult) return null;
-  const casesResult = await requestCorrected(testCaseSchema, "verification_test_cases", "test case correction", input, message);
+  const correctedFixtures = validateFixturePlan(
+    { authentication: planResult.authentication, steps: planResult.fixtureSteps },
+    input.routes,
+  );
+  const correctionInput = {
+    ...input,
+    context: withDeclaredAccountKeys(input.context, correctedFixtures.plan.authentication),
+  };
+  const casesResult = await requestCorrected(testCaseSchema, "verification_test_cases", "test case correction", correctionInput, message);
   if (!casesResult) return null;
   return {
     authentication: planResult.authentication,

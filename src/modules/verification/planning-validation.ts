@@ -229,12 +229,12 @@ export function governCase(input: {
     return manual(`Automated execution was refused. ${binding.reasons.join(" ")} A person must verify this criterion.`, errors);
   }
 
-  // Declaring authenticated-session is not enough: the body must show how the session is established and used,
-  // and any literal account-key lookup must name a key from the fixture plan. Runtime evidence still confirms success.
-  if (c.requiredCapabilities.includes("authenticated-session")) {
+  // Account references are checked for every HTTP case; authenticated-session separately requires the login workflow.
+  // Runtime evidence still confirms the session actually works.
+  if (c.requiredCapabilities.includes("authenticated-session") || selection.adapter.id === "http-blackbox") {
     const authReasons = [
-      ...assessAuthenticatedSessionStructure(c.body),
-      ...assessAccountKeyLiterals(c.body, accountKeys),
+      ...(c.requiredCapabilities.includes("authenticated-session") ? assessAuthenticatedSessionStructure(c.body) : []),
+      ...(selection.adapter.id === "http-blackbox" ? assessAccountKeyLiterals(c.body, accountKeys) : []),
     ];
     if (authReasons.length > 0) {
       const errors = authReasons.map((reason) => error(authStructureCode(reason), true, reason));

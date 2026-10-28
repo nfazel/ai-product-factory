@@ -192,6 +192,66 @@ describe("5. corrected account keys satisfy fixture validation", () => {
   });
 });
 
+describe("unknown literal authentication account references", () => {
+  const accountBody = VALID_BODY.replace(
+    "JSON.stringify(accounts[0])",
+    'JSON.stringify(accounts.find((item) => item.key === "viewer"))',
+  );
+  const fixturePlan = {
+    authentication: { ...VALID_AUTH, accountKeys: ["seeker", "target"] },
+    fixtureSteps: [
+      { ...VALID_STEPS[0]!, account: "seeker" },
+      { ...VALID_STEPS[0]!, account: "target" },
+    ],
+  };
+
+  it("reports AUTH_ACCOUNT_KEY_UNKNOWN even when authenticated-session is omitted", () => {
+    const validation = validate(proposal({
+      ...fixturePlan,
+      testCases: [httpCase({ body: accountBody, requiredCapabilities: ["http-request", "status-assertion", "body-assertion"] })],
+    }));
+    const error = validation.correctable.find((item) => item.code === "AUTH_ACCOUNT_KEY_UNKNOWN");
+    expect(error?.message).toContain('"viewer"');
+    expect(error?.message).toContain("seeker, target");
+    expect(validation.cases[0]?.automated).toBe(false);
+  });
+
+  it("accepts one bounded correction to a provisioned account key", async () => {
+    const bad = proposal({
+      ...fixturePlan,
+      testCases: [httpCase({ body: accountBody, requiredCapabilities: ["http-request", "status-assertion", "body-assertion"] })],
+    });
+    const corrected = proposal({
+      ...fixturePlan,
+      testCases: [httpCase({
+        body: accountBody.replace('item.key === "viewer"', 'item.key === "seeker"'),
+        requiredCapabilities: ["http-request", "status-assertion", "body-assertion"],
+      })],
+    });
+    const correct = vi.fn(async () => corrected);
+    const result = await withEnv(() => validateWithBoundedCorrection({ initial: bad, validate, correct }));
+    expect(correct).toHaveBeenCalledTimes(1);
+    expect(result.accepted).toBe("CORRECTED");
+    expect(result.validation.valid).toBe(true);
+    expect(result.validation.cases[0]?.automated).toBe(true);
+  });
+
+  it("keeps an invalid account reference manual after the single correction fails", async () => {
+    const bad = proposal({
+      ...fixturePlan,
+      testCases: [httpCase({ body: accountBody })],
+    });
+    const correct = vi.fn(async () => bad);
+    const result = await withEnv(() => validateWithBoundedCorrection({ initial: bad, validate, correct, maxCorrections: 5 }));
+    expect(correct).toHaveBeenCalledTimes(1);
+    expect(result.accepted).toBe("INITIAL");
+    expect(result.validation.cases[0]?.automated).toBe(false);
+    expect(result.validation.cases[0]?.manualReason).toContain('account key "viewer"');
+    expect(result.validation.cases[0]?.manualReason).toContain("seeker, target");
+    expect(result.validation.correctable.map((item) => item.code)).toContain("AUTH_ACCOUNT_KEY_UNKNOWN");
+  });
+});
+
 describe("6. unsupported adapters remain rejected", () => {
   it("refuses an unregistered adapter without correction", async () => {
     const bad = proposal({ testCases: [httpCase({ adapterId: "playwright" })] });

@@ -50,7 +50,7 @@ HTTP acceptance (http-blackbox). Use it for an endpoint behaviour named by an ap
 - Each test asserts observable behaviour: the status code and, where the criterion names it, a field in the response body. Do not assert only that a request was made. Do not assert a value against itself. Do not invent endpoints, fields, status codes, or messages that the approved criteria or the inspected routes do not define.
 - A signed-in test reads VERIFICATION_ACCOUNTS, a JSON array of verification-only accounts. Each element is an object with key, email and password. It reads VERIFICATION_PATHS for the signup and login routes. It signs in through the login route with fetch and sends the returned session cookie on later requests. Do not use real user data. Do not write passwords, cookies or tokens into the test body, the purpose, or the evidence; read them from the environment at run time.
 - Declare authenticated-session in requiredCapabilities only when the test body signs in with VERIFICATION_ACCOUNTS. A test that expects an unauthenticated response, such as a 401, must not declare it. Declaring authenticated-session without reading VERIFICATION_ACCOUNTS, reading VERIFICATION_PATHS.login, extracting the session cookie, and sending that cookie on a later request is refused at planning time.
-- Account keys: use only the keys listed under authentication.accountKeys in the current fixture plan (also restated in the bounded context when tests are generated). Names that appear in examples elsewhere are illustrative of the key format only; they are not present unless this plan declares them. Do not invent account identifiers. Looking up a literal key that is not in the plan is refused at planning time. Selecting accounts[0] (or another index into VERIFICATION_ACCOUNTS) is allowed.
+- Account keys: use only the keys listed in the bounded context under "Validated verification account keys for this plan"; that list comes from the keys retained by fixture validation and is exactly what the framework provisions. Format-only examples include viewer or candidate-b; those names are not available unless they appear in that validated list. Do not invent account identifiers. Looking up a literal key that is not in the validated list is refused at planning time. Selecting accounts[0] (or another index into VERIFICATION_ACCOUNTS) is allowed.
 - Concrete authenticated HTTP shape (use the approved criterion id, routes, and account keys from the current plan/context; do not invent them):
   // verifies:<acceptanceCriterionId>
   const base = process.env.VERIFICATION_BASE_URL;
@@ -88,12 +88,15 @@ export function withDeclaredAccountKeys(
   context: string,
   authentication: { required: boolean; accountKeys: string[] },
 ) {
-  if (!authentication.required || authentication.accountKeys.length === 0) return context;
+  const heading = "Validated verification account keys for this plan";
+  const baseContext = context.split(`\n${heading}`)[0] ?? context;
   return [
-    context,
+    baseContext,
     "",
-    "Declared verification account keys for this plan (use only these keys in authenticated HTTP tests):",
-    ...authentication.accountKeys.map((key) => `- ${key}`),
-    "VERIFICATION_ACCOUNTS is a JSON array of { key, email, password } for those keys. Do not invent account identifiers.",
+    `${heading} (use only these keys in HTTP tests):`,
+    ...(authentication.required && authentication.accountKeys.length > 0
+      ? authentication.accountKeys.map((key) => `- ${key}`)
+      : ["- (none) - no authentication accounts will be provisioned"]),
+    "VERIFICATION_ACCOUNTS is a JSON array of { key, email, password } for the listed keys. Do not invent account identifiers.",
   ].join("\n");
 }

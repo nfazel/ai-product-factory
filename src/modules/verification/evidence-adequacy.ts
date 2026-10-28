@@ -107,9 +107,12 @@ export function assessAuthenticatedSessionStructure(body: string): string[] {
  */
 export function literalAccountKeysInBody(body: string): string[] {
   const code = stripComments(body);
+  if (!/\bVERIFICATION_ACCOUNTS\b/.test(code)) return [];
+
   const found = new Set<string>();
-  const forward = /\.key\s*===?\s*(['"])([a-z][a-z0-9-]{0,23})\1/g;
-  const reversed = /(['"])([a-z][a-z0-9-]{0,23})\1\s*===?\s*[A-Za-z_$][\w$]*\.key\b/g;
+  const keyProperty = String.raw`(?:\?\.\s*key\b|\.\s*key\b|\?\.\s*\[\s*["']key["']\s*\]|\[\s*["']key["']\s*\])`;
+  const forward = new RegExp(`${keyProperty}\\s*={2,3}\\s*(['"])([a-z][a-z0-9-]{0,23})\\1`, "g");
+  const reversed = new RegExp(`(['"])([a-z][a-z0-9-]{0,23})\\1\\s*={2,3}\\s*[A-Za-z_$][\\w$]*(?:${keyProperty})`, "g");
   for (const pattern of [forward, reversed]) {
     pattern.lastIndex = 0;
     let match: RegExpExecArray | null;
@@ -118,11 +121,29 @@ export function literalAccountKeysInBody(body: string): string[] {
       if (key) found.add(key);
     }
   }
+
+  const keyBindings = new Set<string>();
+  const destructuredKey = /\{([^{}]*)\}\s*\)\s*=>/g;
+  for (const match of code.matchAll(destructuredKey)) {
+    const keyField = /(?:^|,)\s*key(?:\s*:\s*([A-Za-z_$][\w$]*))?\s*(?=,|$)/.exec(match[1] ?? "");
+    if (keyField) keyBindings.add(keyField[1] ?? "key");
+  }
+  for (const binding of keyBindings) {
+    const escapedBinding = binding.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const forwardBinding = new RegExp(`\\b${escapedBinding}\\b\\s*={2,3}\\s*(['"])([a-z][a-z0-9-]{0,23})\\1`, "g");
+    const reverseBinding = new RegExp(`(['"])([a-z][a-z0-9-]{0,23})\\1\\s*={2,3}\\s*\\b${escapedBinding}\\b`, "g");
+    for (const match of code.matchAll(forwardBinding)) {
+      if (match[2]) found.add(match[2]);
+    }
+    for (const match of code.matchAll(reverseBinding)) {
+      if (match[2]) found.add(match[2]);
+    }
+  }
   return [...found];
 }
 
 /**
- * Whether every literal account-key lookup in an authenticated-session body is one of the fixture plan's account keys.
+ * Whether every literal account-key lookup in a test using verification accounts is one of the fixture plan's account keys.
  * Unknown literals are correctable planning errors. Array-index and other dynamic lookups are left alone.
  */
 export function assessAccountKeyLiterals(body: string, accountKeys: string[]): string[] {

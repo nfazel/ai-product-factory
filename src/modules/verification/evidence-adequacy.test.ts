@@ -3,9 +3,11 @@ import { describe, expect, it } from "vitest";
 import {
   assessHttpEvidence,
   assessAuthentication,
+  assessAccountKeyLiterals,
   assessPositiveBehaviour,
   assessStepCoverage,
   declaredRequestSteps,
+  literalAccountKeysInBody,
   responseAssertionCount,
 } from "@/modules/verification/evidence-adequacy";
 import type { HttpObservation } from "@/modules/verification/http/guard";
@@ -109,6 +111,33 @@ const MULTI_STEP_PARTIAL = [
 ].join("\n");
 
 const AUTH = ["authenticated-session"];
+
+describe("authentication account-key references", () => {
+  it("recognizes property, bracket, and destructured literal account lookups", () => {
+    const body = [
+      "const accounts = JSON.parse(process.env.VERIFICATION_ACCOUNTS);",
+      'accounts.find((item) => item.key === "viewer");',
+      "accounts.find((item) => item['key'] == 'seeker');",
+      'accounts.find(({ key: accountKey, email }) => accountKey === "target");',
+      'accounts.find(({ email, key }) => "candidate" === key);',
+    ].join("\n");
+    expect(literalAccountKeysInBody(body)).toEqual(["viewer", "seeker", "target", "candidate"]);
+  });
+
+  it("checks account references whenever the body reads verification accounts", () => {
+    const body = [
+      "const accounts = JSON.parse(process.env.VERIFICATION_ACCOUNTS);",
+      'const account = accounts.find((item) => item.key === "viewer");',
+    ].join("\n");
+    expect(assessAccountKeyLiterals(body, ["seeker", "target"])).toEqual([
+      expect.stringContaining('account key "viewer"'),
+    ]);
+  });
+
+  it("ignores unrelated object keys when verification accounts are not used", () => {
+    expect(literalAccountKeysInBody('const profile = { key: "viewer" };')).toEqual([]);
+  });
+});
 
 describe("1. unauthenticated 401 test that passes but does not verify authenticated behaviour", () => {
   it("is inadequate when it declares authenticated-session", () => {
