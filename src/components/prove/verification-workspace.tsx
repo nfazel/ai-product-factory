@@ -322,6 +322,23 @@ function PlanPanel({ ctx }: { ctx: Ctx }) {
                 </p>
                 {test.purpose ? <p>{test.purpose}</p> : null}
                 {test.expectedResult ? <p className="text-muted-foreground">Expected: {test.expectedResult}</p> : null}
+                {test.automated ? (
+                  test.body.trim() ? (
+                    <details className="mt-3 rounded-md border bg-stone-50">
+                      <summary className="cursor-pointer px-3 py-2 text-sm font-medium">View Test Source</summary>
+                      <div className="border-t p-3">
+                        <p className="mb-2 text-xs text-muted-foreground">
+                          Test file: <code className="font-mono">{test.filePath || "Path unavailable"}</code>
+                        </p>
+                        <pre className="max-h-96 overflow-auto rounded-md bg-stone-950 p-3 text-xs leading-5 whitespace-pre text-stone-50">
+                          <code>{test.body}</code>
+                        </pre>
+                      </div>
+                    </details>
+                  ) : (
+                    <p className="mt-2 text-xs text-muted-foreground">Test source unavailable.</p>
+                  )
+                ) : null}
               </li>
             ))}
           </ul>

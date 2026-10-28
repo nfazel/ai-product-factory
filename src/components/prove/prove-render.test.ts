@@ -115,6 +115,28 @@ function task4Session(): ProveSession {
   } as unknown as ProveSession;
 }
 
+function sessionWithTestSource(body: string): ProveSession {
+  return {
+    ...task4Session(),
+    testCases: [
+      {
+        id: "test-source-1",
+        acceptanceCriterionId: "criterion-1",
+        title: "Discovery feed returns matching profiles",
+        purpose: "Match profiles and allow a connection or pass action.",
+        expectedResult: "The feed contains matching profiles.",
+        testType: "API",
+        priority: "HIGH",
+        provenance: "VERIFICATION_AGENT",
+        automated: true,
+        status: "PASSED",
+        filePath: "verification/http/discovery.test.mjs",
+        body,
+      },
+    ],
+  } as unknown as ProveSession;
+}
+
 const sessions: ProveSession[] = [];
 
 beforeEach(() => {
@@ -210,6 +232,54 @@ describe("Verification Workspace rendering", () => {
 
   it("does not run verification when the workspace renders", () => {
     renderWorkspace(task4(), []);
+    for (const spy of Object.values(actionSpies)) expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("exposes persisted source for an automated test and keeps its title and status visible", () => {
+    const source = [
+      'import test from "node:test";',
+      "",
+      'test("discovery feed", async () => {',
+      '  const response = await fetch("/api/discovery/feed");',
+      "  assert.equal(response.status, 200);",
+      "});",
+    ].join("\n");
+    const html = renderWorkspace(task4(), [sessionWithTestSource(source)], "plan");
+
+    expect(html).toContain("View Test Source");
+    expect(html).toContain("<summary");
+    expect(html).toContain('Test file: <code class="font-mono">verification/http/discovery.test.mjs</code>');
+    expect(html).toContain("Discovery feed returns matching profiles");
+    expect(html).toContain(" · PASSED");
+    expect(html).toContain("Match profiles and allow a connection or pass action.");
+    expect(html).toContain("Expected: The feed contains matching profiles.");
+  });
+
+  it("preserves source formatting and safely renders HTML-like source as text", () => {
+    const source = [
+      'import test from "node:test";',
+      'test("source stays literal", () => {',
+      "    const markup = \"<script>alert(1)</script>\";",
+      "    assert.equal(markup.length > 0, true);",
+      "});",
+    ].join("\n");
+    const html = renderWorkspace(task4(), [sessionWithTestSource(source)], "plan");
+
+    expect(html).toContain('    const markup = &quot;&lt;script&gt;alert(1)&lt;/script&gt;&quot;;\n    assert.equal(markup.length &gt; 0, true);');
+    expect(html).not.toContain("<script>alert(1)</script>");
+  });
+
+  it("does not render an empty source viewer when an automated case has no body", () => {
+    const html = renderWorkspace(task4(), [sessionWithTestSource("")], "plan");
+
+    expect(html).not.toContain("View Test Source");
+    expect(html).toContain("Test source unavailable.");
+  });
+
+  it("keeps test source inspection read-only", () => {
+    const html = renderWorkspace(task4(), [sessionWithTestSource("assert.equal(1, 1);")], "plan");
+
+    expect(html).toContain("View Test Source");
     for (const spy of Object.values(actionSpies)) expect(spy).not.toHaveBeenCalled();
   });
 
