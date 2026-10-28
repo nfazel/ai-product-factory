@@ -20,7 +20,7 @@ function input(overrides: Partial<CoverageReportInput> = {}): CoverageReportInpu
       { id: "t1", acceptanceCriterionId: "c1", title: "Submit valid notice", purpose: "Demonstrate the criterion.", automated: true, filePath: "verification/x.test.mjs" },
       { id: "t3", acceptanceCriterionId: "c3", title: "Download receipt", purpose: "A person checks the receipt.", automated: false, filePath: "" },
     ],
-    evidence: [{ testCaseId: "t1", acceptanceCriterionId: "c1", type: "TEST_RESULT", result: "EXECUTED" }],
+    evidence: [{ testCaseId: "t1", acceptanceCriterionId: "c1", type: "TEST_RESULT", result: "DEMONSTRATED" }],
     changedFiles: [],
     ...overrides,
   };
@@ -46,6 +46,61 @@ describe("coverage gap report", () => {
       input({ evidence: [], coverages: [{ acceptanceCriterionId: "c1", status: "VERIFIED", humanConfirmed: false, rationale: "" }] }),
     );
     expect(report.criteria.find((item) => item.criterionId === "c1")?.state).toBe("insufficient-evidence");
+  });
+
+  it("counts linked DEMONSTRATED evidence and does not recommend insufficient evidence", () => {
+    const report = buildCoverageReport(input());
+    const criterion = report.criteria.find((item) => item.criterionId === "c1");
+    expect(criterion).toMatchObject({ state: "automated-evidence", automatedEvidence: 1 });
+    expect(report.recommendations.some((item) => item.subject === criterion?.description)).toBe(false);
+  });
+
+  it("does not treat a linked EXECUTED result as demonstrated evidence", () => {
+    const report = buildCoverageReport(input({
+      evidence: [{ testCaseId: "t1", acceptanceCriterionId: "c1", type: "TEST_RESULT", result: "EXECUTED" }],
+    }));
+    const criterion = report.criteria.find((item) => item.criterionId === "c1");
+    expect(criterion).toMatchObject({ state: "insufficient-evidence", automatedEvidence: 0 });
+    expect(criterion?.reason).toMatch(/Linked evidence exists, but it does not demonstrate/);
+    expect(report.recommendations.find((item) => item.subject === criterion?.description)?.message).not.toMatch(/no linked evidence exists/i);
+  });
+
+  it("uses persisted criterion IDs to link evidence directly", () => {
+    const report = buildCoverageReport(input({
+      evidence: [{ testCaseId: null, acceptanceCriterionId: "c1", type: "TEST_RESULT", result: "DEMONSTRATED" }],
+    }));
+    expect(report.criteria.find((item) => item.criterionId === "c1")).toMatchObject({
+      state: "automated-evidence",
+      automatedEvidence: 1,
+    });
+  });
+
+  it("uses persisted test-case IDs to link evidence when the criterion ID is absent", () => {
+    const report = buildCoverageReport(input({
+      evidence: [{ testCaseId: "t1", acceptanceCriterionId: null, type: "TEST_RESULT", result: "DEMONSTRATED" }],
+    }));
+    expect(report.criteria.find((item) => item.criterionId === "c1")).toMatchObject({
+      state: "automated-evidence",
+      automatedEvidence: 1,
+    });
+  });
+
+  it("reports missing evidence only when neither persisted identifier links a record", () => {
+    const report = buildCoverageReport(input({ evidence: [] }));
+    const criterion = report.criteria.find((item) => item.criterionId === "c1");
+    expect(criterion?.reason).toBe("Recorded as verified, but no linked evidence exists.");
+    expect(report.recommendations.find((item) => item.subject === criterion?.description)?.message).toMatch(/no linked evidence exists/i);
+  });
+
+  it("keeps a passing manual confirmation distinct from automated evidence", () => {
+    const report = buildCoverageReport(input({
+      evidence: [{ testCaseId: "t1", acceptanceCriterionId: "c1", type: "MANUAL_CONFIRMATION", result: "PASS" }],
+    }));
+    expect(report.criteria.find((item) => item.criterionId === "c1")).toMatchObject({
+      state: "manual-verification-required",
+      automatedEvidence: 0,
+      manualEvidence: 1,
+    });
   });
 
   it("reports a failed or blocked criterion with its rationale", () => {
