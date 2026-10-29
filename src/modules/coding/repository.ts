@@ -245,3 +245,14 @@ export async function changedPaths(workspaceId: string) {
 export async function openEscalationCount(workspaceId: string) {
   return db.codingEscalation.count({ where: { workspaceId, status: "OPEN" } });
 }
+
+/** The latest successful full read, persisted for separately invoked tool calls. */
+export async function lastReadHash(workspaceId: string, file: string): Promise<string | null> {
+  const event = await db.codingToolEvent.findFirst({
+    where: { workspaceId, path: file, allowed: true, action: "READ_FILE" },
+    orderBy: { createdAt: "desc" },
+    select: { metadata: true },
+  });
+  const metadata = event?.metadata;
+  return metadata && typeof metadata === "object" && !Array.isArray(metadata) && typeof metadata.contentHash === "string" ? metadata.contentHash : null;
+}

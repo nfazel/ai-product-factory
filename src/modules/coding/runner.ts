@@ -42,10 +42,12 @@ import {
   type CompiledExecutionContract,
   type PlannedCommand,
 } from "@/modules/coding/commands";
-import { classifyWrite, isTestFile, outsideApprovedPlan } from "@/modules/coding/policy";
+import { sourceDependencies } from "@/modules/coding/source-context";
+import { classifyRead, classifyWrite, resolveInside, isTestFile, outsideApprovedPlan } from "@/modules/coding/policy";
 import { CODING_SYSTEM_PROMPT, codingUserMessage } from "@/modules/coding/prompt";
 import {
   findWorkspace,
+  changedPaths,
   openEscalationCount,
   recordEscalation,
   recordEvidence,
@@ -61,7 +63,8 @@ import {
   type ChangeRequest,
 } from "@/modules/coding/schema";
 import { asStrings, clip } from "@/modules/coding/strings";
-import { executeRepositoryTool, type ToolContext, type ToolResult } from "@/modules/coding/tools";
+import { baselinePreservationIssues } from "@/modules/coding/preservation";
+import { executeRepositoryTool, preflightRepositoryBatch, type ToolContext, type ToolResult } from "@/modules/coding/tools";
 import { db } from "@/lib/db";
 import { assessCodingReadiness } from "@/modules/governance/coding-readiness";
 import { DomainError } from "@/modules/shared/errors";
@@ -135,7 +138,7 @@ async function assertCodingRun(request: AgentExecutionRequest) {
     if (!flight.ready) {
       throw new DomainError(
         flight.blockers[0]?.message
-          ?? "Execution Plan cannot be approved because a required operation is not permitted by the current coding contract.",
+        ?? "Execution Plan cannot be approved because a required operation is not permitted by the current coding contract.",
       );
     }
   }
@@ -191,6 +194,8 @@ function toolContext(
     maxFiles: contract.maxFiles ?? 8,
     policyCommands: executableCommands,
     stale: workspace.executionContractStale || contract.stale,
+    completeReads: {},
+    baseCommit: workspace.baseCommit,
   };
 }
 
@@ -247,47 +252,129 @@ async function ask<T>(schema: ZodType<T>, schemaName: string, input: {
   return { data: parsed.data, ...aiRunEvidence(result) };
 }
 
-async function boundedContext(context: ToolContext) {
+async function boundedContext(
+  context: ToolContext,
+  priorityFiles: string[] = [],
+) {
   const chunks: string[] = [];
-  let budget = 40_000;
+  let budget = 80_000;
   let files = 0;
-  const listed = await executeRepositoryTool(context, { action: "LIST_DIRECTORY", path: "." });
-  if (listed.allowed && listed.content) chunks.push(`Directory .\n${listed.content}`);
-  const candidates = ["package.json", "README.md", "tsconfig.json", ".env.example"];
+
+  const listed = await executeRepositoryTool(context, {
+    action: "LIST_DIRECTORY",
+    path: ".",
+  });
+
+  if (listed.allowed && listed.content) {
+    chunks.push(`Directory .\n${listed.content}`);
+  }
+
+  // Read existing files from the approved execution plan first.
+  // Repository access restrictions are still enforced by READ_FILE.
+  const candidates = [
+    ...priorityFiles,
+    "package.json",
+    "README.md",
+    "tsconfig.json",
+  ];
+
   const roots = context.allowedPaths
-    .map((pattern) => pattern.replace(/\/\*\*$/, "").replace(/\/\*$/, ""))
+    .map((pattern) =>
+      pattern.replace(/\/\*\*$/, "").replace(/\/\*$/, ""),
+    )
     .filter((pattern) => pattern.length > 0 && !pattern.includes("*"));
+
   const walk = (relative: string, depth: number) => {
-    if (depth > 3) return;
-    const absolute = path.join(context.workspacePath, relative);
+    if (depth > 8) return;
+
+    const located = resolveInside(context.workspacePath, relative);
+    if (!located.ok) return;
+    const absolute = located.absolute;
     if (!fs.existsSync(absolute)) return;
+
     if (fs.statSync(absolute).isDirectory()) {
       for (const name of fs.readdirSync(absolute)) {
-        if (name === "node_modules" || name === ".git") continue;
+        if (name === "node_modules" || name === ".git" || name === ".next") continue;
+
         walk(path.posix.join(relative, name), depth + 1);
       }
       return;
     }
+
     candidates.push(relative);
   };
-  for (const root of roots) walk(root, 0);
-  for (const file of [...new Set(candidates)]) {
-    if (files >= 8 || budget <= 0) break;
-    const read = await executeRepositoryTool(context, { action: "READ_FILE", path: file });
-    if (!read.allowed || read.content == null) continue;
-    const slice = read.content.slice(0, Math.min(4_000, budget));
+
+  for (const root of roots) {
+    walk(root, 0);
+  }
+
+  const visited = new Set<string>();
+  for (const file of candidates) {
+    if (visited.has(file)) continue;
+    visited.add(file);
+    if (files >= 40 || budget <= 0) {
+      if (context.completeReads) delete context.completeReads[file];
+      if (priorityFiles.includes(file)) chunks.push(`File ${file}: EXISTING CONTENT OMITTED — context limit. Modification is blocked until full contents are available.`);
+      continue;
+    }
+
+    const read = await executeRepositoryTool(context, {
+      action: "READ_FILE",
+      path: file,
+    });
+
+    if (!read.allowed || read.content == null) {
+      if (priorityFiles.includes(file)) chunks.push(`File ${file}: unavailable (${read.reason}). Existing files cannot be replaced without complete current contents.`);
+      continue;
+    }
+
+    // Never silently truncate an approved-plan file.
+    // If it cannot fit, tell the agent that its context is incomplete.
+    const isPriority = priorityFiles.includes(file);
+
+    if (isPriority && read.content.length > budget) {
+      if (context.completeReads) delete context.completeReads[file];
+      chunks.push(
+        `File ${file}: EXISTING CONTENT OMITTED — insufficient context budget. ` +
+        "Do not modify this file without obtaining its complete contents.",
+      );
+      continue;
+    }
+
+    const limit = isPriority
+      ? budget
+      : Math.min(4_000, budget);
+
+    const slice = read.content.slice(0, limit);
+
+    if (slice.length < read.content.length && context.completeReads) delete context.completeReads[file];
     budget -= slice.length;
     files += 1;
-    chunks.push(`File ${file}\n${slice}`);
-  }
-  return chunks.join("\n\n") || "No readable project files were found inside the contract.";
-}
 
+    if (slice.length === read.content.length) {
+      const dependencies = sourceDependencies(context.workspacePath, file, slice, candidate => classifyRead(candidate, context.allowedPaths, context.restrictedPaths).ok).filter(dependency => !visited.has(dependency));
+      candidates.splice(candidates.indexOf(file) + 1, 0, ...dependencies);
+    }
+    chunks.push(
+      `File ${file}\n${slice}` +
+      (slice.length < read.content.length
+        ? "\n[CONTENT TRUNCATED — do not assume the rest of this file]"
+        : ""),
+    );
+  }
+
+  return chunks.join("\n\n") ||
+    "No readable project files were found inside the contract.";
+}
 async function runPlan(workspace: NonNullable<Awaited<ReturnType<typeof findWorkspace>>>) {
   const compiled = boundContract(workspace, null);
   const context = toolContext(workspace, compiled.contract.executableCommands);
   const contract = contractText(workspace, compiled.contract);
   const objective = workspace.contract?.objective ?? "";
+  const changeRequest =
+    workspace.plan?.status === "CHANGES_REQUESTED"
+      ? workspace.plan.changeRequest?.trim() ?? ""
+      : "";
   await recordActivity({
     productId: workspace.productId,
     type: "CODING_EXECUTION_STARTED",
@@ -317,7 +404,22 @@ async function runPlan(workspace: NonNullable<Awaited<ReturnType<typeof findWork
     phase: "plan",
     objective,
     contract,
-    context: [inspected, `Analysis: ${analysis.data.summary}`, bootstrapNote, schemaNote].filter(Boolean).join("\n\n"),
+    context: [
+      inspected,
+      `Analysis: ${analysis.data.summary}`,
+      bootstrapNote,
+      schemaNote,
+      changeRequest
+        ? `MANDATORY EXECUTION PLAN REVISION INSTRUCTIONS:
+      The previous execution plan was rejected by the human reviewer.
+      Revise the plan to address the following feedback.
+      Do not simply repeat the previous plan.
+
+  ${changeRequest}`
+        : "",
+    ]
+      .filter(Boolean)
+      .join("\n\n"),
   });
   const outside = plan.data.filesExpectedToChange.filter(
     (file) => !classifyWrite(file, context.allowedPaths, context.restrictedPaths).ok,
@@ -602,6 +704,13 @@ function planData(
   };
 }
 
+function batchEscalationKind(issues: { reason: string }[], operations: { action: string; path: string }[]) {
+  if (operations.some(operation => operation.action === "DELETE_FILE" && isTestFile(operation.path))) return "TEST_FAILURE" as const;
+  if (issues.some(issue => /scope|approved execution plan|allowed|outside|file limit/i.test(issue.reason))) return "SCOPE_EXPANSION" as const;
+  if (issues.some(issue => /authentication|authorization|security/i.test(issue.reason))) return "SECURITY_CONCERN" as const;
+  return "ARCHITECTURE_CONFLICT" as const;
+}
+
 async function runImplement(
   workspace: NonNullable<Awaited<ReturnType<typeof findWorkspace>>>,
   revision: string,
@@ -620,17 +729,17 @@ async function runImplement(
     where: { workspaceId: workspace.id },
     data: { status: "EXECUTING" },
   });
-  const inspected = await boundedContext(context);
   const expected = asStrings(workspace.plan?.filesExpectedToChange);
+  const inspected = await boundedContext(context, expected);
   const approvedPlan = workspace.plan
     ? [
-        `Approved execution plan version ${workspace.plan.version}: ${workspace.plan.summary}`,
-        `Steps: ${asStrings(workspace.plan.steps).join(" | ")}`,
-        `Files in the approved plan: ${expected.join(", ") || "none listed"}`,
-        `Validation: ${workspace.plan.validationPlan}`,
-        `Risks: ${workspace.plan.risks}`,
-        "Do not change a file that is not in the approved plan.",
-      ].join("\n")
+      `Approved execution plan version ${workspace.plan.version}: ${workspace.plan.summary}`,
+      `Steps: ${asStrings(workspace.plan.steps).join(" | ")}`,
+      `Files in the approved plan: ${expected.join(", ") || "none listed"}`,
+      `Validation: ${workspace.plan.validationPlan}`,
+      `Risks: ${workspace.plan.risks}`,
+      "Do not change a file that is not in the approved plan.",
+    ].join("\n")
     : "";
   const revisionNote = revision
     ? await db.codingRevision.findFirst({ where: { id: revision, workspaceId: workspace.id } })
@@ -657,6 +766,13 @@ async function runImplement(
     return output(workspace.id, "ESCALATED", true, change.data.summary, change.provider, change.model, change.usage, compiled.contract);
   }
 
+  const batchIssues = preflightRepositoryBatch(context, change.data.operations, await changedPaths(context.workspaceId));
+  for (const operation of change.data.operations) if (!isTestFile(operation.path) && outsideApprovedPlan(operation.path, expected)) batchIssues.push({ path: operation.path, reason: "File is outside the approved execution plan." });
+  if (batchIssues.length) {
+    await escalate(workspace, batchEscalationKind(batchIssues, change.data.operations), "Preservation preflight blocked the change batch before any files were written.", batchIssues.map(issue => `${issue.path}: ${issue.reason}`).join("\n"), "Obtain complete current source or request explicit human review of the incompatible change. Do not bypass preservation checks.");
+    await finish(workspace, context, "ESCALATED", change.data.summary, false);
+    return output(workspace.id, "ESCALATED", true, change.data.summary, change.provider, change.model, change.usage, compiled.contract);
+  }
   let denied = false;
   for (const operation of change.data.operations) {
     if (!isTestFile(operation.path) && outsideApprovedPlan(operation.path, expected)) {
@@ -771,8 +887,8 @@ async function runImplement(
   });
   const open = await openEscalationCount(workspace.id);
   const outcome = decide(completion.data.proposal, checksOk, denied, open > 0);
-  await finish(workspace, context, outcome, change.data.summary, true);
-  return output(workspace.id, outcome, outcome === "ESCALATED", change.data.summary, completion.provider, completion.model, completion.usage, compiled.contract);
+  const finalOutcome = await finish(workspace, context, outcome, change.data.summary, true);
+  return output(workspace.id, finalOutcome, finalOutcome === "ESCALATED", change.data.summary, completion.provider, completion.model, completion.usage, compiled.contract);
 }
 
 function decide(
@@ -876,10 +992,10 @@ async function runRepair(
   const record = input && typeof input === "object" ? input as { failures?: unknown; attempt?: unknown } : {};
   const failures = Array.isArray(record.failures)
     ? record.failures.flatMap((item) => {
-        if (!item || typeof item !== "object") return [];
-        const failure = item as { command?: unknown; output?: unknown };
-        return typeof failure.command === "string" ? [{ command: failure.command, output: typeof failure.output === "string" ? failure.output : "" }] : [];
-      })
+      if (!item || typeof item !== "object") return [];
+      const failure = item as { command?: unknown; output?: unknown };
+      return typeof failure.command === "string" ? [{ command: failure.command, output: typeof failure.output === "string" ? failure.output : "" }] : [];
+    })
     : [];
   const steps = asStrings(workspace.plan?.steps);
   const gaps = assessImplementationCompleteness({
@@ -896,6 +1012,7 @@ async function runRepair(
     gaps,
   });
   const expected = asStrings(workspace.plan?.filesExpectedToChange);
+  const inspected = await boundedContext(context, expected);
   const schemaContext = await initialSchemaContextFor(workspace);
   const modelWork = steps.filter((step) => /prisma\/schema\.prisma/i.test(step) && /\bmodels?\b/i.test(step));
   const schemaPath = path.join(context.workspacePath, "prisma/schema.prisma");
@@ -911,14 +1028,22 @@ async function runRepair(
       `Approved execution plan version ${workspace.plan?.version ?? "unknown"}.`,
       "Fix the implementation inside the approved files. Do not add commands. Do not change the execution plan.",
       `Approved files: ${expected.join(", ") || "none"}.`,
+      inspected,
       modelWork.length ? `Work item requiring initial Prisma models:\n${modelWork.join("\n")}` : "",
       currentSchema ? `Current prisma/schema.prisma:\n${currentSchema}` : "",
       schemaContext.named ? schemaContext.text : "The approved design does not name an initial schema model. Do not invent one.",
       "Do not add a model named Example, Test, or Placeholder.",
-      "Do not add application behaviour beyond the initial schema models named by the approved design.",
+      "Reuse existing database and authentication helpers. Preserve existing models and application behaviour; repair only the approved task.",
       ...failures.map((item) => `Failed command ${item.command}\n${item.output}`),
     ].filter(Boolean).join("\n\n"),
   });
+  const batchIssues = preflightRepositoryBatch(context, repair.data.operations, await changedPaths(context.workspaceId));
+  for (const operation of repair.data.operations) if (!isTestFile(operation.path) && outsideApprovedPlan(operation.path, expected)) batchIssues.push({ path: operation.path, reason: "File is outside the approved execution plan." });
+  if (batchIssues.length) {
+    await escalate(workspace, batchEscalationKind(batchIssues, repair.data.operations), "Preservation preflight blocked the repair batch before any files were written.", batchIssues.map(issue => `${issue.path}: ${issue.reason}`).join("\n"), "Obtain complete current source or request explicit human review. Do not bypass preservation checks.");
+    await finish(workspace, context, "ESCALATED", repair.data.summary, false, "repair");
+    return output(workspace.id, "ESCALATED", true, repair.data.summary, repair.provider, repair.model, repair.usage, compiled.contract);
+  }
   let blocked = false;
   for (const operation of repair.data.operations) {
     if (!isTestFile(operation.path) && outsideApprovedPlan(operation.path, expected)) {
@@ -977,8 +1102,8 @@ async function runRepair(
     }
   }
   const outcome = ok ? "COMPLETED" : "FAILED";
-  await finish(workspace, context, outcome, repair.data.summary, true, "repair");
-  return output(workspace.id, outcome, !ok && blocked, repair.data.summary, repair.provider, repair.model, repair.usage, compiled.contract);
+  const finalOutcome = await finish(workspace, context, outcome, repair.data.summary, true, "repair");
+  return output(workspace.id, finalOutcome, finalOutcome === "ESCALATED", repair.data.summary, repair.provider, repair.model, repair.usage, compiled.contract);
 }
 
 function evidenceType(command: string) {
@@ -1047,6 +1172,13 @@ async function finish(
   storeDiff: boolean,
   phase: "implement" | "repair" = "implement",
 ) {
+  if ((outcome === "COMPLETED" || outcome === "COMPLETED_WITH_CONCERNS") && context.baseCommit) {
+    const issues = await baselinePreservationIssues(context.workspacePath, context.baseCommit);
+    if (issues.length) {
+      await escalate(workspace, "ARCHITECTURE_CONFLICT", "Final preservation checks failed.", issues.map(issue => `${issue.path}: ${issue.reason}`).join("\n"), "Review the incompatible change before proceeding. Build success is not evidence of preservation.");
+      outcome = "ESCALATED";
+    }
+  }
   const diff = storeDiff ? await captureWorkspaceDiff(context.workspacePath) : null;
   try {
     await storeWorkspaceResult({
@@ -1079,6 +1211,7 @@ async function finish(
       actor: "Coding Agent",
     });
   }
+  return outcome;
 }
 
 async function escalate(

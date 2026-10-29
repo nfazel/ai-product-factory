@@ -749,7 +749,7 @@ describe("coding execution", () => {
     expect(await db.codingExecutionPlan.count({ where: { workspaceId: failed!.id } })).toBe(1);
   });
 
-  it("stops after two repair attempts and does not write outside the approved plan", async () => {
+  it("stops immediately when preservation preflight finds an out-of-scope repair", async () => {
     useRepo(false);
     const setup = await readyProduct();
     setAIProviderForTests(provider(writeChange));
@@ -771,15 +771,15 @@ describe("coding execution", () => {
       },
     });
     const stopped = await repairCodingTask(setup.product.id, failed!.id);
-    expect(repairs).toBe(2);
+    expect(repairs).toBe(1);
     expect(fs.existsSync(path.join(stopped!.workspacePath, "src/outside.ts"))).toBe(false);
     expect(stopped?.escalations.some((item) => item.type === "SCOPE_EXPANSION")).toBe(true);
     expect(stopped?.plan?.version).toBe(1);
-    expect(stopped?.plan?.status).toBe("APPROVED");
+    expect(stopped?.plan?.status).toBe("ESCALATED");
     const original = failed?.evidence.find((item) => item.result === "FAIL");
     expect(stopped?.evidence.some((item) => item.id === original?.id && item.result === "FAIL")).toBe(true);
-    await expect(repairCodingTask(setup.product.id, failed!.id)).rejects.toThrow(/bounded attempts/);
-    expect(repairs).toBe(2);
+    await expect(repairCodingTask(setup.product.id, failed!.id)).rejects.toThrow(/approved|Revise|scope|execution plan/i);
+    expect(repairs).toBe(1);
   });
 
   it("escalates scope expansion without editing files", async () => {
@@ -836,7 +836,7 @@ describe("coding execution", () => {
     );
     const workspace = await startCodingTask(setup.product.id, setup.task.id);
     expect(workspace?.escalations.some((item) => item.type === "SCOPE_EXPANSION")).toBe(true);
-    expect(fs.existsSync(path.join(workspace!.workspacePath, "src/claims/extra.ts"))).toBe(true);
+    expect(fs.existsSync(path.join(workspace!.workspacePath, "src/claims/extra.ts"))).toBe(false);
     expect(fs.existsSync(path.join(workspace!.workspacePath, "src/claims/another.ts"))).toBe(false);
     const task = await db.implementationTask.findUnique({ where: { id: setup.task.id } });
     expect(task?.status).not.toBe("COMPLETED");

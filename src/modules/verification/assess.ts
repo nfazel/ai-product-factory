@@ -5,7 +5,7 @@ import { asStrings } from "@/modules/coding/strings";
 import { sanitizeFailureDetail } from "@/modules/verification/diagnostics";
 import { failureClassForEscalation, failureClassForVerdict } from "@/modules/verification/failure";
 import { executionIsCredible } from "@/modules/verification/adapters/registry";
-import { deriveObligations, inspectWorkspace, type ObligationStatus } from "@/modules/verification/obligations";
+import { requiredFunctionalCriteria, deriveObligations, inspectWorkspace, type ObligationStatus } from "@/modules/verification/obligations";
 import { decideVerdict, evidenceAreas, sessionStatusFor } from "@/modules/verification/verdict";
 import { assessTestStructure } from "@/modules/verification/test-binding";
 import { assessHttpEvidence } from "@/modules/verification/evidence-adequacy";
@@ -260,12 +260,12 @@ async function evaluateObligations(session: {
       : null,
     commitSha: session.commitSha,
     baseCommit: session.workspace?.baseCommit || coding?.headCommit || "",
-    functionalCriteria: session.coverages.map((coverage) => ({
+    functionalCriteria: requiredFunctionalCriteria(task?.workItem?.acceptanceCriteria ?? [], session.coverages.map((coverage) => ({
       id: coverage.acceptanceCriterionId,
       description: task?.workItem?.acceptanceCriteria.find((item) => item.id === coverage.acceptanceCriterionId)?.description
         || "Functional acceptance criterion",
       status: coverageStatus(coverage),
-    })),
+    }))),
     parentCriteria,
     architecture: session.contract?.architectureConstraints ?? "",
     nfrs: session.nfrResults.map((item) => ({ id: item.nfrId || item.title, title: item.title, status: item.status })),

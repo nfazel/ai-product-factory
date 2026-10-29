@@ -15,8 +15,10 @@ import {
   isTestFile,
   resolveInside,
   weakensChecks,
+  hashText,
 } from "@/modules/coding/policy";
-import { changedPaths, recordToolEvent } from "@/modules/coding/repository";
+import { baselinePreservationIssues, preflightPreservation } from "@/modules/coding/preservation";
+import { changedPaths, lastReadHash, recordToolEvent } from "@/modules/coding/repository";
 
 export type ToolRequest =
   | { action: "READ_FILE"; path: string }
@@ -38,6 +40,10 @@ export type ToolContext = {
   maxFiles: number;
   policyCommands: string[];
   stale: boolean;
+  /** Only files supplied to the model in full qualify for a generated batch. */
+  completeReads?: Record<string, string>;
+  /** Immutable task Git baseline; also used to inspect final script-induced changes. */
+  baseCommit?: string;
 };
 
 export type ToolResult = {
@@ -101,6 +107,10 @@ async function apply(context: ToolContext, request: ToolRequest): Promise<ToolRe
     const environment = commandEnvironment(request.command, context.workspacePath);
     const result = await runProcess(approved.argv, context.workspacePath, 120_000, environment.env);
     const output = [environment.note, safeCommandOutput(result.stdout, result.stderr)].filter(Boolean).join("\n\n");
+    if (context.baseCommit) {
+      const issues = await baselinePreservationIssues(context.workspacePath, context.baseCommit);
+      if (issues.length) return { allowed: false, reason: issues.map(issue => `${issue.path}: ${issue.reason}`).join("\n"), kind: "restricted", content: output, metadata: { exitCode: result.code, output, preservationBlocked: true } };
+    }
     return {
       allowed: true,
       reason: "",
@@ -150,7 +160,18 @@ async function apply(context: ToolContext, request: ToolRequest): Promise<ToolRe
       return { allowed: false, reason: "The file does not exist inside the workspace.", kind: "scope", metadata: {} };
     }
     const content = fs.readFileSync(located.absolute, "utf8");
-    return { allowed: true, reason: "", kind: "ok", content, metadata: { bytes: Buffer.byteLength(content) } };
+    if (context.completeReads) context.completeReads[located.relative] = hashText(content);
+    return { allowed: true, reason: "", kind: "ok", content, metadata: { bytes: Buffer.byteLength(content), contentHash: hashText(content) } };
+  }
+
+  if (WRITE_ACTIONS.has(request.action)) {
+    const reads = context.completeReads ?? {};
+    if (!context.completeReads) {
+      const recorded = await lastReadHash(context.workspaceId, located.relative);
+      if (recorded) reads[located.relative] = recorded;
+    }
+    const issues = preflightPreservation(context.workspacePath, [request as { path: string; action: string; content?: string }], reads);
+    if (issues.length) return { allowed: false, reason: issues.map(issue => issue.reason).join(" "), kind: "restricted", metadata: { preservationBlocked: true } };
   }
 
   if (request.action === "DELETE_FILE") {
@@ -217,4 +238,20 @@ function activityType(action: ToolRequest["action"], allowed: boolean) {
 
 function label(action: ToolRequest["action"]) {
   return action.toLowerCase().replaceAll("_", " ");
+}
+
+/** Validate the full generated batch before the first mutation. */
+export function preflightRepositoryBatch(context: ToolContext, requests: ToolRequest[], previouslyTouched: Iterable<string> = []) {
+  const writes = requests.filter((request): request is Extract<ToolRequest, { path: string }> => WRITE_ACTIONS.has(request.action) && "path" in request);
+  const issues = preflightPreservation(context.workspacePath, writes, context.completeReads ?? {});
+  if (context.stale && writes.length) issues.push({ path: ".", reason: "EXECUTION CONTRACT STALE. Further code changes are paused." });
+  if (new Set([...previouslyTouched, ...writes.map(item => item.path)]).size > context.maxFiles) issues.push({ path: ".", reason: "The change batch exceeds the task file limit." });
+  for (const request of writes) {
+    const located = resolveInside(context.workspacePath, request.path, { allowMissingParents: true });
+    if (!located.ok) continue;
+    const permission = classifyWrite(located.relative, context.allowedPaths, context.restrictedPaths);
+    if (!permission.ok) issues.push({ path: request.path, reason: permission.reason });
+    if (request.action === "DELETE_FILE" && !context.allowFileDelete) issues.push({ path: request.path, reason: "File deletion is not permitted for this task." });
+  }
+  return issues;
 }

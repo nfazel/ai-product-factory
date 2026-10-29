@@ -75,6 +75,7 @@ import {
   restoreBaselineFile,
   workspaceDirectory,
 } from "@/modules/coding/git";
+import { baselinePreservationIssues } from "@/modules/coding/preservation";
 import { classifyWrite, filesBlockingPlanApproval, hashText } from "@/modules/coding/policy";
 import {
   findOccupyingWorkspace,
@@ -862,6 +863,8 @@ export async function approveCodeChanges(productId: string, workspaceId: string,
     if (message === BASELINE_UNRESOLVED) throw new DomainError(BASELINE_UNRESOLVED);
     throw error;
   }
+  const preservationIssues = await baselinePreservationIssues(workspace.workspacePath, workspace.baseCommit);
+  if (preservationIssues.length) throw new DomainError(`Preservation review required: ${preservationIssues.map(issue => `${issue.path}: ${issue.reason}`).join("\n")}`);
   const status = await repositoryStatus(workspace.workspacePath);
   if (
     validationSnapshotDrifted({
@@ -1259,6 +1262,8 @@ export async function createCodingCommit(productId: string, workspaceId: string)
     if (message === BASELINE_UNRESOLVED) throw new DomainError(BASELINE_UNRESOLVED);
     throw error;
   }
+  const preservationIssues = await baselinePreservationIssues(workspace.workspacePath, workspace.baseCommit);
+  if (preservationIssues.length) throw new DomainError(`Preservation review required: ${preservationIssues.map(issue => `${issue.path}: ${issue.reason}`).join("\n")}`);
   const status = await repositoryStatus(workspace.workspacePath);
   if (
     validationSnapshotDrifted({
@@ -1424,7 +1429,7 @@ export async function repairCodingTask(productId: string, workspaceId: string) {
         createdAt: { gte: marked },
       },
     });
-    if (output?.outcome === "COMPLETED" && open === 0) break;
+    if (output?.outcome === "ESCALATED" || (output?.outcome === "COMPLETED" && open === 0)) break;
   }
   return findWorkspace(productId, workspaceId);
 }
@@ -1563,6 +1568,7 @@ export async function validateExistingImplementation(productId: string, workspac
     allowFileDelete: workspace.contract?.allowFileDelete ?? false,
     maxFiles: workspace.contract?.maxFiles ?? 8,
     policyCommands: compiled.contract.executableCommands,
+    baseCommit: workspace.baseCommit,
     stale: false,
   };
 
@@ -1967,6 +1973,7 @@ export async function applyCodingTool(productId: string, workspaceId: string, re
         validationCommands: workspace.plan?.validationCommands,
       }).contract.executableCommands,
       stale: workspace.executionContractStale || workspace.contract.stale,
+      baseCommit: workspace.baseCommit,
     },
     request,
   );

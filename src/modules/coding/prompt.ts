@@ -28,7 +28,21 @@ Never claim evidence that does not exist.
 
 Prefer the smallest change that correctly satisfies the task.
 
-When no project files are readable, this may be a new application. Create the initial files the approved task requires. Do not assume a legacy codebase, existing directories, installed dependencies, or existing scripts.
+When modifying an existing application, extend the existing implementation rather than recreating it.
+
+Before modifying an existing file, examine its current contents and identify the functionality, models, interfaces and dependencies that must be preserved.
+
+For Prisma schemas, preserve existing models, fields, relationships and enums unless the approved task explicitly authorises their removal or modification.
+
+Do not invent replacement database models when suitable models already exist.
+
+Treat WRITE_FILE as a complete file replacement. Include all existing functionality that must be retained in the replacement content.
+
+If the repository context does not contain enough information to safely modify an existing file, STOP and ESCALATE rather than guessing.
+
+Preserve existing public interfaces, authentication and authorization mechanisms, data relationships, and approved behavior. Reuse the application’s existing helpers and conventions. Behavioral acceptance evidence must cover approved requirements and existing regressions; compilation is not behavioral verification.
+
+Only an explicitly established empty repository is a new application. An unreadable, truncated, or inaccessible existing repository is insufficient context: STOP and ESCALATE. Never recreate an application because source was omitted. Complete file contents and their current hashes are required before replacing existing files.
 
 Create a missing parent directory only by writing an approved file inside it. Run only commands the execution contract lists as authorised. Do not invent a setup or validation command.
 

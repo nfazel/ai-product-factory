@@ -293,3 +293,18 @@ function nfrStatus(status: string): ObligationStatus {
 function normalise(file: string) {
   return file.replaceAll("\\", "/").replace(/^\.\//, "");
 }
+
+/** Coverage rows are evidence, not the source of required criteria. Missing rows
+ * must remain visible as mandatory, untested obligations. */
+export function requiredFunctionalCriteria(
+  approved: { id: string; description: string }[],
+  coverage: { id: string; description?: string; status: ObligationStatus }[],
+) {
+  const requirements = new Map(approved.map(item => [item.id, { ...item, status: "NOT_TESTED" as ObligationStatus }]));
+  for (const item of coverage) {
+    const requirement = requirements.get(item.id);
+    if (requirement) requirement.status = item.status;
+    else requirements.set(item.id, { id: item.id, description: item.description || "Bound acceptance criterion", status: item.status });
+  }
+  return [...requirements.values()];
+}
