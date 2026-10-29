@@ -93,7 +93,8 @@ export function summariseBuildTask(
   if (workspace?.stale) blockers.push(workspace.staleReason || "Approved coding instructions are out of date.");
   if (workspace?.planIncomplete) blockers.push("Execution plan must be revised before coding can continue.");
 
-  const completed = task.status === "COMPLETED" || workspace?.status === "COMPLETED";
+  const completed = task.status === "COMPLETED";
+
   const inProgress =
     !completed &&
     (task.status === "IN_PROGRESS" ||
@@ -146,8 +147,12 @@ function codingStatus(task: CodingTask): { label: string; tone: StatusTone } {
     return { label: "Not started", tone: "neutral" };
   }
   const plan = workspace.plan;
+  if (workspace.status === "COMPLETED" && task.status !== "COMPLETED") {
+    return { label: "Not started", tone: "neutral" };
+  }
+
   if (workspace.status === "COMPLETED" && !planNeedsHumanReview(plan?.status)) {
-    return { label: "Completed", tone: "success" };
+      return { label: "Completed", tone: "success" };
   }
   if (workspace.status === "ABANDONED") return { label: "Abandoned", tone: "neutral" };
   if (workspace.status === "ACTIVE") return { label: "Running", tone: "progress" };
@@ -172,6 +177,9 @@ function codingStatus(task: CodingTask): { label: string; tone: StatusTone } {
 
 function validationStatus(task: CodingTask): { label: string; tone: StatusTone } {
   const workspace = task.workspace;
+  if (task.status === "APPROVED" && workspace?.status === "COMPLETED") {
+    return { label: "Not started", tone: "neutral" };
+  }
   if (!workspace?.plan) return { label: "Not started", tone: "neutral" };
   const evidence = workspace.evidence.filter((item) => item.command);
   if (evidence.length === 0) {
@@ -208,8 +216,11 @@ function verificationStatus(
   task: CodingTask,
   verification: VerificationSnapshot | null,
 ): { label: string; tone: StatusTone } {
+  if (task.status === "APPROVED" && task.workspace?.status === "COMPLETED") {
+    return { label: "Not started", tone: "neutral" };
+  }
   if (!verification) {
-    if (task.status === "COMPLETED" || task.workspace?.status === "COMPLETED") {
+    if (task.status === "COMPLETED") {
       return { label: "Ready for Prove", tone: "attention" };
     }
     return { label: "Not started", tone: "neutral" };
@@ -255,7 +266,7 @@ function primaryAction(
     return { kind: "recover-workspace", label: "Resolve coding recovery" };
   }
   if (
-    (task.status === "COMPLETED" || workspace?.status === "COMPLETED") &&
+    task.status === "COMPLETED" &&
     (verify.tone === "attention" || verify.tone === "neutral")
   ) {
     return { kind: "open-prove", label: "Open Prove for verification" };

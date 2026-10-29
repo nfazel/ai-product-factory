@@ -10,6 +10,7 @@ import {
   approveCodeAction,
   approvePlanAction,
   approveTaskAction,
+  requestCompletedTaskCorrectionAction,
   commitCodingAction,
   regenerateContractAction,
   rejectCodeAction,
@@ -45,6 +46,24 @@ export function ApproveTaskButton({ productId, taskId }: { productId: string; ta
     <form action={action} className="space-y-2">
       <Hidden productId={productId} taskId={taskId} />
       <SubmitButton pendingLabel="Approving">Approve implementation task</SubmitButton>
+      <FormMessage state={state} />
+    </form>
+  );
+}
+
+export function RequestCompletedTaskCorrectionForm({ productId, taskId }: { productId: string; taskId: string }) {
+  const [state, action] = useActionState(requestCompletedTaskCorrectionAction, idleState);
+  return (
+    <form action={action} className="space-y-2">
+      <Hidden productId={productId} taskId={taskId} />
+      <TextAreaField
+        label="Correction reason"
+        name="reason"
+        required
+        hint="Explain the missing or defective behaviour (12–2000 characters). Existing verification will become stale."
+        error={state.fieldErrors?.reason}
+      />
+      <SubmitButton variant="secondary" pendingLabel="Requesting correction">Request Correction</SubmitButton>
       <FormMessage state={state} />
     </form>
   );

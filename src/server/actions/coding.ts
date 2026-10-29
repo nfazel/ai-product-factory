@@ -8,6 +8,7 @@ import {
   approveCodeChanges,
   approveExecutionPlan,
   approveImplementationTask,
+  requestCompletedTaskCorrection,
   createCodingCommit,
   regenerateCodingContract,
   rejectCodeChanges,
@@ -48,6 +49,17 @@ export async function approveTaskAction(_prev: ActionState, formData: FormData):
   try {
     await approveImplementationTask(parsed.data.productId, parsed.data.taskId);
     return done(parsed.data.productId, "The implementation task is approved for coding.");
+  } catch (error) {
+    return actionFailure(error);
+  }
+}
+
+export async function requestCompletedTaskCorrectionAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const parsed = ids.extend({ reason: z.string().trim().min(12).max(2000) }).safeParse(formValues(formData));
+  if (!parsed.success) return invalidState(parsed.error.issues);
+  try {
+    await requestCompletedTaskCorrection(parsed.data.productId, parsed.data.taskId, parsed.data.reason);
+    return done(parsed.data.productId, "Correction requested. Approve the task again before starting a new coding attempt.");
   } catch (error) {
     return actionFailure(error);
   }

@@ -5,6 +5,7 @@ import {
   ApproveCodeChangesButton,
   ApprovePlanButton,
   ApproveTaskButton,
+  RequestCompletedTaskCorrectionForm,
   ApprovedCommit,
   RepairPlanCoverageButton,
   StartCodingButton,
@@ -88,6 +89,20 @@ export function TaskWorkspaceView({
               ))}
             </ul>
           </div>
+        ) : null}
+
+        {task.status === "COMPLETED" ? (
+          <div className="mt-5 rounded-xl border bg-stone-50 px-4 py-3">
+            <h2 className="mb-3 text-sm font-semibold">Request implementation correction</h2>
+            <RequestCompletedTaskCorrectionForm productId={productId} taskId={task.id} />
+          </div>
+        ) : null}
+
+        {task.status === "BLOCKED" ? (
+         <div className="mt-5 rounded-xl border bg-stone-50 px-4 py-3">
+          <h2 className="mb-3 text-sm font-semibold">Approve implementation task</h2>
+          <ApproveTaskButton productId={productId} taskId={task.id} />
+        </div>
         ) : null}
 
         <div className="mt-5 rounded-xl border bg-stone-50 px-4 py-3">

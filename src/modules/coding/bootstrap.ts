@@ -104,9 +104,9 @@ export function assessBootstrapCompleteness(input: {
     .map((item) => item.command);
   const environment = requiredCommands.includes("npx prisma validate")
     ? [{
-        command: "npx prisma validate",
-        note: "Validation environment: DATABASE_URL is supplied as a non-secret placeholder for this process only. It is not written to the product and it is not the Builder database URL.",
-      }]
+      command: "npx prisma validate",
+      note: "Validation environment: DATABASE_URL is supplied as a non-secret placeholder for this process only. It is not written to the product and it is not the Builder database URL.",
+    }]
     : [];
   const nextBuild = requiredCommands.includes("npm run build") && mentionsNext(corpus);
   const bootstrap = isApplicationBootstrap(design, input.files, input.greenfield === true);
@@ -466,7 +466,24 @@ export function assessPlanConsistency(input: {
       message: `Execution Plan cannot be approved because ${named} ${named.includes(",") ? "are" : "is"} in scope but no work item creates ${named.includes(",") ? "them" : "it"}. Revise the execution plan.`,
     });
   }
-  const outside = fileMentions(input.steps).filter((file) => !input.files.map(normalise).includes(file));
+
+  const approvedFiles = input.files.map(normalise);
+  const outside = fileMentions(input.steps).filter((file) => {
+    // Exact approved path.
+    if (approvedFiles.includes(file)) return false;
+
+    // A filename without a directory may refer to an approved file,
+    // but only if exactly one approved file has that name.
+    if (!file.includes("/")) {
+      const matches = approvedFiles.filter(
+        (approved) => approved.split("/").pop() === file
+      );
+
+      if (matches.length === 1) return false;
+    }
+
+    return true;
+  });
   if (outside.length > 0) {
     blockers.push({
       step: null,

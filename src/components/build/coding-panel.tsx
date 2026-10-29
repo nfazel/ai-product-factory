@@ -1,6 +1,7 @@
 import { ViewChangesButton } from "@/components/build/code-changes-viewer";
 import {
   ApproveTaskButton,
+  RequestCompletedTaskCorrectionForm,
   ApprovedCommit,
   ReviewActions,
   ScopeResolution,
@@ -180,6 +181,9 @@ export function CodingTaskCard({
               <ApproveTaskButton productId={productId} taskId={task.id} />
             ) : null}
             {task.canStart ? <StartCodingButton productId={productId} taskId={task.id} /> : null}
+            {task.status === "COMPLETED" ? (
+              <RequestCompletedTaskCorrectionForm productId={productId} taskId={task.id} />
+            ) : null}
           </div>
         </>
       )}

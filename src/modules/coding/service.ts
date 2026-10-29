@@ -158,6 +158,68 @@ export async function approveImplementationTask(productId: string, taskId: strin
   return updated;
 }
 
+/** Return a completed implementation to the existing human approval and coding cycle. */
+export async function requestCompletedTaskCorrection(productId: string, taskId: string, reason: string) {
+  const actor = getCurrentActor().name;
+  assertHuman(actor);
+  const explanation = reason.trim();
+  if (explanation.length < 12 || explanation.length > 2000) {
+    throw new DomainError("Provide a correction reason between 12 and 2000 characters.");
+  }
+  const task = await loadTaskGraph(productId, taskId);
+  if (!task) throw new DomainError("The implementation task was not found.", "NOT_FOUND");
+  if (task.status !== "COMPLETED") {
+    throw new DomainError("Only completed implementation tasks can request a correction.");
+  }
+  const occupying = await findOccupyingWorkspace(productId);
+  if (occupying) {
+    throw new DomainError("Finish or abandon the active coding workspace before requesting a correction.");
+  }
+  const completedWorkspace = await db.repositoryWorkspace.findFirst({
+    where: { productId, implementationTaskId: taskId, status: "COMPLETED" },
+    orderBy: { createdAt: "desc" },
+    select: { id: true },
+  });
+  if (!completedWorkspace) {
+    throw new DomainError("A completed coding workspace is required to request a correction.");
+  }
+  const message = `RE-VERIFICATION REQUIRED. ${actor} requested correction of completed task "${task.title}": ${explanation}`;
+  const now = new Date();
+  await db.$transaction(async (tx) => {
+    const changed = await tx.implementationTask.updateMany({
+      where: { id: taskId, status: "COMPLETED" },
+      data: { status: "BLOCKED" },
+    });
+    if (changed.count !== 1) throw new DomainError("Task status changed; reload before requesting a correction.");
+    const sessions = await tx.verificationSession.findMany({
+      where: { productId, implementationTaskId: taskId, demo: false },
+      select: { id: true },
+    });
+    const sessionIds = sessions.map((session) => session.id);
+    if (sessionIds.length) {
+      await tx.verificationSession.updateMany({
+        where: { id: { in: sessionIds } },
+        data: { stale: true, staleReason: message, staleFlaggedAt: now },
+      });
+      await tx.verificationContract.updateMany({
+        where: { sessionId: { in: sessionIds } },
+        data: { stale: true },
+      });
+      await tx.verificationApproval.updateMany({
+        where: { sessionId: { in: sessionIds }, stale: false },
+        data: { stale: true, staleReason: message, staleFlaggedAt: now },
+      });
+    }
+  });
+  await recordActivity({
+    productId,
+    type: "CODING_CHANGES_REQUESTED",
+    description: message,
+    actor,
+  });
+  return db.implementationTask.findUnique({ where: { id: taskId } });
+}
+
 export async function startCodingTask(productId: string, taskId: string) {
   const gate = await assertCodingEntry(productId, taskId);
   await prepareAI();
