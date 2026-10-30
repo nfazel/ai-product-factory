@@ -1,0 +1,15 @@
+import {beforeEach,describe,it,expect,vi} from 'vitest';
+const mocks=vi.hoisted(()=>({headers:vi.fn(),record:vi.fn(),refresh:vi.fn()}));
+vi.mock('next/headers',()=>({headers:mocks.headers}));vi.mock('next/cache',()=>({revalidatePath:mocks.refresh}));vi.mock('@/modules/feature-review/service',()=>({recordFeatureReview:mocks.record}));
+import {featureReviewAction} from './feature-review';
+import {DomainError} from '@/modules/shared/errors';
+function form(decision='ACCEPTED'){const f=new FormData();for(const [k,v]of Object.entries({productId:'p',featureId:'f',decision,digest:'d'.repeat(64),idempotencyKey:'unique-request',credential:'private-operator-value'}))f.set(k,v);return f}
+beforeEach(()=>{vi.clearAllMocks();mocks.headers.mockResolvedValue(new Headers({origin:'http://localhost:4317',host:'localhost:4317'}));mocks.record.mockResolvedValue({review:{status:'ACCEPTED'}})});
+describe('protected Build feature actions',()=>{
+ it.each(['ACCEPTED','DEFERRED'])('forwards %s through the protected domain boundary only',async decision=>{const result=await featureReviewAction({status:'idle'},form(decision));expect(result.status).toBe('success');expect(mocks.record).toHaveBeenCalledWith(expect.objectContaining({decision,credential:'private-operator-value',featureId:'f'}));expect(JSON.stringify(result)).not.toContain('private-operator-value');expect(mocks.refresh).toHaveBeenCalledWith('/products/p/releases')});
+ it('does not turn a browser actor name into authority',async()=>{const f=form();f.set('approvedBy','Local user');mocks.record.mockRejectedValue(new Error('sensitive exception with private-operator-value'));const result=await featureReviewAction({status:'idle'},f);expect(result.status).toBe('error');expect(JSON.stringify(result)).not.toContain('private-operator-value');expect(mocks.record.mock.calls[0][0]).not.toHaveProperty('approvedBy')});
+ it.each([{origin:'http://remote.example',host:'remote.example'},{origin:'https://other.example',host:'localhost:4317'}])('rejects insecure or cross-origin confirmation',async h=>{mocks.headers.mockResolvedValue(new Headers(h));expect((await featureReviewAction({status:'idle'},form())).status).toBe('error');expect(mocks.record).not.toHaveBeenCalled()});
+ it('passes exact concern IDs and rejects invalid decisions',async()=>{const f=form();f.append('concern','concern-id');await featureReviewAction({status:'idle'},f);expect(mocks.record.mock.calls[0][0].acknowledgedConcerns).toEqual(['concern-id']);f.set('decision','INVALIDATED');expect((await featureReviewAction({status:'idle'},f)).status).toBe('error')});
+ it('does not report replayed stale acceptance as current',async()=>{mocks.record.mockResolvedValue({replayed:true,review:{status:'REVIEW_REQUIRED'}});expect((await featureReviewAction({status:'idle'},form())).status).toBe('error')});
+ it('preserves server eligibility failures rather than claiming acceptance',async()=>{mocks.record.mockRejectedValue(new DomainError('Independent verification is not current.'));expect(await featureReviewAction({status:'idle'},form())).toMatchObject({status:'error',message:'Independent verification is not current.'})});
+});

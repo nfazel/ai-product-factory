@@ -1,0 +1,82 @@
+import fs from 'node:fs';import os from 'node:os';import path from 'node:path';import {randomBytes,randomUUID} from 'node:crypto';import {execFile} from 'node:child_process';import {promisify} from 'node:util';
+import pg from 'pg';
+import {beforeAll,afterAll,beforeEach,describe,it,expect,vi} from 'vitest';
+import {manifest as fixtureManifest} from './fixture.test-support';
+import {featureManifestDigest,type FeatureReviewManifest} from './manifest';
+vi.mock('./loader',()=>({loadFeatureManifest:vi.fn()}));
+import {loadFeatureManifest} from './loader';
+const exec=promisify(execFile),key='synthetic-feature-review-key-at-least-32-bytes';
+const databaseName=`apf_feature_test_${randomBytes(8).toString('hex')}`;
+const originalUrl=process.env.DATABASE_URL;
+let admin:pg.Client,db:typeof import('@/lib/db').db,api:typeof import('./service'),current:FeatureReviewManifest,created=false;
+const temp=fs.mkdtempSync(path.join(os.tmpdir(),'apf-feature-ledger-'));
+beforeAll(async()=>{
+ if(!originalUrl)throw new Error('Local database configuration is required.');
+ const url=new URL(originalUrl);if(!['127.0.0.1','localhost'].includes(url.hostname)||!/^apf_feature_test_[a-f0-9]{16}$/.test(databaseName))throw new Error('Disposable local test database isolation is unavailable.');
+ admin=new pg.Client({connectionString:originalUrl});await admin.connect();await admin.query(`CREATE DATABASE "${databaseName}"`);created=true;
+ url.pathname=`/${databaseName}`;process.env.DATABASE_URL=url.toString();
+ // No inherited API/operator secrets are delivered to the migration subprocess.
+ const empty=path.join(temp,'empty.env');fs.writeFileSync(empty,'');
+ try{await exec(process.execPath,['node_modules/prisma/build/index.js','migrate','deploy'],{cwd:process.cwd(),env:{PATH:process.env.PATH,HOME:process.env.HOME,DATABASE_URL:url.toString(),DOTENV_CONFIG_PATH:empty,NODE_ENV:'test'},timeout:60000,maxBuffer:2_000_000})}catch{throw new Error('Disposable test schema migration failed; no production schema was touched.')}
+ db=(await import('@/lib/db')).db;api=await import('./service');
+},90000);
+afterAll(async()=>{if(db)await db.$disconnect();if(admin){if(created)await admin.query(`DROP DATABASE "${databaseName}" WITH (FORCE)`);await admin.end()}if(originalUrl===undefined)delete process.env.DATABASE_URL;else process.env.DATABASE_URL=originalUrl;vi.unstubAllEnvs();fs.rmSync(temp,{recursive:true,force:true})},30000);
+beforeEach(async()=>{
+ vi.stubEnv('EXTERNAL_REVIEW_APPROVAL_KEY',key);vi.clearAllMocks();
+ const productId=randomUUID(),featureId=randomUUID();
+ await db.product.create({data:{id:productId,name:'Synthetic feature test',description:'Temporary',vision:'Temporary',problemStatement:'Temporary',targetUsers:'Test',status:'ACTIVE'}});
+ await db.workItem.create({data:{id:featureId,productId,type:'FEATURE',title:'Test feature',status:'READY'}});
+ current=fixtureManifest();current.productId=productId;current.featureId=featureId;current.scope[0].id=featureId;current.requirements[0].workItemId=featureId;
+ vi.mocked(loadFeatureManifest).mockImplementation(async(product,feature,reader=db)=>{if(product!==current.productId||feature!==current.featureId)throw new Error('Feature not found in product');const stored=await reader.featureReviewEvent.findFirst({where:{productId:product,featureId:feature,type:'ARCHIVED'}});const copy=structuredClone(current);copy.scope[0].archivedAt=stored?.createdAt.toISOString()??null;return copy});
+});
+function input(extra:Partial<Parameters<typeof import('./service').recordFeatureReview>[0]>={}){return{productId:current.productId,featureId:current.featureId,decision:'ACCEPTED' as const,reviewedDigest:featureManifestDigest(current),idempotencyKey:randomUUID(),credential:key,...extra}}
+describe('feature acceptance foundation with disposable PostgreSQL ledger',()=>{
+ it('accepts only protected operator decisions and preserves the exact reviewed manifest',async()=>{
+  const result=await api.recordFeatureReview(input());expect(result.review.status).toBe('ACCEPTED');const row=await db.featureReviewEvent.findUniqueOrThrow({where:{id:result.eventId}});expect(row.manifest).toEqual(current);expect(row.actorName).toBe('Local operator');expect(row.actorId).not.toBe('local-user');expect(row.signature).toMatch(/^[a-f0-9]{64}$/);expect('signature'in result.review.history[0]).toBe(false);expect(JSON.stringify(row)).not.toContain(key);
+ });
+ it('rejects missing credentials, caller identity spoofing and stale digests without a human event',async()=>{
+  await expect(api.recordFeatureReview(input({credential:'Local user'}))).rejects.toThrow();await expect(api.recordFeatureReview(input({reviewedDigest:'d'.repeat(64)}))).rejects.toThrow(/version changed/);expect(await db.featureReviewEvent.count({where:{featureId:current.featureId}})).toBe(0);
+ });
+ it('allows deferral before verification and acceptance later without changing work status',async()=>{
+  current.technical[0].current=false;const status=(await db.workItem.findUniqueOrThrow({where:{id:current.featureId}})).status;
+  const deferred=await api.recordFeatureReview(input({decision:'DEFERRED'}));expect(deferred.review.status).toBe('DEFERRED');expect((await db.workItem.findUniqueOrThrow({where:{id:current.featureId}})).status).toBe(status);current.technical[0].current=true;
+  const accepted=await api.recordFeatureReview(input());expect(accepted.review.history.map(event=>event.type)).toEqual(['DEFERRED','ACCEPTED']);
+ });
+ it('allows deferral of unverified draft work but preserves archived records as read-only',async()=>{current.productActive=false;expect((await api.recordFeatureReview(input({decision:'DEFERRED'}))).review.status).toBe('DEFERRED');current.productArchived=true;await expect(api.recordFeatureReview(input({decision:'DEFERRED'}))).rejects.toThrow(/Archived/)});
+ it('rejects unverified features and cannot acknowledge a failed mandatory control away',async()=>{
+  current.technical[0].mandatoryPassed=false;current.technical[0].verdict='PASS_WITH_CONCERNS';await expect(api.recordFeatureReview(input())).rejects.toThrow(/acceptance is unavailable/);expect(await db.featureReviewEvent.count({where:{featureId:current.featureId}})).toBe(0);
+ });
+ it('requires exact acknowledgement of all non-blocking concerns',async()=>{
+  current.technical[0].verdict='PASS_WITH_CONCERNS';current.technical[0].concerns=[{id:'optional-gap',text:'Non-blocking optional gap'}];await expect(api.recordFeatureReview(input())).rejects.toThrow(/acknowledgement/);const accepted=await api.recordFeatureReview(input({acknowledgedConcerns:['optional-gap']}));expect(accepted.review.status).toBe('ACCEPTED');
+ });
+ it('rechecks operator authority if it changes while the reviewed version is loading',async()=>{vi.mocked(loadFeatureManifest).mockImplementationOnce(async()=>{vi.stubEnv('EXTERNAL_REVIEW_APPROVAL_KEY','rotated-feature-operator-key-at-least-32-bytes');return structuredClone(current)});await expect(api.recordFeatureReview(input())).rejects.toThrow();expect(await db.featureReviewEvent.count({where:{featureId:current.featureId}})).toBe(0)});
+ it('reserves system idempotency keys',async()=>{await expect(api.recordFeatureReview(input({idempotencyKey:'invalidate:reserved'}))).rejects.toThrow(/idempotency/)});
+ it('is idempotent and rejects the same key with changed content',async()=>{
+  const request=input();const first=await api.recordFeatureReview(request),retry=await api.recordFeatureReview(request);expect(retry.eventId).toBe(first.eventId);expect(retry.replayed).toBe(true);await expect(api.recordFeatureReview({...request,reason:'Changed decision reason'})).rejects.toThrow(/idempotency/);expect(await db.featureReviewEvent.count({where:{featureId:current.featureId}})).toBe(1);
+ });
+ it('serializes simultaneous duplicate decisions without duplicate history',async()=>{
+  const request=input();const results=await Promise.all(Array.from({length:5},()=>api.recordFeatureReview(request)));expect(new Set(results.map(result=>result.eventId)).size).toBe(1);expect(await db.featureReviewEvent.count({where:{featureId:current.featureId}})).toBe(1);
+ });
+ it.each(['implementation','requirements','membership','evidence','authority'] as const)('appends terminal invalidation after %s changes',async change=>{
+  const accepted=await api.recordFeatureReview(input()),before=await db.featureReviewEvent.findUniqueOrThrow({where:{id:accepted.eventId}});const original=structuredClone(current);
+  if(change==='implementation')current.build.commitSha='c'.repeat(40);if(change==='requirements')current.requirements[0].description='New approved requirement';if(change==='membership')current.taskIds.push('new-task');if(change==='evidence')current.technical[0].fingerprint='new evidence';if(change==='authority')current.technical[0].current=false;
+  expect((await api.getFeatureReview(current.productId,current.featureId)).status).toBe('REVIEW_REQUIRED');expect(await db.featureReviewEvent.findUniqueOrThrow({where:{id:accepted.eventId}})).toEqual(before);current=original;const again=await api.getFeatureReview(current.productId,current.featureId);expect(again.status).toBe('REVIEW_REQUIRED');expect(again.history.filter(event=>event.type==='INVALIDATED')).toHaveLength(1);
+ });
+ it('preserves acceptance during a transient authority outage and restores it without a new decision',async()=>{await api.recordFeatureReview(input());current.observation={unavailable:true,changed:false,reasons:['Unavailable']};current.technical[0].current=false;const unavailable=await api.getFeatureReview(current.productId,current.featureId);expect(unavailable.status).toBe('UNAVAILABLE');expect(unavailable.eligible).toBe(false);expect(unavailable.history.map(event=>event.type)).toEqual(['ACCEPTED']);await expect(api.recordFeatureReview(input())).rejects.toThrow(/unavailable/);await expect(api.recordFeatureReview(input({decision:'DEFERRED'}))).rejects.toThrow(/withdraw/);delete current.observation;current.technical[0].current=true;expect((await api.getFeatureReview(current.productId,current.featureId)).status).toBe('ACCEPTED')});
+ it('preserves accepted history through temporary Git unavailability and recovers the exact snapshot',async()=>{await api.recordFeatureReview(input());const build=structuredClone(current.build);current.observation={unavailable:true,changed:false,reasons:[]};current.build={...build,available:false,clean:false,commitSha:'',tree:''};current.technical[0].current=false;expect((await api.getFeatureReview(current.productId,current.featureId)).history.map(event=>event.type)).toEqual(['ACCEPTED']);current.build=build;current.technical[0].current=true;delete current.observation;expect((await api.getFeatureReview(current.productId,current.featureId)).status).toBe('ACCEPTED')});
+ it('does not permanently revoke acceptance when operator configuration is temporarily missing',async()=>{await api.recordFeatureReview(input());vi.stubEnv('EXTERNAL_REVIEW_APPROVAL_KEY','');expect((await api.getFeatureReview(current.productId,current.featureId)).history).toHaveLength(1);vi.stubEnv('EXTERNAL_REVIEW_APPROVAL_KEY',key);expect((await api.getFeatureReview(current.productId,current.featureId)).status).toBe('ACCEPTED')});
+ it('still records confirmed requirement changes during a technical outage',async()=>{await api.recordFeatureReview(input());current.observation={unavailable:true,changed:false,reasons:[]};current.requirements[0].description='Confirmed new approved requirement';const review=await api.getFeatureReview(current.productId,current.featureId);expect(review.status).toBe('UNAVAILABLE');expect(review.history.map(event=>event.type)).toEqual(['ACCEPTED','INVALIDATED'])});
+ it('deduplicates concurrent invalidation and permits a fresh explicitly reviewed version',async()=>{const first=await api.recordFeatureReview(input());current.requirements[0].description='Revised approved behaviour';const reviews=await Promise.all(Array.from({length:4},()=>api.getFeatureReview(current.productId,current.featureId)));expect(reviews.every(review=>review.status==='REVIEW_REQUIRED')).toBe(true);expect(await db.featureReviewEvent.count({where:{invalidatesEventId:first.eventId}})).toBe(1);const fresh=await api.recordFeatureReview(input());expect(fresh.review.status).toBe('ACCEPTED');expect(fresh.review.history.filter(event=>event.type==='ACCEPTED')).toHaveLength(2)});
+ it('invalidates old signature authority when the operator credential changes',async()=>{
+  await api.recordFeatureReview(input());vi.stubEnv('EXTERNAL_REVIEW_APPROVAL_KEY','different-feature-operator-key-of-32-bytes');expect((await api.getFeatureReview(current.productId,current.featureId)).status).toBe('REVIEW_REQUIRED');
+ });
+ it('does not turn deferral into withdrawal of an existing acceptance',async()=>{await api.recordFeatureReview(input());await expect(api.recordFeatureReview(input({decision:'DEFERRED'}))).rejects.toThrow(/does not withdraw/)});
+ it('enforces append-only rows, truncate prevention and retained parents in PostgreSQL',async()=>{
+  const accepted=await api.recordFeatureReview(input());await expect(db.featureReviewEvent.update({where:{id:accepted.eventId},data:{reason:'rewrite'}})).rejects.toThrow();await expect(db.featureReviewEvent.delete({where:{id:accepted.eventId}})).rejects.toThrow();await expect(db.$executeRawUnsafe('TRUNCATE TABLE "FeatureReviewEvent" CASCADE')).rejects.toThrow();await expect(db.workItem.delete({where:{id:current.featureId}})).rejects.toThrow();await expect(db.product.delete({where:{id:current.productId}})).rejects.toThrow();expect(await db.featureReviewEvent.count({where:{id:accepted.eventId}})).toBe(1);
+ });
+ it('archives accepted features without deleting their review history',async()=>{const accepted=await api.recordFeatureReview(input());const archived=await api.archiveReviewedFeature(current.productId,current.featureId,key);expect(archived.status).toBe('ARCHIVED');expect(archived.history.some(event=>event.id===accepted.eventId)).toBe(true);expect(archived.manifest.scope[0].archivedAt).not.toBeNull()});
+ it('keeps deferral scoped to its feature while another feature is accepted',async()=>{current.technical[0].current=false;const firstFeature=current.featureId;await api.recordFeatureReview(input({decision:'DEFERRED'}));const second=randomUUID();await db.workItem.create({data:{id:second,productId:current.productId,type:'FEATURE',title:'Independent feature',status:'READY'}});current.featureId=second;current.scope[0].id=second;current.requirements[0].workItemId=second;current.technical[0].current=true;expect((await api.recordFeatureReview(input())).review.status).toBe('ACCEPTED');expect((await db.featureReviewEvent.findMany({where:{featureId:firstFeature}})).map(event=>event.type)).toEqual(['DEFERRED'])});
+ it('rejects cross-product and non-feature ledger targets at the database boundary',async()=>{const other=await db.product.create({data:{name:'Other synthetic product',description:'Temporary',vision:'Temporary',problemStatement:'Temporary',targetUsers:'Test'}});const row={productId:other.id,featureId:current.featureId,type:'ACCEPTED' as const,manifest:JSON.parse(JSON.stringify(current)),manifestDigest:featureManifestDigest(current),actorKind:'LOCAL_OPERATOR',actorId:'forged',actorName:'Caller name',idempotencyKey:randomUUID(),requestDigest:'a'.repeat(64),signature:'0'.repeat(64)};await expect(db.featureReviewEvent.create({data:row})).rejects.toThrow();const story=await db.workItem.create({data:{productId:current.productId,type:'STORY',title:'A story'}});await expect(db.featureReviewEvent.create({data:{...row,productId:current.productId,featureId:story.id}})).rejects.toThrow()});
+ it('does not trust a stored acceptance label without valid protected operator proof',async()=>{await db.featureReviewEvent.create({data:{productId:current.productId,featureId:current.featureId,type:'ACCEPTED',manifest:JSON.parse(JSON.stringify(current)),manifestDigest:featureManifestDigest(current),actorKind:'LOCAL_OPERATOR',actorId:'caller',actorName:'Local user',idempotencyKey:randomUUID(),requestDigest:'a'.repeat(64),signature:'0'.repeat(64)}});const review=await api.getFeatureReview(current.productId,current.featureId);expect(review.status).toBe('REVIEW_REQUIRED');expect(review.acceptanceId).toBeNull()});
+ it('rejects operator credentials in persisted review comments',async()=>{await expect(api.recordFeatureReview(input({reason:`Do not save ${key}`}))).rejects.toThrow(/credentials/);expect(await db.featureReviewEvent.count({where:{featureId:current.featureId}})).toBe(0)});
+});

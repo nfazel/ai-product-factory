@@ -1,3 +1,4 @@
+import {FeatureReviews} from '@/components/build/feature-reviews';
 import { Suspense } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -193,6 +194,7 @@ async function Build({
 
       <BuildReadiness coding={workspace.coding} />
 
+      <Suspense fallback={<p>Loading feature reviews…</p>}><FeatureReviews productId={id}/></Suspense>
       <BuildOverview
         productId={id}
         summary={overview}

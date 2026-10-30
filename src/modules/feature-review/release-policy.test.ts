@@ -1,0 +1,14 @@
+import {describe,it,expect} from 'vitest';
+import {featureAcceptanceBlockers,releaseScopeChanged,candidateFeatureBlockers} from './release-policy';
+import {releaseFingerprint,entryBlockers,evidenceDrafts} from '@/modules/release/readiness';
+import type {ReleaseFacts} from '@/modules/release/readiness';
+const accepted={featureId:'feature',title:'Feature',status:'ACCEPTED',acceptanceId:'acceptance',digest:'d'.repeat(64),commitSha:'a'.repeat(40),taskIds:['task']};
+const facts={tasks:[{id:'task'}],featureAcceptance:[accepted]};
+describe('release feature acceptance policy',()=>{
+ it('requires valid acceptance without silently excluding deferred features',()=>{expect(featureAcceptanceBlockers(facts)).toEqual([]);for(const status of ['DEFERRED','REVIEW_REQUIRED','UNAVAILABLE','INCOMPLETE_SCOPE','UNMAPPED'])expect(featureAcceptanceBlockers({...facts,featureAcceptance:[{...accepted,status}]}).length).toBeGreaterThan(0)});
+ it('rejects missing acceptance and unmapped included tasks',()=>{expect(featureAcceptanceBlockers({tasks:facts.tasks})).not.toEqual([]);expect(featureAcceptanceBlockers({...facts,tasks:[...facts.tasks,{id:'unmapped'}]})).not.toEqual([])});
+ it('prevents refresh from silently replacing included task scope',()=>{const items=[{type:'IMPLEMENTATION_TASK',implementationTaskId:'original'}];expect(releaseScopeChanged(items,facts.tasks)).toBe(true);expect(candidateFeatureBlockers({items},facts)).toContain('Release scope changed; create a new candidate after review.')});
+ it('binds acceptance identity, scope and digest into release fingerprints',()=>{const input={sliceId:'slice',tasks:[],plan:null,factors:[],evidence:[],governanceCurrent:true,policyCurrent:true,integratedId:'integrated',integratedGaps:[],featureAcceptance:[accepted]};const original=releaseFingerprint(input);for(const change of [{acceptanceId:'other'},{digest:'e'.repeat(64)},{status:'UNAVAILABLE'}])expect(releaseFingerprint({...input,featureAcceptance:[{...accepted,...change}]})).not.toBe(original)});
+ it('retains the actual acceptance reference and manifest digest in the generated evidence pack',()=>{const facts={productId:'p',slice:null,tasks:[],defects:[],featureAcceptance:[accepted]} as unknown as ReleaseFacts;const proof=evidenceDrafts(facts).find(row=>row.referenceId==='acceptance');expect(proof).toMatchObject({source:'HUMAN',result:'APPROVED'});expect(proof?.description).toContain(accepted.digest)});
+ it('adds acceptance to existing candidate creation blockers',()=>{const all={productId:'p',slice:{id:'s',name:'Slice',status:'APPROVED',description:''},tasks:[],defects:[],governanceCurrent:true,policyCurrent:true,integrated:{id:'i',verdict:'PASS',gaps:[]},featureAcceptance:[{...accepted,status:'DEFERRED'}]} as unknown as ReleaseFacts;expect(entryBlockers(all).some(reason=>reason.includes('human acceptance'))).toBe(true)});
+});

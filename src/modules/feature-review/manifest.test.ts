@@ -1,0 +1,12 @@
+import {describe,it,expect} from 'vitest';
+import {featureManifestDigest,reviewEligibility,featureScope} from './manifest';
+import {manifest} from './fixture.test-support';
+
+describe('complete feature review eligibility',()=>{
+ it('requires feature-level functional coverage beyond technical task completion',()=>{const m=manifest();expect(reviewEligibility(m).eligible).toBe(true);m.technical[0].criteria=[];expect(reviewEligibility(m).eligible).toBe(false)});
+ it.each(['FAIL','INCONCLUSIVE','NOT_RUN'])('rejects %s verification',verdict=>{const m=manifest();m.technical[0].verdict=verdict;expect(reviewEligibility(m).eligible).toBe(false)});
+ it.each(['mandatory','authority','version','unapproved','archive','missing-task','dirty','blocking'])('rejects %s',change=>{const m=manifest();if(change==='mandatory')m.technical[0].mandatoryPassed=false;if(change==='authority')m.technical[0].current=false;if(change==='version')m.technical[0].commitSha='c'.repeat(40);if(change==='unapproved')m.requirementsApproved=false;if(change==='archive')m.scope[0].archivedAt='now';if(change==='missing-task')m.taskIds.push('missing');if(change==='dirty')m.build.clean=false;if(change==='blocking')m.blockingIssues.push('Open security defect');expect(reviewEligibility(m).eligible).toBe(false)});
+ it('allows only non-blocking concerns after mandatory controls pass',()=>{const m=manifest();m.technical[0].verdict='PASS_WITH_CONCERNS';m.technical[0].concerns=[{id:'optional',text:'An optional check was unavailable'}];expect(reviewEligibility(m)).toMatchObject({eligible:true,concerns:m.technical[0].concerns});m.technical[0].mandatoryPassed=false;expect(reviewEligibility(m).eligible).toBe(false)});
+ it.each(['build','requirements','membership','evidence','authority'])('binds changed %s',change=>{const a=manifest(),b=structuredClone(a);if(change==='build')b.build.commitSha='c'.repeat(40);if(change==='requirements')b.requirements[0].description='Different behaviour';if(change==='membership')b.taskIds.push('new-task');if(change==='evidence')b.technical[0].fingerprint='changed';if(change==='authority')b.technical[0].authorityDigest='revoked';expect(featureManifestDigest(a)).not.toBe(featureManifestDigest(b))});
+ it('is generic across target platforms and rejects cross-feature hierarchy scope',()=>{const m=manifest();expect(featureScope('f',m.scope)).toEqual(m.scope);expect(()=>featureScope('task',m.scope)).toThrow();expect(()=>featureScope('f',[...m.scope,{...m.scope[0],id:'nested',parentId:'f'}])).toThrow(/Nested/)});
+});

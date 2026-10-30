@@ -90,6 +90,7 @@ model Product {
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
 
+  featureReviewEvents FeatureReviewEvent[]
   workItems         WorkItem[]
   decisions         Decision[]
   approvals         Approval[]
@@ -162,6 +163,7 @@ model WorkItem {
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
 
+  featureReviewEvents FeatureReviewEvent[]
   product    Product    @relation(fields: [productId], references: [id], onDelete: Cascade)
   parent     WorkItem?  @relation("WorkItemHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
   children   WorkItem[] @relation("WorkItemHierarchy")
@@ -3388,4 +3390,41 @@ model RequirementTraceLink {
   @@unique([sourceRequirementId, targetKind, targetId])
   @@index([productId])
   @@index([targetId])
+}
+
+// Business acceptance is distinct from technical/code/release approvals.
+enum FeatureReviewEventType {
+  ACCEPTED
+  DEFERRED
+  INVALIDATED
+  ARCHIVED
+}
+
+model FeatureReviewEvent {
+  id String @id @default(cuid())
+  sequence Int @unique @default(autoincrement())
+  productId String
+  featureId String
+  type FeatureReviewEventType
+  manifestVersion Int @default(1)
+  manifest Json
+  manifestDigest String
+  actorKind String
+  actorId String
+  actorName String
+  reason String @default("")
+  acknowledgedConcerns Json @default("[]")
+  idempotencyKey String
+  requestDigest String
+  signature String @default("")
+  invalidatesEventId String? @unique
+  createdAt DateTime @default(now())
+
+  product Product @relation(fields:[productId], references:[id], onDelete:Restrict)
+  feature WorkItem @relation(fields:[featureId], references:[id], onDelete:Restrict)
+  invalidates FeatureReviewEvent? @relation("FeatureReviewInvalidation",fields:[invalidatesEventId],references:[id],onDelete:Restrict)
+  invalidatedBy FeatureReviewEvent? @relation("FeatureReviewInvalidation")
+
+  @@unique([featureId,idempotencyKey])
+  @@index([productId,featureId,createdAt])
 }

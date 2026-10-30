@@ -1,3 +1,6 @@
+import {releaseFeatureAcceptance} from '@/modules/feature-review/release';
+import {featureAcceptanceBlockers,releaseScopeChanged,candidateFeatureBlockers} from '@/modules/feature-review/release-policy';
+import {inspectSessionRuntimeBinding} from '@/modules/verification/runtime-review';
 import "server-only";
 
 import type { Prisma } from "@/generated/prisma/client";
@@ -5,7 +8,7 @@ import type { Prisma } from "@/generated/prisma/client";
 import { db } from "@/lib/db";
 import { getAIProvider, isAIConfigured, prepareAI } from "@/modules/ai/provider";
 import { recordActivity } from "@/modules/activity/service";
-import { verificationApprovalIsCurrent } from "@/modules/verification/integrity";
+import { VERIFICATION_EVIDENCE_INCLUDE, verificationApprovalIsCurrent } from "@/modules/verification/integrity";
 import { getCurrentActor } from "@/modules/identity/actor";
 import { buildReleasePrompt, RELEASE_REVIEW_PROMPT, releaseNotesSchema, releaseReviewSchema } from "@/modules/release/prompt";
 import {
@@ -97,7 +100,7 @@ export async function loadReleaseFacts(productId: string): Promise<ReleaseFacts>
               workItem: { include: { acceptanceCriteria: true, parent: { include: { parent: true } } } },
               verificationSessions: {
                 orderBy: { createdAt: "desc" },
-                include: { approvals: { include: { approval: true } }, coverages: true, executions: true },
+                include: VERIFICATION_EVIDENCE_INCLUDE,
               },
               publishedChanges: { orderBy: { createdAt: "desc" }, include: { pullRequest: { include: { checks: true, reviews: true } } } },
             },
@@ -119,6 +122,7 @@ export async function loadReleaseFacts(productId: string): Promise<ReleaseFacts>
   const integrated = slice
     ? await db.integratedVerificationSession.findFirst({ where: { productId, productSliceId: slice.id }, orderBy: { createdAt: "desc" } })
     : null;
+  for (const task of plan?.tasks ?? []) for (const session of task.verificationSessions) if ((await inspectSessionRuntimeBinding(session.id))!=='CURRENT') session.stale = true;
   const tasks: ReleaseTaskFact[] = (plan?.tasks ?? []).map((task) => {
     const session = task.verificationSessions[0];
     const verificationApproval = session?.approvals.find((item) => session && verificationApprovalIsCurrent(item, session));
@@ -167,7 +171,9 @@ export async function loadReleaseFacts(productId: string): Promise<ReleaseFacts>
         : null,
     };
   });
+  const featureAcceptance=await releaseFeatureAcceptance(productId,tasks,slice?.id);
   return {
+    featureAcceptance,
     productId,
     slice: slice ? { id: slice.id, name: slice.name, status: slice.status, description: slice.description } : null,
     outcome: outcome
@@ -245,7 +251,8 @@ async function replaceGenerated(candidateId: string, facts: ReleaseFacts) {
   await db.releaseCandidateItem.deleteMany({ where: { releaseCandidateId: candidateId } });
   const items = facts.tasks.flatMap((task) => {
     const rows: Prisma.ReleaseCandidateItemCreateManyInput[] = [];
-    if (task.featureTitle) rows.push({ releaseCandidateId: candidateId, type: "FEATURE", title: task.featureTitle, workItemId: task.workItemId || null });
+    const acceptedFeature=facts.featureAcceptance?.find(feature=>feature.taskIds.includes(task.id));
+    if (acceptedFeature) rows.push({ releaseCandidateId: candidateId, type: "FEATURE", title: acceptedFeature.title, workItemId: acceptedFeature.featureId });
     if (task.storyTitle) rows.push({ releaseCandidateId: candidateId, type: "STORY", title: task.storyTitle, workItemId: task.workItemId || null });
     rows.push({
       releaseCandidateId: candidateId,
@@ -329,12 +336,22 @@ async function syncFactors(candidate: CandidateRecord, facts: ReleaseFacts) {
 
 async function syncCandidate(candidate: CandidateRecord, facts: ReleaseFacts) {
   if (candidate.demo) return candidate;
+  const acceptanceBlockers=featureAcceptanceBlockers(facts),scopeChanged=releaseScopeChanged(candidate.items,facts.tasks,facts.featureAcceptance);
+  if(facts.featureAcceptance?.some(feature=>feature.status==='UNAVAILABLE'))return candidate;
+  if(acceptanceBlockers.length||scopeChanged){
+    const reason='Feature acceptance: '+(scopeChanged?'Release scope changed; create a new candidate after review.':acceptanceBlockers.join(' '));
+    if(!candidate.reviewRequired)await db.releaseCandidate.update({where:{id:candidate.id},data:{reviewRequired:true,reviewReason:reason}});
+    await db.releaseApproval.updateMany({where:{releaseCandidateId:candidate.id,stale:false},data:{stale:true,staleReason:reason,staleFlaggedAt:new Date()}});
+    return loadCandidate(candidate.id,candidate.productId);
+  }
+  if(candidate.reviewRequired&&candidate.reviewReason.startsWith('Feature acceptance:'))await db.releaseCandidate.update({where:{id:candidate.id},data:{reviewRequired:false,reviewReason:''}});
   await replaceGenerated(candidate.id, facts);
   const refreshed = await loadCandidate(candidate.id, candidate.productId);
   const factors = await syncFactors(refreshed, facts);
   const plan = planFact(await loadCandidate(candidate.id, candidate.productId));
   const evidence = await db.releaseEvidence.findMany({ where: { releaseCandidateId: candidate.id } });
   const fingerprint = releaseFingerprint({
+    featureAcceptance:facts.featureAcceptance,
     sliceId: facts.slice?.id ?? "",
     tasks: facts.tasks,
     plan,
@@ -379,7 +396,7 @@ function present(candidate: CandidateRecord, facts: ReleaseFacts) {
     : assessReleaseReadiness({ facts, plan, evidence, operationalSufficient: operations.sufficient, operationalRelevant: operations.relevant });
   const blockers = candidate.demo
     ? ["DEMO DATA. This release candidate cannot be approved."]
-    : approvalBlockers({ factors, questions: candidate.questions, evidence, plan });
+    : [...featureAcceptanceBlockers(facts),...(releaseScopeChanged(candidate.items,facts.tasks,facts.featureAcceptance)?["Release scope changed; create a new candidate after review."]:[]),...approvalBlockers({ factors, questions: candidate.questions, evidence, plan })];
   const approval = candidate.approvals[0];
   const learn = learnBlockers({
     demo: candidate.demo,
@@ -394,8 +411,8 @@ function present(candidate: CandidateRecord, facts: ReleaseFacts) {
     description: candidate.description,
     status: candidate.status,
     demo: candidate.demo,
-    reviewRequired: candidate.reviewRequired,
-    reviewReason: candidate.reviewReason,
+    reviewRequired: candidate.reviewRequired || candidateFeatureBlockers(candidate,facts).length>0,
+    reviewReason: candidate.reviewReason||candidateFeatureBlockers(candidate,facts).join(" "),
     createdBy: candidate.createdBy,
     sourceCommits: Array.isArray(candidate.sourceCommitSummary)
       ? (candidate.sourceCommitSummary as { number: number; headSha: string; mergeSha: string; mergedBy: string; mergedAt: string | null }[])
@@ -511,7 +528,11 @@ export async function createReleaseCandidate(productId: string, versionInput: st
   });
   await recordActivity({ productId, type: "RELEASE_CANDIDATE_CREATED", description: `${actor} created release candidate ${version}.`, actor });
   const loaded = await loadCandidate(candidate.id, productId);
-  await syncCandidate(loaded, facts);
+  const freshFacts=await loadReleaseFacts(productId);
+  const finalBlockers=featureAcceptanceBlockers(freshFacts);
+  if(finalBlockers.length)throw new DomainError(finalBlockers.join(" "));
+  const refreshed=await syncCandidate(loaded,freshFacts);
+  if(refreshed.reviewRequired)throw new DomainError(refreshed.reviewReason);
   await db.releaseCandidate.update({ where: { id: candidate.id }, data: { status: "READY_FOR_REVIEW" } });
   await recordActivity({ productId, type: "RELEASE_EVIDENCE_ADDED", description: `Evidence pack recorded for ${version}.`, actor });
   await recordActivity({ productId, type: "RELEASE_RISK_IDENTIFIED", description: `Deterministic release risk recorded for ${version}.`, actor });
@@ -753,6 +774,9 @@ export async function approveRelease(productId: string, candidateId: string, act
   assertHuman(actor);
   const facts = await loadReleaseFacts(productId);
   const candidate = await syncCandidate(await loadCandidate(candidateId, productId), facts);
+  const acceptanceBlockers=candidateFeatureBlockers(candidate,facts);
+  if(acceptanceBlockers.length)throw new DomainError(acceptanceBlockers.join(" "));
+  if(candidate.reviewRequired)throw new DomainError(candidate.reviewReason||"Release review is required.");
   if (candidate.demo) throw new DomainError("Demo release data cannot be approved.");
   const blockers = approvalBlockers({
     factors: candidate.risk?.factors ?? [],
@@ -804,7 +828,10 @@ export async function recordDeployment(productId: string, candidateId: string, i
 }, actorInput?: string) {
   const actor = actorName(actorInput);
   assertHuman(actor);
-  const candidate = await loadCandidate(candidateId, productId);
+  const facts=await loadReleaseFacts(productId);
+  const candidate=await syncCandidate(await loadCandidate(candidateId,productId),facts);
+  const acceptanceBlockers=candidateFeatureBlockers(candidate,facts);
+  if(acceptanceBlockers.length)throw new DomainError(acceptanceBlockers.join(" "));
   if (candidate.demo) throw new DomainError("Demo data cannot be recorded as a deployment.");
   if (!["STARTED", "SUCCEEDED", "FAILED"].includes(input.status)) throw new DomainError("Choose a deployment result.");
   const approval = candidate.approvals.find((item) => item.approval.status === "APPROVED" && !item.stale);
@@ -1180,7 +1207,7 @@ export async function stageMoveBlockers(productId: string, stage: "SHIP" | "LEAR
   if (!view) return ["The product was not found."];
   if (stage === "SHIP") {
     const approved = view.versions.some((item) => !item.demo && (item.status === "APPROVED" || item.status === "DEPLOYED"));
-    const current = view.candidate && !view.candidate.demo && (view.candidate.status === "APPROVED" || view.candidate.status === "DEPLOYED") && view.candidate.approval && !view.candidate.approval.stale;
+    const current = view.candidate && !view.candidate.demo && !view.candidate.reviewRequired && view.candidate.blockers.length===0 && (view.candidate.status === "APPROVED" || view.candidate.status === "DEPLOYED") && view.candidate.approval && !view.candidate.approval.stale;
     return approved && current ? [] : ["Ship stays closed until a person has approved a release candidate."];
   }
   return view.readyToLearn.ready ? [] : view.readyToLearn.reasons;

@@ -1,0 +1,20 @@
+import {beforeEach,describe,expect,it,vi} from 'vitest';
+const mock=vi.hoisted(()=>{const tables=new Map<string,{findMany:ReturnType<typeof vi.fn>;findUnique:ReturnType<typeof vi.fn>}>();const db=new Proxy({}, {get(_target,key:string){if(!tables.has(key))tables.set(key,{findMany:vi.fn(async()=>[]),findUnique:vi.fn(async()=>null)});return tables.get(key)}});return{db,tables,acceptance:vi.fn()}});
+vi.mock('@/lib/db',()=>({db:mock.db}));
+vi.mock('@/modules/feature-review/release',()=>({releaseFeatureAcceptance:mock.acceptance}));
+vi.mock('@/modules/coding/restore-approval',()=>({recoverApprovedPlansAfterProviderFailure:vi.fn(),restoreApprovedPlanAfterValidationFailure:vi.fn()}));
+vi.mock('@/modules/verification/runtime-review',()=>({runtimeReviewIsCurrent:vi.fn(async()=>true)}));
+vi.mock('@/modules/verification/integrity',()=>({VERIFICATION_EVIDENCE_INCLUDE:{},verificationApprovalIsCurrent:()=>true}));
+import {loadSnapshots} from './load';
+const accepted={featureId:'feature',title:'Feature',status:'ACCEPTED',acceptanceId:'acceptance',digest:'d'.repeat(64),commitSha:'a'.repeat(40),taskIds:['task']};
+function rows(table:string,value:unknown[]){Reflect.get(mock.db,table).findMany.mockResolvedValue(value)}
+beforeEach(()=>{vi.clearAllMocks();for(const table of mock.tables.values()){table.findMany.mockResolvedValue([]);table.findUnique.mockResolvedValue(null)}
+ rows('product',[{id:'p',name:'Synthetic product',currentStage:'PROVE',developmentContext:'EXISTING'}]);rows('productSlice',[{id:'slice',productId:'p',name:'Slice',status:'APPROVED'}]);rows('implementationPlan',[{id:'plan',productId:'p',status:'APPROVED'}]);rows('engineeringGovernanceReview',[{productId:'p',status:'APPROVED',reviewRequired:false,findings:[],policy:{reapprovalRequired:false}}]);rows('approval',[{productId:'p'}]);rows('implementationTask',[{id:'task',title:'Task',status:'COMPLETED',workItemId:'story',codingRisks:[],plan:{productId:'p',productSliceId:'slice'}}]);rows('verificationSession',[{id:'verification',productId:'p',implementationTaskId:'task',overallVerdict:'PASS',commitSha:'a'.repeat(40),stale:false,demo:false}]);rows('verificationApproval',[{implementationTaskId:'task',sessionId:'verification'}]);rows('pullRequestRecord',[{id:'pull',productId:'p',publishedChange:{implementationTaskId:'task'},state:'MERGED',demo:false,headSha:'a'.repeat(40),mergeCommitSha:'b'.repeat(40),reviews:[]}]);rows('integratedVerificationSession',[{productId:'p',id:'integrated'}]);mock.acceptance.mockResolvedValue([accepted]);
+});
+describe('guidance consumes existing feature acceptance and release policy',()=>{
+ it('recognises current acceptance and passes the exact product, slice and task identities',async()=>{const [snapshot]=await loadSnapshots('p');expect(snapshot.prove.entryOpen).toBe(true);expect(mock.acceptance).toHaveBeenCalledWith('p',expect.arrayContaining([expect.objectContaining({id:'task',workItemId:'story'})]),'slice')});
+ it.each(['DEFERRED','REVIEW_REQUIRED','UNAVAILABLE'])('keeps %s acceptance blocked',async status=>{mock.acceptance.mockResolvedValue([{...accepted,status}]);const [snapshot]=await loadSnapshots('p');expect(snapshot.prove.entryOpen).toBe(false);expect(snapshot.prove.entryReason).toContain('human acceptance')});
+ it('keeps missing acceptance blocked',async()=>{mock.acceptance.mockResolvedValue([]);const [snapshot]=await loadSnapshots('p');expect(snapshot.prove.entryOpen).toBe(false);expect(snapshot.prove.entryReason).toContain('acceptance')});
+ it('does not return open guidance when the acceptance lookup itself fails',async()=>{mock.acceptance.mockRejectedValueOnce(new Error('Authority unavailable'));await expect(loadSnapshots('p')).rejects.toThrow('Authority unavailable')});
+ it('preserves existing technical verification gates despite human acceptance',async()=>{rows('verificationSession',[]);const [snapshot]=await loadSnapshots('p');expect(snapshot.prove.entryOpen).toBe(false);expect(snapshot.prove.entryReason).toContain('approved verification')});
+});

@@ -1,3 +1,5 @@
+import type {FeatureAcceptanceFact} from '@/modules/feature-review/release';
+import {featureAcceptanceBlockers} from '@/modules/feature-review/release-policy';
 import { createHash } from "node:crypto";
 
 import { currentChecks } from "@/modules/source-control/ci-state";
@@ -71,6 +73,7 @@ export type ReleaseTaskFact = {
 };
 
 export type ReleaseFacts = {
+  featureAcceptance?: FeatureAcceptanceFact[];
   productId: string;
   slice: { id: string; name: string; status: string; description: string } | null;
   outcome: { id: string; title: string; successMeasure: string; target: string; status: string } | null;
@@ -133,7 +136,7 @@ function mergedPull(task: ReleaseTaskFact) {
 }
 
 export function entryBlockers(facts: ReleaseFacts) {
-  const reasons: string[] = [];
+  const reasons: string[] = featureAcceptanceBlockers(facts);
   if (!facts.slice || facts.slice.status !== "APPROVED") reasons.push("The product slice is not approved.");
   if (facts.tasks.length === 0) reasons.push("The approved slice has no implementation tasks.");
   for (const task of facts.tasks) {
@@ -325,6 +328,7 @@ export function overallRisk(factors: { severity: string; status: string }[]): Re
 
 export function evidenceDrafts(facts: ReleaseFacts): EvidenceDraft[] {
   const rows: EvidenceDraft[] = [];
+  for(const feature of facts.featureAcceptance??[])rows.push({type:"PRODUCT_APPROVAL",source:"HUMAN",description:`Feature ${feature.featureId}: ${feature.title}. Human acceptance ${feature.acceptanceId??"missing"}; manifest ${feature.digest}; implementation ${feature.commitSha}.`,result:feature.status==="ACCEPTED"?"APPROVED":"MISSING",referenceId:feature.acceptanceId??""});
   rows.push({
     type: "PRODUCT_APPROVAL",
     source: "FACTORY",
@@ -596,6 +600,7 @@ export function learnBlockers(input: {
 }
 
 export function releaseFingerprint(input: {
+  featureAcceptance?: FeatureAcceptanceFact[];
   sliceId: string;
   tasks: ReleaseTaskFact[];
   plan: PlanFact | null;
@@ -607,6 +612,7 @@ export function releaseFingerprint(input: {
   integratedGaps: string[];
 }) {
   const body = {
+    featureAcceptance: [...(input.featureAcceptance??[])].sort((a,b)=>a.featureId.localeCompare(b.featureId)),
     sliceId: input.sliceId,
     governanceCurrent: input.governanceCurrent,
     policyCurrent: input.policyCurrent,

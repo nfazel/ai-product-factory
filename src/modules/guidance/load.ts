@@ -1,3 +1,4 @@
+import { releaseFeatureAcceptance } from '@/modules/feature-review/release';
 import {runtimeReviewIsCurrent} from '@/modules/verification/runtime-review';
 import "server-only";
 
@@ -250,7 +251,7 @@ export async function loadSnapshots(productId?: string): Promise<GuidanceSnapsho
   });
 
   for (const session of verifications) if (!(await runtimeReviewIsCurrent(session.id))) session.stale = true;
-  return products.map((product) => {
+  return Promise.all(products.map(async (product): Promise<GuidanceSnapshot> => {
     const brief = briefs.find((item) => item.productId === product.id);
     const definition = definitions.find((item) => item.productId === product.id);
     const definitionApproved = Boolean(definition?.status === "APPROVED" && definitionApprovals.some((item) => item.productId === product.id));
@@ -452,6 +453,7 @@ export async function loadSnapshots(productId?: string): Promise<GuidanceSnapsho
       };
     });
     const facts: ReleaseFacts = {
+      featureAcceptance: await releaseFeatureAcceptance(product.id, realTasks, slice?.id),
       productId: product.id,
       slice: slice ? { id: slice.id, name: slice.name, status: slice.status, description: slice.description } : null,
       outcome: primaryOutcome ? { id: primaryOutcome.id, title: primaryOutcome.title, successMeasure: primaryOutcome.successMeasure, target: primaryOutcome.targetValue, status: primaryOutcome.status } : null,
@@ -637,5 +639,5 @@ export async function loadSnapshots(productId?: string): Promise<GuidanceSnapsho
         updatedAt: iso(latestObservation?.observedAt ?? learning.find((item) => item.productId === product.id)?.createdAt),
       },
     };
-  });
+  }));
 }
