@@ -1,9 +1,10 @@
+import {runtimeReviewIsCurrent} from '@/modules/verification/runtime-review';
 import "server-only";
 
 import { getAIProvider, isAIConfigured, prepareAI } from "@/modules/ai/provider";
 import { recordActivity } from "@/modules/activity/service";
 import { classifyWrite } from "@/modules/coding/policy";
-import { verificationApprovalIsCurrent } from "@/modules/verification/integrity";
+import { VERIFICATION_EVIDENCE_INCLUDE, verificationApprovalIsCurrent } from "@/modules/verification/integrity";
 import { asStrings } from "@/modules/coding/strings";
 import { getCurrentActor } from "@/modules/identity/actor";
 import { db } from "@/lib/db";
@@ -917,9 +918,7 @@ const taskInclude = {
   verificationSessions: {
     orderBy: { createdAt: "desc" as const },
     include: {
-      approvals: { include: { approval: true } },
-      executions: true,
-      coverages: true,
+      ...VERIFICATION_EVIDENCE_INCLUDE,
       defectLinks: { include: { workItem: true } },
     },
   },
@@ -959,7 +958,7 @@ async function presentTask(
       !session.demo &&
       !session.stale &&
       (session.overallVerdict === "PASS" || session.overallVerdict === "PASS_WITH_CONCERNS") &&
-    session.approvals.some((item) => verificationApprovalIsCurrent(item, session)),
+    session.approvals.some((item) => verificationApprovalIsCurrent(item, session)) && await runtimeReviewIsCurrent(session.id),
   );
   const readiness = !pull
     ? { label: "NOT READY" as const, ready: false, reasons: ["No pull request has been created."], approvals: undefined }
@@ -1069,13 +1068,11 @@ async function currentVerification(productId: string, taskId: string, commitSha:
       overallVerdict: { in: ["PASS", "PASS_WITH_CONCERNS"] },
     },
     include: {
-      approvals: { include: { approval: true } },
-      executions: true,
-      coverages: true,
+      ...VERIFICATION_EVIDENCE_INCLUDE,
     },
     orderBy: { createdAt: "desc" },
   });
-  return session?.approvals.some((item) => verificationApprovalIsCurrent(item, session)) ? session : null;
+  return session?.approvals.some((item) => verificationApprovalIsCurrent(item, session)) && await runtimeReviewIsCurrent(session.id) ? session : null;
 }
 
 async function governanceIsCurrent(productId: string) {

@@ -6,6 +6,7 @@ import { spawnSync } from "node:child_process";
  * connection string or a secret: a database is recorded by name only.
  */
 export type TrackedResource =
+  | { id: string; kind: "container" | "network"; name: string; job: string }
   | { id: string; kind: "database"; name: string }
   | { id: string; kind: "runtime-directory"; path: string }
   | { id: string; kind: "process-group"; pid: number; processStart: string; label: string };
@@ -32,6 +33,17 @@ export function processStartTime(pid: number): string | null {
   return value.length > 0 ? value : null;
 }
 
+/** Recovery may touch only named resources inside this exact job namespace. */
+export function isContainerResourceName(kind: string, name: string, job: string) {
+  if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(job)) return false;
+  if (name === 'apf-verification-active-job') return kind === 'container';
+  const prefix = `apf-vf-${job}-`;
+  if (!name.startsWith(prefix)) return false;
+  const suffix = name.slice(prefix.length);
+  return kind === 'container' ? ['build','app','test','database','artifacts','schema','proxy','snapshot'].includes(suffix)
+    : kind === 'network' && ['dependencies','application','database','tests','test-database'].includes(suffix);
+}
+
 /** Reads the resource list from stored JSON, dropping anything that is not a well-formed record. */
 export function parseTrackedResources(value: unknown): TrackedResource[] {
   if (!Array.isArray(value)) return [];
@@ -40,7 +52,9 @@ export function parseTrackedResources(value: unknown): TrackedResource[] {
     if (!item || typeof item !== "object") continue;
     const record = item as Record<string, unknown>;
     if (typeof record.id !== "string") continue;
-    if (record.kind === "database" && typeof record.name === "string") {
+    if ((record.kind === "container" || record.kind === "network") && typeof record.name === "string" && typeof record.job === "string" && isContainerResourceName(record.kind, record.name, record.job)) {
+      resources.push({ id: record.id, kind: record.kind, name: record.name, job: record.job });
+    } else if (record.kind === "database" && typeof record.name === "string") {
       resources.push({ id: record.id, kind: "database", name: record.name });
     } else if (record.kind === "runtime-directory" && typeof record.path === "string") {
       resources.push({ id: record.id, kind: "runtime-directory", path: record.path });

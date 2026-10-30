@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { executionIsCredible, verificationAdapters } from "@/modules/verification/adapters/registry";
 import { httpBlackboxAdapter } from "@/modules/verification/adapters/http-blackbox";
-import { VERIFICATION_DATABASE_CONFIGURATION_MESSAGE } from "@/modules/verification/http/config";
 import type { ImplementationProfile } from "@/modules/verification/inspection";
 import { approveVerificationCommand } from "@/modules/verification/policy";
 import { assessTestBinding, isHttpBlackboxTest } from "@/modules/verification/test-binding";
@@ -26,7 +25,6 @@ const ROUTED: ImplementationProfile = {
 
 const UNROUTED: ImplementationProfile = { ...ROUTED, routes: [] };
 
-const ADMIN = "postgresql://verifier:secret@127.0.0.1:5433/postgres";
 
 const HTTP_BODY = `// verifies:ac-feed
 import { test } from "node:test";
@@ -45,13 +43,19 @@ afterEach(() => {
 });
 
 describe("http-blackbox adapter registration and selection", () => {
+  it("does not enable a native fallback when only a host database URL is configured", () => {
+    vi.stubEnv("APF_CONTAINER_VERIFICATION_READY", "0");
+    vi.stubEnv("VERIFICATION_DATABASE_ADMIN_URL", "postgresql://unused:unused@127.0.0.1/postgres");
+    expect(httpBlackboxAdapter.detect(ROUTED)).toMatchObject({ available: false, reason: expect.stringContaining("Native fallback is not permitted") });
+  });
   it("is registered beside node-test-mjs, in deterministic order", () => {
     expect(verificationAdapters.list().map((adapter) => adapter.id)).toEqual(["http-blackbox", "node-test-mjs"]);
     expect(verificationAdapters.get("http-blackbox")).toBe(httpBlackboxAdapter);
   });
 
-  it("is selected for an HTTP endpoint case when routes exist and a verification database is configured", () => {
-    vi.stubEnv("VERIFICATION_DATABASE_ADMIN_URL", ADMIN);
+  it("is selected for an HTTP endpoint case when routes exist and container verification is explicitly enabled", () => {
+    vi.stubEnv("APF_CONTAINER_VERIFICATION_READY", "1");
+    vi.stubEnv("VERIFICATION_DATABASE_ADMIN_URL", "");
     const selection = verificationAdapters.select({
       adapterId: "",
       surface: "HTTP_ENDPOINT",
@@ -62,7 +66,8 @@ describe("http-blackbox adapter registration and selection", () => {
     expect(selection).toMatchObject({ ok: true, adapter: { id: "http-blackbox" } });
   });
 
-  it("is unavailable, with the configuration requirement, when no verification database is configured", () => {
+  it("is unavailable, with the configuration requirement, when container verification is disabled", () => {
+    vi.stubEnv("APF_CONTAINER_VERIFICATION_READY", "0");
     vi.stubEnv("VERIFICATION_DATABASE_ADMIN_URL", "");
     const selection = verificationAdapters.select({
       adapterId: "",
@@ -72,11 +77,12 @@ describe("http-blackbox adapter registration and selection", () => {
       profile: ROUTED,
     });
     expect(selection).toMatchObject({ ok: false, kind: "UNAVAILABLE" });
-    expect(selection.ok === false && selection.reason).toBe(VERIFICATION_DATABASE_CONFIGURATION_MESSAGE);
+    expect(selection.ok === false && selection.reason).toMatch(/Container verification is disabled/);
   });
 
   it("is unavailable when the approved snapshot exposes no route to test", () => {
-    vi.stubEnv("VERIFICATION_DATABASE_ADMIN_URL", ADMIN);
+    vi.stubEnv("APF_CONTAINER_VERIFICATION_READY", "1");
+    vi.stubEnv("VERIFICATION_DATABASE_ADMIN_URL", "");
     const selection = verificationAdapters.select({
       adapterId: "",
       surface: "HTTP_ENDPOINT",
@@ -89,7 +95,8 @@ describe("http-blackbox adapter registration and selection", () => {
   });
 
   it("refuses a named HTTP adapter for a module surface, and never substitutes another adapter", () => {
-    vi.stubEnv("VERIFICATION_DATABASE_ADMIN_URL", ADMIN);
+    vi.stubEnv("APF_CONTAINER_VERIFICATION_READY", "1");
+    vi.stubEnv("VERIFICATION_DATABASE_ADMIN_URL", "");
     const selection = verificationAdapters.select({
       adapterId: "http-blackbox",
       surface: "MODULE_EXPORT",
@@ -101,7 +108,8 @@ describe("http-blackbox adapter registration and selection", () => {
   });
 
   it("refuses a capability the HTTP adapter does not provide", () => {
-    vi.stubEnv("VERIFICATION_DATABASE_ADMIN_URL", ADMIN);
+    vi.stubEnv("APF_CONTAINER_VERIFICATION_READY", "1");
+    vi.stubEnv("VERIFICATION_DATABASE_ADMIN_URL", "");
     const selection = verificationAdapters.select({
       adapterId: "",
       surface: "HTTP_ENDPOINT",

@@ -1,3 +1,4 @@
+import {hashText} from '@/modules/coding/policy';
 import "server-only";
 
 import { db } from "@/lib/db";
@@ -28,6 +29,7 @@ export async function persistTestResult(input: {
   observations?: HttpObservation[];
   snapshotCommit: string;
   startedAt: Date;
+  testBody?: string;
   evidenceDescription: string;
   evidenceResult: string;
 }): Promise<AdapterTestResult> {
@@ -66,6 +68,7 @@ export async function persistTestResult(input: {
       command: input.command,
       exitCode: input.exitCode,
       adapterId: input.adapterId,
+      artifactReference: input.testBody ? `sha256:${hashText(input.testBody)}` : "",
       executionId: execution.id,
       snapshotCommit: input.snapshotCommit,
     },

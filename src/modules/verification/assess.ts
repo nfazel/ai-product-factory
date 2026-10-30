@@ -1,3 +1,6 @@
+import {hashText} from '@/modules/coding/policy';
+import {assertSessionRuntimeBinding} from './runtime-review';
+import { approvedBehaviors, behaviorMarkers, assessBehavior } from './behavior-evidence';
 import "server-only";
 
 import { db } from "@/lib/db";
@@ -49,13 +52,16 @@ export async function recomputeSession(sessionId: string) {
       defectLinks: { include: { workItem: true } },
       evidence: true,
       workspace: true,
+      codingWorkspace: {include:{plan:true}},
       approvals: { include: { approval: true } },
     },
   });
   if (!session) return null;
   assertVerificationEvidenceMutable(session);
+  const runtimeBinding = await assertSessionRuntimeBinding(session.id);
   // The approved snapshot is the commit the verification workspace was prepared from.
   const approvedSnapshot = session.workspace?.baseCommit ?? "";
+  const bodyMatches = (executionId:string,body:string) => session.evidence.some(e => e.executionId===executionId && e.source==="COMMAND_RUNNER" && e.artifactReference===`sha256:${hashText(body)}`);
   for (const coverage of session.coverages) {
     const cases = session.testCases.filter((item) => item.acceptanceCriterionId === coverage.acceptanceCriterionId);
     const executions = session.executions.filter((item) =>
@@ -65,7 +71,9 @@ export async function recomputeSession(sessionId: string) {
     // An automated pass verifies the criterion only when the test is bound to product code and asserts on it, and
     // the execution came from an adapter that can run, against the approved snapshot. Passing a test that does not
     // meet these is a process success, not evidence.
-    const verifiedAutomatic = cases.some(
+    const requirementSet = approvedBehaviors(runtimeBinding.manifest.plan.validationPlan).filter(r => r.criterionId === coverage.acceptanceCriterionId);
+    const behaviorComplete = requirementSet.every(r => cases.some(c => c.automated && c.provenance === "VERIFICATION_AGENT" && behaviorMarkers(c.body).includes(r.id) && executions.some(e => e.testCaseId === c.id && bodyMatches(e.id,c.body) && e.status === "PASSED" && e.snapshotCommit === approvedSnapshot && assessBehavior(r,c.body,Array.isArray(e.observations)?e.observations as HttpObservation[]:[],loginPathOf(session.fixturePlan)).length === 0 && evidenceSufficient(c,e,loginPathOf(session.fixturePlan)))));
+    const verifiedAutomatic = behaviorComplete && cases.some(
       (testCase) =>
         testCase.automated &&
         testCase.provenance === "VERIFICATION_AGENT" &&
@@ -77,6 +85,7 @@ export async function recomputeSession(sessionId: string) {
         executions.some(
           (item) =>
             item.testCaseId === testCase.id &&
+            bodyMatches(item.id,testCase.body) &&
             item.status === "PASSED" &&
             executionIsCredible(
               {

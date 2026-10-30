@@ -1,5 +1,4 @@
 import type { ImplementationProfile } from "@/modules/verification/inspection";
-import { verificationDatabaseAdminUrl, VERIFICATION_DATABASE_CONFIGURATION_MESSAGE } from "@/modules/verification/http/config";
 import { isVerificationTestPath } from "@/modules/verification/policy";
 import type { TestAdapter } from "@/modules/verification/adapters/types";
 import { countTests, classifyTestRun, type TestRunOutcome } from "@/modules/verification/test-outcome";
@@ -11,8 +10,8 @@ import { countTests, classifyTestRun, type TestRunOutcome } from "@/modules/veri
  * The framework, not the test, starts the application, provisions and seeds its database, signs in test accounts,
  * and stops everything afterwards. The adapter only proposes the command and classifies what the run produced.
  *
- * Limits: the guard restricts TCP connections and fetch origins inside the test process. It does not stop a test that
- * spawns its own process. That limit is recorded in the Phase 2 report.
+ * The container network boundary applies to the test process and its descendants. HTTP-only tests reach the
+ * application through the controlled proxy and receive no database credentials.
  */
 
 export const HTTP_BLACKBOX_DIRECTORY = "verification/http/";
@@ -42,7 +41,7 @@ export const httpBlackboxAdapter: TestAdapter = {
   environment: [
     "Node.js 18 or later, for the built-in fetch and node:test",
     "A Next.js or Node application with a lockfile and a build or start script, reachable only through the managed local port",
-    "VERIFICATION_DATABASE_ADMIN_URL: a PostgreSQL URL that can create and drop databases. Verification never uses DATABASE_URL.",
+    "Explicitly enabled container verification with disposable PostgreSQL; no host database-administration credentials are required.",
   ],
   setupRequired: true,
   canGenerate: true,
@@ -61,12 +60,12 @@ export const httpBlackboxAdapter: TestAdapter = {
         reason: "The approved snapshot has no build or start script, so the application cannot be run for HTTP verification.",
       };
     }
-    if (!verificationDatabaseAdminUrl()) {
-      return { available: false, reason: VERIFICATION_DATABASE_CONFIGURATION_MESSAGE };
+    if (process.env.APF_CONTAINER_VERIFICATION_READY !== "1") {
+      return { available: false, reason: "Container verification is disabled pending integration validation and approved runtime configuration. Native fallback is not permitted." };
     }
     return {
       available: true,
-      reason: `The snapshot exposes ${profile.routes.length} route handler(s). Tests run against a managed local application with a disposable database.`,
+      reason: `The snapshot exposes ${profile.routes.length} route handler(s). Tests run against an isolated container application with disposable PostgreSQL.`,
     };
   },
 

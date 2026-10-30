@@ -1,3 +1,4 @@
+import { responseValueAssertions } from './behavior-evidence';
 import { assertionArguments, stripComments } from "@/modules/verification/test-binding";
 import type { HttpObservation } from "@/modules/verification/http/guard";
 
@@ -247,7 +248,8 @@ export function assessHttpEvidence(input: EvidenceAdequacyInput): EvidenceAdequa
   }
   reasons.push(...assessPositiveBehaviour(input.observations, input.loginPath ?? ""));
   reasons.push(...assessStepCoverage({ observations: input.observations, declaredSteps: declaredRequestSteps(input.body) }));
-  if (responseAssertionCount(input.body) === 0) {
+  if (responseValueAssertions(input.body) === 0) reasons.push("Status, authentication and response shape alone do not demonstrate acceptance; assert actual returned domain values.");
+  if (responseAssertionCount(input.body) === 0 && responseValueAssertions(input.body) === 0) {
     reasons.push("The test makes no assertion on a response status or body, so it does not check what the product returned.");
   }
   return reasons.length === 0 ? { adequate: true, reasons: [] } : { adequate: false, reasons };

@@ -1,7 +1,22 @@
+import {canonicalJson} from '@/modules/coding/external-manifest';
+import {bindingFromState} from './runtime-manifest';
 import { DomainError } from "@/modules/shared/errors";
 import { hashText } from "@/modules/coding/policy";
 
 export type VerificationEvidenceState = {
+  runState?: unknown;
+  productId?: string;
+  implementationTaskId?: string;
+  repositoryWorkspaceId?: string | null;
+  contract?: unknown;
+  workspace?: unknown;
+  testCases?: unknown[];
+  evidence?: unknown[];
+  conditions?: unknown[];
+  nfrResults?: unknown[];
+  defectLinks?: unknown[];
+  escalations?: unknown[];
+  fixturePlan?: unknown;
   commitSha: string;
   stale: boolean;
   staleReason?: string;
@@ -16,7 +31,12 @@ export type VerificationApprovalFact = {
   approval: { status: string };
 };
 
-export function verificationEvidenceFingerprint(session: Pick<VerificationEvidenceState, "executions" | "coverages">) {
+export function verificationEvidenceFingerprint(session: Pick<VerificationEvidenceState, "executions" | "coverages"> & Partial<VerificationEvidenceState>) {
+  const binding = bindingFromState(session.runState);
+  if (binding) {
+    const ordered = (value: unknown[] | undefined) => (value ?? []).map(item => canonicalJson(item && typeof item === 'object' && !Array.isArray(item) ? Object.fromEntries(Object.entries(item).filter(([key]) => key !== 'criterion')) : item)).sort();
+    return `v2:${hashText(canonicalJson({binding,productId:session.productId,taskId:session.implementationTaskId,workspaceId:session.repositoryWorkspaceId,commitSha:session.commitSha,contract:session.contract,workspace:session.workspace,fixturePlan:session.fixturePlan,executions:ordered(session.executions),coverages:ordered(session.coverages),cases:ordered(session.testCases),evidence:ordered(session.evidence),conditions:ordered(session.conditions),nfrs:ordered(session.nfrResults),defects:ordered(session.defectLinks),escalations:ordered(session.escalations)}))}`;
+  }
   const body = [
     ...session.executions.map((item) => `${item.id}:${item.exitCode}:${item.status}`),
     ...session.coverages.map((item) => `${item.acceptanceCriterionId}:${item.status}`),
@@ -29,6 +49,8 @@ export function verificationApprovalIsCurrent(
   session: VerificationEvidenceState,
 ) {
   return (
+    Boolean(bindingFromState(session.runState)) &&
+    approval.evidenceFingerprint.startsWith("v2:") &&
     !session.stale &&
     !approval.stale &&
     approval.approval.status === "APPROVED" &&
@@ -63,3 +85,7 @@ export function withCurrentVerificationApprovals<T extends VerificationEvidenceS
     })),
   };
 }
+/** All consumers must fingerprint the same complete recorded evidence projection. */
+export const VERIFICATION_EVIDENCE_INCLUDE = {
+ contract:true,workspace:true,conditions:true,testCases:true,coverages:true,executions:true,evidence:true,nfrResults:true,defectLinks:{include:{workItem:true}},escalations:true,approvals:{include:{approval:true}},
+} as const;

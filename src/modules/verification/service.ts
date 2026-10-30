@@ -1,3 +1,5 @@
+import {bindingFromState} from './runtime-manifest';
+import {requireRuntimeReview,assertSessionRuntimeBinding} from './runtime-review';
 import "server-only";
 
 import { AGENT_CATALOG } from "@/domain/constants";
@@ -137,10 +139,10 @@ async function assertAttemptAllowed(productId: string, taskId: string, kind: Att
     orderBy: { createdAt: "desc" },
     include: {
       approvals: { include: { approval: true } },
-      executions: { select: { id: true, exitCode: true, status: true } },
-      coverages: { select: { acceptanceCriterionId: true, status: true } },
+      executions: true, coverages: true, contract: true, workspace: true, conditions: true, testCases: true, evidence: true, nfrResults: true, defectLinks: {include:{workItem:true}}, escalations: true,
     },
   });
+  for (const session of sessions) if (bindingFromState(session.runState)) { try { await assertSessionRuntimeBinding(session.id); } catch { session.stale = true; } }
   const state = attemptStateFor(sessions.map(withCurrentVerificationApprovals), { interrupted: false });
   const decision = attemptPolicy({
     kind,
@@ -171,7 +173,7 @@ async function createAttempt(productId: string, taskId: string, kind: AttemptKin
       },
       workspaces: {
         orderBy: { createdAt: "desc" },
-        include: { contract: true, diff: true, selfReview: true },
+        include: { contract: true, diff: true, selfReview: true, plan: true },
       },
     },
   });
@@ -195,14 +197,16 @@ async function createAttempt(productId: string, taskId: string, kind: AttemptKin
   const findings = await db.governanceFinding.findMany({
     where: { links: { some: { taskId } }, status: "OPEN" },
   });
+  const runtimeBinding = await requireRuntimeReview(productId, codingWorkspace.id);
   const draft = buildVerificationContract({
+    runtimeBindingDigest: runtimeBinding.digest,
     objective: task.objective || task.title,
     storyTitle: task.workItem?.title ?? "",
     criteria,
     nfrs,
     architecture: task.plan.architecture?.summary ?? "",
     security: findings.map((item) => item.title).join("; "),
-    codingSummary: codingWorkspace.contract?.objective ?? task.objective,
+    codingSummary: [codingWorkspace.contract?.objective ?? task.objective, codingWorkspace.plan?.validationPlan ?? ""].join("\n"),
     commitSha: codingWorkspace.headCommit,
     changedFiles: changedFileNames(codingWorkspace.diff?.files),
   });
@@ -212,6 +216,7 @@ async function createAttempt(productId: string, taskId: string, kind: AttemptKin
     repositoryWorkspaceId: codingWorkspace.id,
     commitSha: codingWorkspace.headCommit,
   });
+  await db.verificationSession.update({where:{id:session.id},data:{runState:JSON.parse(JSON.stringify({runtimeBinding}))}});
   // Registered for the life of this request so a concurrent check can tell "running" from "interrupted".
   markAttemptActive(session.id);
   try {
@@ -383,8 +388,11 @@ export async function recoverInterruptedVerification(productId: string, sessionI
 export async function approveVerification(productId: string, sessionId: string, options?: { actorName?: string }) {
   const actor = options?.actorName ?? getCurrentActor().name;
   assertHuman(actor);
-  const session = await requireSession(productId, sessionId);
+  let session = await requireSession(productId, sessionId);
   assertVerificationEvidenceMutable(session);
+  await assertSessionRuntimeBinding(session.id);
+  await recomputeSession(session.id);
+  session = await requireSession(productId,sessionId);
   if (session.overallVerdict !== "PASS" && session.overallVerdict !== "PASS_WITH_CONCERNS") {
     throw new DomainError("Only a passing verification can be approved.");
   }
@@ -460,6 +468,7 @@ export async function recordManualResult(input: {
   assertHuman(tester);
   const session = await requireSession(input.productId, input.sessionId);
   assertVerificationEvidenceMutable(session);
+  await assertSessionRuntimeBinding(session.id);
   const testCase = session.testCases.find((item) => item.id === input.testCaseId);
   if (!testCase) throw new DomainError("The test case was not found.", "NOT_FOUND");
   if (testCase.automated) throw new DomainError("Record manual results on manual test cases.");
@@ -503,6 +512,7 @@ export async function confirmNotApplicable(productId: string, sessionId: string,
   assertHuman(actor);
   const session = await requireSession(productId, sessionId);
   assertVerificationEvidenceMutable(session);
+  await assertSessionRuntimeBinding(session.id);
   const coverage = session.coverages.find((item) => item.acceptanceCriterionId === criterionId);
   if (!coverage) throw new DomainError("That acceptance criterion is not in this verification.");
   await db.verificationCoverage.update({
@@ -581,6 +591,7 @@ export async function createVerificationDefect(input: {
 export async function rerunFailedTests(productId: string, sessionId: string) {
   const session = await requireSession(productId, sessionId);
   assertVerificationEvidenceMutable(session);
+  await assertSessionRuntimeBinding(session.id);
   if (!session.workspace) throw new DomainError("Verification workspace not found.", "NOT_FOUND");
   const failed = session.executions.filter((item) => item.kind === "NEW_VERIFICATION" && item.status === "FAILED" && item.command.startsWith("node --test"));
   for (const execution of failed) {
@@ -683,7 +694,11 @@ export async function getProveView(productId: string) {
     },
   });
   // "Interrupted" is computed here, on the server, from the in-process registry. It is never taken from the client.
-  const sessions = sessionRows.map((session) => ({
+  const checkedRows = await Promise.all(sessionRows.map(async session => {
+    if (bindingFromState(session.runState)) { try { await assertSessionRuntimeBinding(session.id); } catch { return {...session,stale:true,staleReason:"Runtime/behaviour approval is no longer current."}; } }
+    return session;
+  }));
+  const sessions = checkedRows.map((session) => ({
     ...withCurrentVerificationApprovals(session),
     interrupted: (OPEN_ATTEMPT_STATUSES as readonly string[]).includes(session.status) && !isAttemptActive(session.id),
   }));
@@ -726,6 +741,9 @@ export async function getVerificationSession(productId: string, sessionId: strin
       task: true,
     },
   });
+  if (session && bindingFromState(session.runState)) {
+    try { await assertSessionRuntimeBinding(session.id); } catch { return withCurrentVerificationApprovals({...session,stale:true,staleReason:"Runtime/behaviour approval is no longer current."}); }
+  }
   return session ? withCurrentVerificationApprovals(session) : null;
 }
 

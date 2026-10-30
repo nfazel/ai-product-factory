@@ -1,3 +1,4 @@
+import {requireRuntimeReview} from './runtime-review';
 import "server-only";
 
 import fs from "node:fs";
@@ -8,6 +9,7 @@ import { parsePlannedCommands } from "@/modules/coding/commands";
 import { commitExists } from "@/modules/coding/git";
 import { reviewableDiffFiles } from "@/modules/coding/review";
 import { productRepositoryReady, REPOSITORY_NOT_CONFIGURED, resolveProductRepository } from "@/modules/source-control/product-repository";
+import { unapprovedPreservationIssues } from "@/modules/coding/external-review";
 import { DomainError } from "@/modules/shared/errors";
 
 const COMMIT_SHA = /^[0-9a-f]{40}$/;
@@ -55,6 +57,8 @@ export async function verificationEntryBlockers(productId: string, taskId: strin
       });
       if (!decision.ready) reasons.push("Required coding checks did not pass.");
     }
+    const preservation = await unapprovedPreservationIssues(workspace.id, workspace.workspacePath, workspace.baseCommit, true);
+    if (preservation.length) reasons.push(`Preservation approval is not current: ${preservation.map(issue => issue.reason).join(" ")}`);
     const approval = workspace.codeApprovals.find((item) => !item.stale) ?? null;
     if (!approval) {
       reasons.push("A human code approval is required before verification.");
@@ -65,6 +69,9 @@ export async function verificationEntryBlockers(productId: string, taskId: strin
     } else if (!(await approvedCommitIsPresent(productId, workspace.workspacePath, approval.headCommit))) {
       reasons.push("The approved commit is not in the product repository.");
     }
+  }
+  if (workspace && reasons.length === 0) {
+    try { await requireRuntimeReview(productId, workspace.id); } catch(error) { if(!(error instanceof DomainError))throw error; reasons.push("A current signed human runtime/behaviour review is required for this exact task and implementation."); }
   }
   if (!workspace) {
     const approval = await db.codeChangeApproval.findFirst({

@@ -1,12 +1,12 @@
+import {assertSessionRuntimeBinding} from './runtime-review';
 import "server-only";
 
 import fs from "node:fs";
 import path from "node:path";
 
 import { recordActivity } from "@/modules/activity/service";
-import { commandFailureIsEnvironment, validationProcessEnvironment } from "@/modules/coding/bootstrap";
-import { safeCommandOutput } from "@/modules/coding/command-output";
-import { runProcess } from "@/modules/coding/git";
+import { commandFailureIsEnvironment } from "@/modules/coding/bootstrap";
+import { currentContainerContext } from "@/modules/verification/containers/context";
 import { db } from "@/lib/db";
 import { commandUnavailable } from "@/modules/verification/commands";
 import { assertVerificationEvidenceMutable } from "@/modules/verification/integrity";
@@ -46,6 +46,7 @@ export async function executeVerificationTool(
     try {
       if (session) {
         assertVerificationEvidenceMutable(session);
+        await assertSessionRuntimeBinding(session.id);
         reason = "";
       }
     } catch (error) {
@@ -64,14 +65,23 @@ export async function executeVerificationTool(
       return { allowed: false, reason: approved.reason, exitCode: null as number | null, output: "", timedOut: false };
     }
     const started = new Date();
-    const environment = validationProcessEnvironment(approved.command, process.env.DATABASE_URL, input.workspacePath);
-    const result = await runProcess(approved.argv, input.workspacePath, 120_000, {
-      ...environment.env,
-      ...(request.environment ?? {}),
-    });
-    const timedOut = result.signal !== null && result.signal !== undefined;
-    const interruption = timedOut ? `The command was stopped by signal ${result.signal} before it finished.` : "";
-    const output = [environment.note, interruption, safeCommandOutput(result.stdout, result.stderr)].filter(Boolean).join("\n\n");
+    const context = currentContainerContext(input.sessionId);
+    if (!context || request.environment || path.resolve(context.root) !== path.resolve(input.workspacePath)) {
+      const reason = !context ? "A validated isolated verification job is required. Native execution is disabled." : request.environment ? "Command environment is supplied only by the approved isolated runtime." : "The command workspace does not match the active isolated job.";
+      await deny(input, "RUN_COMMAND", reason, "", request.command);
+      return { allowed: false, reason, exitCode: null, output: "", timedOut: false };
+    }
+    let result: Awaited<ReturnType<typeof context.run>>;
+    try { result = await context.run(approved.command); }
+    catch {
+      // Controller/setup failures are unavailable evidence, not product failures.
+      // Do not relay arbitrary exception text that may contain a runtime secret.
+      const reason = 'The isolated command could not complete; no product result was recorded.';
+      await db.verificationEvidence.create({data:{sessionId:input.sessionId,type:commandEvidenceType(approved.command),source:'COMMAND_RUNNER',description:reason,result:'UNAVAILABLE',command:approved.command,exitCode:null}});
+      return {allowed:false,reason,exitCode:null,output:reason,timedOut:false};
+    }
+    const timedOut = result.timedOut;
+    const output = result.output;
     const unavailable = commandUnavailable(output, result.code) || (result.code !== 0 && commandFailureIsEnvironment(output));
     await db.verificationEvidence.create({
       data: {

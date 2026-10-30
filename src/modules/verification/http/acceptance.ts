@@ -149,6 +149,7 @@ export function setHttpAcceptanceOverridesForTests(override: DepsOverride | null
 
 /** Production wiring. The runner supplies the three functions that go through the verification policy gates. */
 export function defaultHttpDeps(gates: Pick<HttpAcceptanceDeps, "writeTest" | "runTest" | "classify">): HttpAcceptanceDeps {
+  if (process.env.VITEST !== "true") throw new Error("Native HTTP verification is disabled. A validated container job is required.");
   const base = baseHttpDeps(gates);
   return testOverride ? { ...base, ...testOverride(base) } : base;
 }

@@ -17,7 +17,8 @@ import {
   weakensChecks,
   hashText,
 } from "@/modules/coding/policy";
-import { baselinePreservationIssues, preflightPreservation } from "@/modules/coding/preservation";
+import { unapprovedPreservationIssues } from "@/modules/coding/external-review";
+import { preflightPreservation } from "@/modules/coding/preservation";
 import { changedPaths, lastReadHash, recordToolEvent } from "@/modules/coding/repository";
 
 export type ToolRequest =
@@ -108,8 +109,8 @@ async function apply(context: ToolContext, request: ToolRequest): Promise<ToolRe
     const result = await runProcess(approved.argv, context.workspacePath, 120_000, environment.env);
     const output = [environment.note, safeCommandOutput(result.stdout, result.stderr)].filter(Boolean).join("\n\n");
     if (context.baseCommit) {
-      const issues = await baselinePreservationIssues(context.workspacePath, context.baseCommit);
-      if (issues.length) return { allowed: false, reason: issues.map(issue => `${issue.path}: ${issue.reason}`).join("\n"), kind: "restricted", content: output, metadata: { exitCode: result.code, output, preservationBlocked: true } };
+      const issues = await unapprovedPreservationIssues(context.workspaceId, context.workspacePath, context.baseCommit);
+      if (issues.length) return { allowed: false, reason: issues.map(issue => `${issue.path}: ${issue.reason}`).join("\n"), kind: "restricted", content: output, metadata: { exitCode: result.code, output: `${output}\n\nPreservation control blocked: ${issues.map(issue => `${issue.path}: ${issue.reason}`).join("\n")}`, preservationBlocked: true, failureClass: "PRESERVATION_POLICY_BLOCKED" } };
     }
     return {
       allowed: true,

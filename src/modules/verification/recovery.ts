@@ -1,4 +1,5 @@
 import "server-only";
+import { dockerCommand } from "@/modules/verification/containers/docker";
 
 import fs from "node:fs";
 import os from "node:os";
@@ -8,7 +9,7 @@ import { db } from "@/lib/db";
 import { groupAlive } from "@/modules/verification/http/lifecycle";
 import { dropOrphanedVerificationDatabase, VERIFICATION_DATABASE_PATTERN } from "@/modules/verification/http/database";
 import { verificationDatabaseAdminUrl } from "@/modules/verification/http/config";
-import { parseTrackedResources, processStartTime, type ResourceTracker, type TrackedResource } from "@/modules/verification/resources";
+import { parseTrackedResources, isContainerResourceName, processStartTime, type ResourceTracker, type TrackedResource } from "@/modules/verification/resources";
 
 /**
  * Crash safety for Independent Verification.
@@ -51,12 +52,12 @@ export function sessionResourceTracker(sessionId: string): ResourceTracker {
 }
 
 async function updateResources(sessionId: string, change: (list: TrackedResource[]) => TrackedResource[]) {
-  const row = await db.verificationSession.findUnique({ where: { id: sessionId }, select: { runState: true } });
-  const state = recordOf(row?.runState);
-  const resources = change(parseTrackedResources(state.resources));
-  await db.verificationSession.update({
-    where: { id: sessionId },
-    data: { runState: { ...state, resources } as unknown as object },
+  await db.$transaction(async tx => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`verification-resources:${sessionId}`})::bigint)`;
+    const row = await tx.verificationSession.findUniqueOrThrow({ where: { id: sessionId }, select: { runState: true } });
+    const state = recordOf(row.runState);
+    const resources = change(parseTrackedResources(state.resources));
+    await tx.verificationSession.update({ where: { id: sessionId }, data: { runState: { ...state, resources } as unknown as object } });
   });
 }
 
@@ -101,8 +102,12 @@ export async function releaseRecordedResources(
 ): Promise<ReleaseOutcome> {
   const outcome: ReleaseOutcome = { released: [], kept: [], notes: [] };
   const adminUrl = verificationDatabaseAdminUrl(env);
-  for (const resource of resources) {
-    const result = await releaseOne(resource, adminUrl, env);
+  const isolated = [...resources.filter(r => r.kind === 'container' && r.name !== 'apf-verification-active-job').reverse(), ...resources.filter(r => r.kind === 'network').reverse(), ...resources.filter(r => r.kind === 'container' && r.name === 'apf-verification-active-job')];
+  const ordinary = resources.filter(r => r.kind !== 'container' && r.kind !== 'network');
+  for (const resource of [...isolated, ...ordinary]) {
+    if (resource.kind === 'container' && resource.name === 'apf-verification-active-job' && outcome.kept.some(r => (r.kind === 'container' || r.kind === 'network') && r.job === resource.job)) { outcome.kept.push(resource); outcome.notes.push('Retained the job lock because isolated resources remain.'); continue; }
+    let result: {released:boolean;note:string};
+    try { result = await releaseOne(resource, adminUrl, env); } catch { result = {released:false,note:'Resource cleanup failed; its record is retained for recovery.'}; }
     if (result.released) outcome.released.push(resource);
     else outcome.kept.push(resource);
     if (result.note) outcome.notes.push(result.note);
@@ -115,6 +120,19 @@ async function releaseOne(
   adminUrl: string | null,
   env: Record<string, string | undefined>,
 ): Promise<{ released: boolean; note: string }> {
+  if (resource.kind === 'container' || resource.kind === 'network') {
+    if (!isContainerResourceName(resource.kind,resource.name,resource.job)) return {released:false,note:'The resource is outside the recorded job namespace; nothing was touched.'};
+    const inspected = await dockerCommand(resource.kind === 'container' ? ['inspect', resource.name] : ['network', 'inspect', resource.name]);
+    if (inspected.code !== 0) {
+      const list = await dockerCommand(resource.kind === 'container' ? ['ps','-a','--format','{{.Names}}'] : ['network','ls','--format','{{.Name}}']);
+      return list.code === 0 && !list.output.split('\n').includes(resource.name) ? {released:true,note:'Isolated resource is confirmed absent.'} : {released:false,note:'Isolated resource absence could not be confirmed.'};
+    }
+    let record; try { [record] = JSON.parse(inspected.output); } catch { return {released:false,note:'The isolated resource could not be inspected.'}; }
+    const labels = resource.kind === 'container' ? record.Config?.Labels : record.Labels;
+    if (labels?.['ai-product-factory.verification.job'] !== resource.job) return {released:false,note:'Resource ownership does not match the recorded verification job; nothing was removed.'};
+    const removed = await dockerCommand(resource.kind === 'container' ? ['rm','-f',resource.name] : ['network','rm',resource.name]);
+    return {released:removed.code===0,note:removed.code===0?'Removed job-owned isolated resource.':'Isolated resource cleanup failed; record retained.'};
+  }
   if (resource.kind === "database") {
     if (!VERIFICATION_DATABASE_PATTERN.test(resource.name)) {
       return { released: false, note: "A recorded database name was not a verification name, so it was not touched." };
@@ -144,6 +162,7 @@ async function releaseOne(
     return { released: true, note: "Removed the verification runtime directory." };
   }
 
+  if (resource.kind !== "process-group") return { released: false, note: "Unsupported resource kind; nothing was touched." };
   // process-group
   const current = processStartTime(resource.pid);
   if (current === null) {

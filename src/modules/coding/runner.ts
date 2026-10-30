@@ -63,7 +63,7 @@ import {
   type ChangeRequest,
 } from "@/modules/coding/schema";
 import { asStrings, clip } from "@/modules/coding/strings";
-import { baselinePreservationIssues } from "@/modules/coding/preservation";
+import { unapprovedPreservationIssues } from "@/modules/coding/external-review";
 import { executeRepositoryTool, preflightRepositoryBatch, type ToolContext, type ToolResult } from "@/modules/coding/tools";
 import { db } from "@/lib/db";
 import { assessCodingReadiness } from "@/modules/governance/coding-readiness";
@@ -1173,7 +1173,7 @@ async function finish(
   phase: "implement" | "repair" = "implement",
 ) {
   if ((outcome === "COMPLETED" || outcome === "COMPLETED_WITH_CONCERNS") && context.baseCommit) {
-    const issues = await baselinePreservationIssues(context.workspacePath, context.baseCommit);
+    const issues = await unapprovedPreservationIssues(context.workspaceId, context.workspacePath, context.baseCommit);
     if (issues.length) {
       await escalate(workspace, "ARCHITECTURE_CONFLICT", "Final preservation checks failed.", issues.map(issue => `${issue.path}: ${issue.reason}`).join("\n"), "Review the incompatible change before proceeding. Build success is not evidence of preservation.");
       outcome = "ESCALATED";

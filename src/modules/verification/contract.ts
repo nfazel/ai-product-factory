@@ -12,6 +12,7 @@ export const REQUIRED_AREAS = [
 ];
 
 export function buildVerificationContract(input: {
+  runtimeBindingDigest?: string;
   objective: string;
   storyTitle: string;
   criteria: { id: string; description: string }[];
@@ -37,6 +38,8 @@ export function buildVerificationContract(input: {
     requiredAreas: REQUIRED_AREAS,
     sourceFingerprint: hashText(
       JSON.stringify({
+        runtimeBindingDigest: input.runtimeBindingDigest,
+        codingSummary: input.codingSummary,
         objective: input.objective,
         acceptanceCriteria,
         nfrs,

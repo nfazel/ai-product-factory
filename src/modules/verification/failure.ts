@@ -86,7 +86,7 @@ export function failureReason(failureClass: VerificationFailureClass) {
 /** The blocking class for an open escalation. Escalations that block a verdict never mean a product failure. */
 export function failureClassForEscalation(type: string): VerificationFailureClass | "" {
   if (type === "IMPLEMENTATION_CHANGE") return "VERIFICATION_SNAPSHOT_MISMATCH";
-  if (type === "SECRET_ACCESS") return "VERIFICATION_ESCALATION_BLOCKED";
+  if (type === "SECRET_ACCESS" || type === "ISOLATION_FAILURE") return "VERIFICATION_ESCALATION_BLOCKED";
   return "";
 }
 

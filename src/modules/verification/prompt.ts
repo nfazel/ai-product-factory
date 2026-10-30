@@ -100,3 +100,5 @@ export function withDeclaredAccountKeys(
     "VERIFICATION_ACCOUNTS is a JSON array of { key, email, password } for the listed keys. Do not invent account identifiers.",
   ].join("\n");
 }
+
+// Managed verification policy: runtime data is never supplied in model prompts.

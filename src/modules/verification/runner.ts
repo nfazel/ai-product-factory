@@ -1,4 +1,5 @@
 import "server-only";
+import { withSessionContainers, currentContainerContext } from "@/modules/verification/containers/context";
 
 import fs from "node:fs";
 import path from "node:path";
@@ -11,7 +12,6 @@ import { parsePlannedCommands } from "@/modules/coding/commands";
 import { asStrings } from "@/modules/coding/strings";
 import { db } from "@/lib/db";
 import { recomputeSession } from "@/modules/verification/assess";
-import { sessionResourceTracker } from "@/modules/verification/recovery";
 import { commandFailureIsEnvironment } from "@/modules/coding/bootstrap";
 import { commandUnavailable, selectVerificationChecks, type VerificationCheck } from "@/modules/verification/commands";
 import { failureReason } from "@/modules/verification/failure";
@@ -36,10 +36,7 @@ import { inspectImplementation, type ImplementationProfile } from "@/modules/ver
 import { LEGACY_ADAPTER_ID, verificationAdapters } from "@/modules/verification/adapters/registry";
 import { persistTestResult } from "@/modules/verification/adapters/results";
 import {
-  defaultHttpDeps,
   HTTP_ADAPTER_ID,
-  runHttpAcceptance,
-  type HttpAcceptanceCase,
 } from "@/modules/verification/http/acceptance";
 import { validateFixturePlan } from "@/modules/verification/http/fixtures";
 import { EMPTY_FIXTURE_PLAN, type FixturePlan } from "@/modules/verification/http/fixtures";
@@ -57,7 +54,6 @@ import { assessHttpEvidence } from "@/modules/verification/evidence-adequacy";
 import { assertVerificationEvidenceMutable } from "@/modules/verification/integrity";
 import type { TestRunOutcome } from "@/modules/verification/test-outcome";
 import { DomainError } from "@/modules/shared/errors";
-import { randomUUID } from "node:crypto";
 import type { ZodType } from "zod";
 
 const refusal = "The Verification Agent returned a response that did not match the required structure. Nothing further was written.";
@@ -355,6 +351,13 @@ async function recordNotRun(sessionId: string, testCaseId: string, reason: strin
 }
 
 async function runExecute(session: NonNullable<Awaited<ReturnType<typeof loadSession>>>) {
+  await assertSnapshotUnchanged(session.workspace!.workspacePath, session.workspace!.baseCommit);
+  if ((await changedProductFiles(session.workspace!.workspacePath)).length) throw new Error('The approved snapshot changed before container verification.');
+  await db.verificationSession.update({where:{id:session.id},data:{status:'EXECUTING'}});
+  const cases = await db.verificationTestCase.findMany({where:{sessionId:session.id}});
+  return withSessionContainers(session.id, cases.some(c => c.automated && c.adapterId === HTTP_ADAPTER_ID), storedFixturePlan(session.fixturePlan), () => runExecuteIsolated(session));
+}
+async function runExecuteIsolated(session: NonNullable<Awaited<ReturnType<typeof loadSession>>>) {
   await db.verificationSession.update({ where: { id: session.id }, data: { status: "EXECUTING" } });
   const workspacePath = session.workspace!.workspacePath;
   await assertSnapshotUnchanged(workspacePath, session.workspace!.baseCommit);
@@ -432,6 +435,7 @@ async function runExecute(session: NonNullable<Awaited<ReturnType<typeof loadSes
     await runHttpCases(session, workspacePath, httpCases, storedFixturePlan(session.fixturePlan));
   }
   const checkLines = await runRepositoryChecks(session, workspacePath);
+  await currentContainerContext(session.id)?.close();
   await recordProductChanges(session.id, workspacePath);
   const contract = contractText(session.contract!);
   const context = [
@@ -551,6 +555,7 @@ async function recordExecution(
     // The approved snapshot is what this run judged. Later credibility checks compare against it.
     snapshotCommit: session.workspace!.baseCommit,
     startedAt: run.startedAt,
+    testBody: testCase.body,
     evidenceDescription: demonstrated
       ? `The verification test executed, passed, and is bound to the linked acceptance criterion through ${basis}.`
       : insufficient
@@ -576,79 +581,17 @@ async function runHttpCases(
   cases: TestCaseRow[],
   fixturePlan: FixturePlan,
 ) {
-  const gate = { sessionId: session.id, productId: session.productId, workspacePath };
-  const adapter = verificationAdapters.get(HTTP_ADAPTER_ID);
-  if (!adapter) {
-    for (const testCase of cases) {
-      await recordNotRun(session.id, testCase.id, "The HTTP verification adapter is not registered, so the case was not executed.");
-    }
-    return;
-  }
-  const results = await runHttpAcceptance(
-    {
-      attemptId: randomUUID(),
-      workspacePath,
-      baseCommit: session.workspace!.baseCommit,
-      cases: cases.map((testCase) => ({
-        testCaseId: testCase.id,
-        acceptanceCriterionId: testCase.acceptanceCriterionId,
-        filePath: testCase.filePath ?? "",
-        body: testCase.body ?? "",
-      })),
-      fixturePlan,
-      forbiddenDatabaseNames: forbiddenDatabaseNames(),
-      tracker: sessionResourceTracker(session.id),
-    },
-    defaultHttpDeps({
-      writeTest: async (item: HttpAcceptanceCase) => {
-        // The framework writes only approved HTTP paths. The adapter and the policy gate both check the path.
-        if (!adapter.acceptsFile(item.filePath)) {
-          return { allowed: false, reason: `The test file ${item.filePath} is not an approved HTTP verification path.` };
-        }
-        const written = await executeVerificationTool(gate, { action: "WRITE_FILE", path: item.filePath, content: item.body });
-        return { allowed: written.allowed, reason: written.allowed ? "" : written.reason };
-      },
-      runTest: async (input: { command: string; environment: Record<string, string> }) => {
-        const ran = await executeVerificationTool(gate, {
-          action: "RUN_COMMAND",
-          command: input.command,
-          environment: input.environment,
-        });
-        return {
-          allowed: ran.allowed,
-          reason: ran.reason ?? "",
-          exitCode: ran.exitCode,
-          output: ran.output,
-          timedOut: ran.timedOut,
-        };
-      },
-      classify: (run: { exitCode: number | null; output: string; timedOut: boolean }) => adapter.classify(run),
-    }),
-  );
-  const byId = new Map(cases.map((testCase) => [testCase.id, testCase]));
-  for (const result of results) {
-    const testCase = byId.get(result.testCaseId);
-    if (!testCase) continue;
-    if (!result.attempted && !result.stage) {
-      await recordNotRun(session.id, testCase.id, result.outcome.reason);
-      continue;
-    }
-    const recorded = await recordExecution(session, testCase, {
-      adapterId: HTTP_ADAPTER_ID,
-      command: result.command,
-      exitCode: result.exitCode,
-      output: result.output,
-      outcome: result.outcome,
-      startedAt: result.startedAt,
-      failureCategory: result.stage ?? undefined,
-      observations: result.observations,
-      requiresRequests: true,
-      loginPath: fixturePlan.authentication.loginPath,
-    });
-    await db.verificationTestCase.update({
-      where: { id: testCase.id },
-      data: { status: recorded.executionStatus },
-    });
+  const context = currentContainerContext(session.id);
+  if (!context?.managed) throw new Error("Verification setup could not provide an isolated HTTP environment.");
+  const adapter = verificationAdapters.get(HTTP_ADAPTER_ID)!;
+  for (const testCase of cases) {
+    const written = await executeVerificationTool({sessionId:session.id,productId:session.productId,workspacePath},{action:'WRITE_FILE',path:testCase.filePath,content:testCase.body});
+    if (!written.allowed) { await recordNotRun(session.id,testCase.id,written.reason); continue; }
+    const command = adapter.commandFor(testCase.filePath), startedAt = new Date();
+    const ran = await executeVerificationTool({sessionId:session.id,productId:session.productId,workspacePath},{action:'RUN_COMMAND',command});
+    const outcome = ran.allowed ? adapter.classify({exitCode:ran.exitCode,output:ran.output,timedOut:ran.timedOut}) : {category:'NOT_EXECUTED' as const,status:'NOT_RUN' as const,reason:ran.reason,counts:{tests:0,passed:0,failed:0,skipped:0,reported:false}};
+    const recorded = await recordExecution(session,testCase,{adapterId:HTTP_ADAPTER_ID,command,exitCode:ran.exitCode,output:ran.output,outcome,startedAt,observations:ran.allowed&&!ran.timedOut?await context.observations():[],requiresRequests:true,loginPath:fixturePlan.authentication.loginPath});
+    await db.verificationTestCase.update({where:{id:testCase.id},data:{status:recorded.executionStatus}});
   }
 }
 
@@ -657,20 +600,6 @@ function storedFixturePlan(value: unknown): FixturePlan {
   const record = value && typeof value === "object" && !Array.isArray(value) ? (value as Partial<FixturePlan>) : null;
   if (!record?.authentication || !Array.isArray(record.steps)) return EMPTY_FIXTURE_PLAN;
   return { authentication: record.authentication, steps: record.steps };
-}
-
-/** The builder's own database must never be created, used or dropped by verification. */
-function forbiddenDatabaseNames() {
-  const names = ["ai_product_factory"];
-  const builder = process.env.DATABASE_URL;
-  if (builder) {
-    try {
-      names.push(decodeURIComponent(new URL(builder).pathname.replace(/^\//, "")));
-    } catch {
-      // A malformed builder URL names no database, so there is nothing more to forbid.
-    }
-  }
-  return names.filter((name) => name.length > 0);
 }
 
 async function createDefect(
@@ -822,6 +751,7 @@ async function recordCheck(
       status,
       exitCode: ran.exitCode,
       outputSummary: ran.output || ran.reason || check.reason,
+      snapshotCommit: (await db.verificationSession.findUniqueOrThrow({where:{id:session.id},select:{commitSha:true}})).commitSha,
       startedAt: new Date(),
       completedAt: new Date(),
     },

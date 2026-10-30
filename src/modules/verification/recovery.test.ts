@@ -17,6 +17,7 @@ import {
 } from "@/modules/verification/recovery";
 import { processStartTime } from "@/modules/verification/resources";
 import { getProveView, recoverInterruptedVerification, startVerification } from "@/modules/verification/service";
+import { DockerJob, dockerCommand } from "@/modules/verification/containers/docker";
 
 /**
  * Interrupted-attempt recovery. Every test runs against the builder's own database with no verification admin URL
@@ -76,6 +77,27 @@ afterEach(async () => {
 });
 
 describe("recovering an interrupted verification attempt", () => {
+  it.runIf(process.env.APF_CONTAINER_VERIFICATION_READY === "1")("recovers real tracked containers and attached networks after interruption", async () => {
+    const setup = await completedTaskIn(makeRepo()); products.push(setup.product.id);
+    const session = await interruptedSession(setup, []);
+    const tracker = sessionResourceTracker(session.id);
+    const job = new DockerJob({
+      record: resource => tracker.record({ ...resource, id: `${resource.kind}:${resource.name}` }),
+      release: resource => tracker.release(`${resource.kind}:${resource.name}`),
+    });
+    try {
+      await job.preflight(); const initialNetwork = await job.network('tests');
+      const worker = await job.container('test', initialNetwork);
+      const network = await job.network('test-database'); await job.attach(worker, network);
+      const recovered = await recoverInterruptedVerification(setup.product.id, session.id, { actorName: 'Regression test operator' });
+      expect(recovered?.failureClass).toBe('VERIFICATION_INTERRUPTED');
+      const stored = await db.verificationSession.findUniqueOrThrow({ where: { id: session.id } });
+      expect((stored.runState as { resources: unknown[] }).resources).toEqual([]);
+      for (const command of [['ps', '-a', '--filter', `label=ai-product-factory.verification.job=${job.id}`, '--format', '{{.Names}}'], ['network', 'ls', '--filter', `label=ai-product-factory.verification.job=${job.id}`, '--format', '{{.Name}}']]) {
+        const result = await dockerCommand(command); expect(result.code).toBe(0); expect(result.output.trim()).toBe('');
+      }
+    } finally { await job.cleanup(); }
+  }, 40_000);
   it("releases what the attempt recorded, keeps what it cannot release, and keeps the history", async () => {
     const setup = await completedTaskIn(makeRepo());
     products.push(setup.product.id);
@@ -198,6 +220,18 @@ describe("recovering an interrupted verification attempt", () => {
     await tracker.release("runtime:x");
     const stored = await db.verificationSession.findUniqueOrThrow({ where: { id: session.id } });
     expect((stored.runState as { resources: { id: string }[] }).resources.map((item) => item.id)).toEqual([`database:${name}`]);
+  });
+
+  it("serializes concurrent resource updates without losing audit entries", async () => {
+    const setup = await completedTaskIn(makeRepo()); products.push(setup.product.id);
+    const session = await interruptedSession(setup, []), tracker = sessionResourceTracker(session.id);
+    const entries = Array.from({length:8}, (_, i) => ({id:`runtime:concurrent-${i}`,kind:'runtime-directory' as const,path:path.join(os.tmpdir(),`apf-verify-concurrent-${i}`)}));
+    await Promise.all(entries.map(r => tracker.record(r)));
+    let row = await db.verificationSession.findUniqueOrThrow({where:{id:session.id}});
+    expect((row.runState as {resources:{id:string}[]}).resources.map(r=>r.id).sort()).toEqual(entries.map(r=>r.id).sort());
+    await Promise.all(entries.map(r => tracker.release(r.id)));
+    row = await db.verificationSession.findUniqueOrThrow({where:{id:session.id}});
+    expect((row.runState as {resources:unknown[]}).resources).toEqual([]);
   });
 
   it("reads a process start time for a live process and none for a missing one", () => {

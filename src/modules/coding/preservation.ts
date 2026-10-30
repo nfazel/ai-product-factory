@@ -1,3 +1,4 @@
+import {AuthorityUnavailableError} from '@/modules/verification/authority-status';
 import fs from "node:fs";
 import ts from "typescript";
 
@@ -216,15 +217,17 @@ export function preflightPreservation(root: string, operations: ProposedFile[], 
 /** Compare the final tree with the immutable Git baseline, including changes
  * made by repository scripts rather than by WRITE_FILE. Never read secret files.
  */
-export async function baselinePreservationIssues(root: string, baseCommit: string): Promise<PreservationIssue[]> {
+export async function baselinePreservationIssues(root: string, baseCommit: string, strictAvailability=false): Promise<PreservationIssue[]> {
   const { runGit } = await import("@/modules/coding/git");
   const { isSecretPath } = await import("@/modules/coding/policy");
   const { isGeneratedReviewPath } = await import("@/modules/coding/generated-paths");
   if (!/^[a-f0-9]{40}$/.test(baseCommit)) return [{ path: ".", reason: "A resolved immutable Git baseline is required for preservation checks." }];
   const baseline = await runGit(root, ["cat-file", "-t", baseCommit]);
+  if(strictAvailability&&(baseline.code!==0||baseline.stdout.trim()!=="commit"))throw new AuthorityUnavailableError();
   if (baseline.code !== 0 || baseline.stdout.trim() !== "commit") return [{ path: ".", reason: "The task Git baseline cannot be resolved; preservation checks cannot proceed." }];
   const changed = await runGit(root, ["diff", "--name-only", "-z", baseCommit, "--"]);
   const untracked = await runGit(root, ["ls-files", "--others", "--exclude-standard", "-z"]);
+  if(strictAvailability&&(changed.code!==0||untracked.code!==0))throw new AuthorityUnavailableError();
   if (changed.code !== 0 || untracked.code !== 0) return [{ path: ".", reason: "Cannot inspect the task diff for preservation." }];
   const issues: PreservationIssue[] = [];
   for (const file of new Set([...changed.stdout.split("\0"), ...untracked.stdout.split("\0")].filter(Boolean))) {

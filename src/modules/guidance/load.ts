@@ -1,3 +1,4 @@
+import {runtimeReviewIsCurrent} from '@/modules/verification/runtime-review';
 import "server-only";
 
 import fs from "node:fs";
@@ -23,7 +24,7 @@ import { entryBlockers, learnBlockers, type ReleaseFacts, type ReleaseTaskFact }
 import type { GuidanceSnapshot, TaskSnapshot } from "@/modules/guidance/types";
 import { clarificationReviewFromRecords } from "@/modules/clarification/service";
 import { verificationProgress } from "@/modules/verification/disposition";
-import { verificationApprovalIsCurrent } from "@/modules/verification/integrity";
+import { VERIFICATION_EVIDENCE_INCLUDE, verificationApprovalIsCurrent } from "@/modules/verification/integrity";
 import { approvedPublication } from "@/modules/source-control/publication-state";
 import { classifyMergeability, pullRequestNextAction, type PullRequestGate } from "@/modules/source-control/pull-request-gate";
 import { countsAsHumanReviewer, effectiveReviews } from "@/modules/source-control/readiness";
@@ -195,9 +196,7 @@ export async function loadSnapshots(productId?: string): Promise<GuidanceSnapsho
         where: { productId: { in: ids } },
         orderBy: { createdAt: "desc" },
         include: {
-          approvals: { include: { approval: true } },
-          executions: { select: { id: true, exitCode: true, status: true } },
-          coverages: { select: { acceptanceCriterionId: true, status: true } },
+          ...VERIFICATION_EVIDENCE_INCLUDE,
         },
       }),
       db.verificationApproval.findMany({
@@ -250,6 +249,7 @@ export async function loadSnapshots(productId?: string): Promise<GuidanceSnapsho
     select: { productId: true, input: true, output: true, createdAt: true },
   });
 
+  for (const session of verifications) if (!(await runtimeReviewIsCurrent(session.id))) session.stale = true;
   return products.map((product) => {
     const brief = briefs.find((item) => item.productId === product.id);
     const definition = definitions.find((item) => item.productId === product.id);

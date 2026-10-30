@@ -1,11 +1,14 @@
+import {approveRuntimeReview,prepareRuntimeReview} from './runtime-review';
+import {runtimeManifestDigest} from './runtime-manifest';
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { db } from "@/lib/db";
+import { DockerJob } from "@/modules/verification/containers/docker";
 import { setAIProviderForTests, type AIProvider } from "@/modules/ai/provider";
 import { listAgentCatalogue } from "@/modules/agent/service";
 import { noteVerificationCommitChanged } from "@/modules/verification/impact";
@@ -47,7 +50,7 @@ function git(dir: string, args: string[]) {
 
 const PRODUCT_MODULE = "export function submitClaim() { return { reference: \"CLM-1001\" }; }\n";
 
-type RepoOptions = { javascript?: boolean; productModule?: string };
+type RepoOptions = { javascript?: boolean; productModule?: string; fixture?: "http-postgres" };
 
 function makeRepo(pass: boolean | "absent" = true, build = false, options: RepoOptions = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "apf-verify-repo-"));
@@ -63,6 +66,7 @@ function makeRepo(pass: boolean | "absent" = true, build = false, options: RepoO
   if (pass !== "absent") scripts.test = `node -e "process.exit(${pass ? 0 : 1})"`;
   if (build) scripts.build = "node -e \"process.exit(0)\"";
   fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify({ name: "demo-claims", scripts }));
+  if (options.fixture) fs.cpSync(path.join(process.cwd(), "src/modules/verification/containers/fixtures", options.fixture), dir, { recursive: true });
   git(dir, ["init", "-b", "main"]);
   git(dir, ["config", "user.email", "test@example.com"]);
   git(dir, ["config", "user.name", "Test"]);
@@ -168,7 +172,15 @@ function provider(options: {
   };
 }
 
+/** Synthetic human review data only; never used by application/runtime code. */
+async function approveFixtureRuntime(productId:string,workspaceId:string) {
+ const key='synthetic-service-runtime-review-key-32-bytes';vi.stubEnv('EXTERNAL_REVIEW_APPROVAL_KEY',key);
+ const manifest=await prepareRuntimeReview(productId,workspaceId);
+ await approveRuntimeReview({productId,workspaceId,digest:runtimeManifestDigest(manifest),credential:key,actor:{id:'fixture-human',name:'Fixture human'},reason:'Synthetic fixture: explicitly reviewed the exact source, runtime and behavioural scope.'});
+}
+
 async function completedTask(options?: {
+  fixture?: "http-postgres";
   pass?: boolean | "absent";
   build?: boolean;
   javascript?: boolean;
@@ -185,6 +197,7 @@ async function completedTask(options?: {
   const repo = prepareRepo(options?.pass ?? true, options?.build ?? false, {
     javascript: options?.javascript,
     productModule: options?.productModule,
+    fixture: options?.fixture,
   });
   const sha = git(repo, ["rev-parse", "HEAD"]).trim();
   const product = await db.product.create({
@@ -334,7 +347,7 @@ async function completedTask(options?: {
   }
   if (options?.approval !== false) {
     const approval = await db.approval.create({
-      data: { productId: product.id, approvalType: "CODE_CHANGE", status: "APPROVED", approvedBy: "Local user" },
+      data: { productId: product.id, approvalType: "CODE_CHANGE", status: "APPROVED", approvedBy: "Local user", resolvedAt: new Date() },
     });
     if (options?.workspace !== false) {
       const workspace = await db.repositoryWorkspace.findFirst({ where: { implementationTaskId: task.id } });
@@ -351,10 +364,16 @@ async function completedTask(options?: {
       });
     }
   }
+  if (options?.approval !== false && options?.workspace !== false && options?.sha !== false && options?.stale !== true && (options?.status ?? 'COMPLETED') === 'COMPLETED') {
+    const approvedWorkspace=await db.repositoryWorkspace.findFirstOrThrow({where:{implementationTaskId:task.id}});
+    await approveFixtureRuntime(product.id,approvedWorkspace.id);
+  }
   return { repo, sha, product, slice, task, criterion };
 }
 
 afterEach(async () => {
+  vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   setAIProviderForTests(null);
   process.env.OPENAI_API_KEY = originalKey;
   if (originalProvider === undefined) delete process.env.AI_PROVIDER;
@@ -550,6 +569,68 @@ describe("verification entry", () => {
 });
 
 describe("verification execution", () => {
+  it.runIf(process.env.APF_CONTAINER_VERIFICATION_READY === '1')('verifies a generic HTTP PostgreSQL workflow with isolated credentials and persisted independent evidence', async () => {
+    vi.stubEnv('VERIFICATION_DATABASE_ADMIN_URL', '');
+    const setup = await completedTask({ fixture: 'http-postgres' });
+    const workspace = await db.repositoryWorkspace.findFirstOrThrow({ where: { implementationTaskId: setup.task.id } });
+    await db.codingExecutionPlan.update({ where: { workspaceId: workspace.id }, data: { validationPlan: JSON.stringify({ verificationRuntime: {
+      commands: [{ command: 'npm test', runtime: { kind: 'MANAGED_HTTP_DATABASE', baseUrlEnv: 'TEST_BASE_URL', databaseUrlEnv: 'TEST_DATABASE_URL' } }],
+      behaviors: [{ id: 'persist-claim', criterionId: setup.criterion.id, description: 'Created claim references persist and are returned by the read endpoint.', minimumValueAssertions: 2, read: true, write: true, concurrent: false }],
+    } }) } });
+    await approveFixtureRuntime(setup.product.id,workspace.id);
+    const jobs = new Set<DockerJob>(), credentials: { role: string; command: string; keys: string[]; databaseRoles: string[] }[] = [], validatedRoles: string[] = [];
+    const run = DockerJob.prototype.run, container = DockerJob.prototype.container;
+    vi.spyOn(DockerJob.prototype, 'container').mockImplementation(async function(this: DockerJob, role, network) {
+      const name = await container.call(this, role, network); validatedRoles.push(role); return name;
+    });
+    vi.spyOn(DockerJob.prototype, 'run').mockImplementation(function(this: DockerJob, name, argv, env, timeoutMs) {
+      jobs.add(this);
+      credentials.push({ role: name.split('-').at(-1)!, command: argv.slice(0, 3).join(' ').replace(/const[\s\S]*/, '[trusted controller]'), keys: Object.keys(env ?? {}).sort(), databaseRoles: Object.entries(env ?? {}).filter(([key]) => /DATABASE_URL$/.test(key)).map(([,value]) => new URL(value).username || 'placeholder') });
+      return run.call(this, name, argv, env, timeoutMs);
+    });
+    const body = `import test from 'node:test';
+import assert from 'node:assert/strict';
+// verifies:${setup.criterion.id}
+// behavior:persist-claim
+test('created claim references persist and are returned by the read endpoint',async()=>{
+ assert.equal(process.env.DATABASE_URL,undefined);assert.equal(process.env.TEST_DATABASE_URL,undefined);assert.equal(process.env.SESSION_SECRET,undefined);assert.equal(process.env.OPENAI_API_KEY,undefined);assert.equal(process.env.VERIFICATION_DATABASE_ADMIN_URL,undefined);
+ const response=await fetch(new URL('/api/claims',process.env.VERIFICATION_BASE_URL),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({reference:'CLM-1001'})});
+ assert.equal(response.status,201);const created=await response.json();assert.equal(created.reference,'CLM-1001');
+ const read=await fetch(new URL('/api/claims',process.env.VERIFICATION_BASE_URL));const data=await read.json();const saved=data.claims.find(claim=>claim.reference==='CLM-1001');assert.equal(saved.id,created.id);assert.equal(saved.receipt,created.receipt);
+});`;
+    const ai = provider({ criterionId: setup.criterion.id, body, adapterId: 'http-blackbox', targetSurface: 'HTTP_ENDPOINT', requiredCapabilities: ['http-request','body-assertion'], filePath: 'verification/http/persist-claim.test.mjs' });
+    const prompts: string[] = [];
+    setAIProviderForTests({ async generate(request) { prompts.push(JSON.stringify(request)); return ai.generate(request); } });
+    try {
+      const session = await startVerification(setup.product.id, setup.task.id);
+      const secrets = [...jobs].flatMap(job => job.secrets).filter(value => value.length >= 4);
+      const evidence = JSON.stringify(session), promptText = prompts.join('\n');
+      expect(secrets.some(secret => [secret, encodeURIComponent(secret), Buffer.from(secret).toString('base64')].some(value => evidence.includes(value) || promptText.includes(value)))).toBe(false);
+      fs.mkdirSync('.tmp/integration-review', { recursive: true });
+      fs.writeFileSync(`.tmp/integration-review/generic-http-postgres-workflow-${session?.id ?? Date.now()}-evidence.json`, JSON.stringify({ syntheticFixture: true, taskId: setup.task.id, session, credentialDelivery: credentials, validatedRoles }, null, 2));
+      expect(session?.overallVerdict).toBe('PASS');
+      expect(session?.workspace?.baseCommit).toBe(setup.sha);
+      expect(session?.coverages.find(c => c.acceptanceCriterionId === setup.criterion.id)?.status).toBe('VERIFIED');
+      expect(session?.executions.some(e => e.kind === 'EXISTING_REGRESSION' && e.command === 'npm test' && e.status === 'PASSED')).toBe(true);
+      const independent = session?.executions.find(e => e.kind === 'NEW_VERIFICATION' && e.adapterId === 'http-blackbox');
+      expect(independent?.status).toBe('PASSED'); expect(independent?.snapshotCommit).toBe(setup.sha);
+      const observations = independent?.observations as { method: string; path: string; status: number }[];
+      expect(observations).toEqual(expect.arrayContaining([expect.objectContaining({method:'POST',path:'/api/claims',status:201}),expect.objectContaining({method:'GET',path:'/api/claims',status:200})]));
+      expect((session?.runState as { resources: unknown[] }).resources).toEqual([]);
+      expect(validatedRoles).toEqual(expect.arrayContaining(['database','schema','build','app','proxy','test']));
+      const app = credentials.find(e => e.role === 'app' && e.command === 'npm run start');
+      expect(app?.databaseRoles).toEqual(['application_worker']);
+      expect(app?.keys).toEqual(['DATABASE_URL','HOST','NEXT_TELEMETRY_DISABLED','NODE_ENV','PORT','SESSION_SECRET']);
+      const regression = credentials.find(e => e.role === 'test' && e.command === 'npm test');
+      expect(regression?.databaseRoles).toEqual(['integration_worker']);
+      expect(regression?.keys).toEqual(['NPM_CONFIG_CACHE','TEST_BASE_URL','TEST_DATABASE_URL']);
+      const acceptance = credentials.find(e => e.role === 'test' && e.command.startsWith('node --test'));
+      expect(acceptance?.databaseRoles).toEqual([]);
+      expect(acceptance?.keys).toEqual(['VERIFICATION_ACCOUNTS','VERIFICATION_BASE_URL','VERIFICATION_PATHS']);
+      expect(credentials.flatMap(e => e.databaseRoles).includes('controller')).toBe(false);
+    } finally { vi.unstubAllEnvs(); }
+  }, 180_000);
+
   it("verifies from an isolated worktree at the approved commit", async () => {
     const setup = await completedTask();
     setAIProviderForTests(provider({ criterionId: setup.criterion.id }));
@@ -557,6 +638,7 @@ describe("verification execution", () => {
     expect(session?.workspace?.baseCommit).toBe(setup.sha);
     expect(session?.workspace?.branchName).toContain("ai-factory/verify-task-");
     expect(session?.overallVerdict).toBe("PASS");
+    expect((session?.runState as {resources:unknown[]}).resources).toEqual([]);
     expect(fs.existsSync(path.join(session!.workspace!.workspacePath, `verification/${setup.criterion.id}/claim.test.mjs`))).toBe(true);
     expect(fs.existsSync(path.join(setup.repo, `verification/${setup.criterion.id}/claim.test.mjs`))).toBe(false);
     expect(fs.readFileSync(path.join(setup.repo, "src/claims/submit.ts"), "utf8")).toContain("notice");
@@ -568,6 +650,26 @@ describe("verification execution", () => {
     expect(session?.testCases.some((item) => item.provenance === "HUMAN_EXISTING")).toBe(true);
     const coverage = session?.coverages.find((item) => item.acceptanceCriterionId === setup.criterion.id);
     expect(coverage?.status).toBe("VERIFIED");
+  });
+
+  it("cleans up a timed-out container workflow without recording a product failure", async () => {
+    const setup = await completedTask();
+    const run = DockerJob.prototype.run;
+    vi.spyOn(DockerJob.prototype, 'run').mockImplementation(function(this:DockerJob,name,argv,env,timeoutMs){
+      return run.call(this,name,argv,env,argv[0]==='node'&&argv[1]==='--test'?1500:timeoutMs);
+    });
+    const body = `import test from 'node:test';
+import assert from 'node:assert/strict';
+import {spawn} from 'node:child_process';
+import {submitClaim} from '../../src/claims/submit.mjs';
+// verifies:${setup.criterion.id}
+test('claim verification with a stalled descendant',async()=>{assert.equal(submitClaim().reference,'CLM-1001');spawn(process.execPath,['-e','setInterval(()=>{},1000)']);await new Promise(resolve=>setTimeout(resolve,60000));});`;
+    setAIProviderForTests(provider({criterionId:setup.criterion.id,body}));
+    const session = await startVerification(setup.product.id, setup.task.id);
+    expect(session?.overallVerdict).not.toBe('PASS');
+    expect(session?.failureClass).not.toBe('PRODUCT_VERIFICATION_FAILED');
+    expect(session?.executions.some(e=>e.kind==='NEW_VERIFICATION'&&e.status==='BLOCKED')).toBe(true);
+    expect((session?.runState as {resources:unknown[]}).resources).toEqual([]);
   });
 
   it("does not execute an automated test without the criterion marker, and says why", async () => {
@@ -665,6 +767,7 @@ describe("verification execution", () => {
     setAIProviderForTests(provider({ criterionId: setup.criterion.id, body: failingBody(setup.criterion.id) }));
     const session = await startVerification(setup.product.id, setup.task.id);
     expect(session?.overallVerdict).toBe("FAIL");
+    expect((session?.runState as {resources:unknown[]}).resources).toEqual([]);
     expect(session?.coverages[0]?.status).toBe("FAILED");
     expect(session?.defectLinks[0]?.workItem.type).toBe("DEFECT");
     expect(session?.defectLinks[0]?.implementationTaskId).toBe(setup.task.id);

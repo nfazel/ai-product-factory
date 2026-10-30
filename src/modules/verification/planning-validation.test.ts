@@ -27,7 +27,7 @@ const ROUTES = [
   "/api/discovery/action",
 ];
 
-/** A profile whose adapter registry holds http-blackbox available (HTTP routes, a build script, a database). */
+/** A profile whose adapter registry holds http-blackbox available (HTTP routes, a build script, enabled container verification). */
 const PROFILE = {
   routes: ROUTES.map((url) => ({ url })),
   scripts: ["build", "start"],
@@ -37,16 +37,16 @@ const PROFILE = {
   testRunners: [],
 } as unknown as ImplementationProfile;
 
-const ADMIN_ENV = "postgresql://verifier:x@127.0.0.1:5433/postgres";
+const CONTAINER_READY = "1";
 
 function withEnv<T>(fn: () => T): T {
-  const previous = process.env.VERIFICATION_DATABASE_ADMIN_URL;
-  process.env.VERIFICATION_DATABASE_ADMIN_URL = ADMIN_ENV;
+  const previous = process.env.APF_CONTAINER_VERIFICATION_READY;
+  process.env.APF_CONTAINER_VERIFICATION_READY = CONTAINER_READY;
   try {
     return fn();
   } finally {
-    if (previous === undefined) delete process.env.VERIFICATION_DATABASE_ADMIN_URL;
-    else process.env.VERIFICATION_DATABASE_ADMIN_URL = previous;
+    if (previous === undefined) delete process.env.APF_CONTAINER_VERIFICATION_READY;
+    else process.env.APF_CONTAINER_VERIFICATION_READY = previous;
   }
 }
 
@@ -263,12 +263,12 @@ describe("6. unsupported adapters remain rejected", () => {
 
   it("does not select an adapter that cannot execute for this implementation (terminal, not correctable)", () => {
     const noDatabase = withEnv(() => {
-      const previous = process.env.VERIFICATION_DATABASE_ADMIN_URL;
-      delete process.env.VERIFICATION_DATABASE_ADMIN_URL;
+      const previous = process.env.APF_CONTAINER_VERIFICATION_READY;
+      delete process.env.APF_CONTAINER_VERIFICATION_READY;
       try {
         return validatePlanProposal({ proposal: proposal(), routes: ROUTES, profile: PROFILE, workspacePath: "/nonexistent" });
       } finally {
-        if (previous !== undefined) process.env.VERIFICATION_DATABASE_ADMIN_URL = previous;
+        if (previous !== undefined) process.env.APF_CONTAINER_VERIFICATION_READY = previous;
       }
     });
     expect(noDatabase.cases[0]?.automated).toBe(false);
@@ -316,14 +316,14 @@ describe("8. correction is attempted at most once", () => {
   });
 
   it("makes no correction request for terminal-only errors (adapter unavailable, not refused)", async () => {
-    // Remove the database configuration so http-blackbox is UNAVAILABLE. Rewording the case cannot fix that.
+    // Disable container verification so http-blackbox is UNAVAILABLE. Rewording the case cannot fix that.
     const unavailable = (): ReturnType<typeof validatePlanProposal> => {
-      const previous = process.env.VERIFICATION_DATABASE_ADMIN_URL;
-      delete process.env.VERIFICATION_DATABASE_ADMIN_URL;
+      const previous = process.env.APF_CONTAINER_VERIFICATION_READY;
+      delete process.env.APF_CONTAINER_VERIFICATION_READY;
       try {
         return validatePlanProposal({ proposal: proposal(), routes: ROUTES, profile: PROFILE, workspacePath: "/nonexistent" });
       } finally {
-        if (previous !== undefined) process.env.VERIFICATION_DATABASE_ADMIN_URL = previous;
+        if (previous !== undefined) process.env.APF_CONTAINER_VERIFICATION_READY = previous;
       }
     };
     const correct = vi.fn(async () => null);

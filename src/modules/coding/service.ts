@@ -75,7 +75,7 @@ import {
   restoreBaselineFile,
   workspaceDirectory,
 } from "@/modules/coding/git";
-import { baselinePreservationIssues } from "@/modules/coding/preservation";
+import { unapprovedPreservationIssues } from "@/modules/coding/external-review";
 import { classifyWrite, filesBlockingPlanApproval, hashText } from "@/modules/coding/policy";
 import {
   findOccupyingWorkspace,
@@ -863,7 +863,7 @@ export async function approveCodeChanges(productId: string, workspaceId: string,
     if (message === BASELINE_UNRESOLVED) throw new DomainError(BASELINE_UNRESOLVED);
     throw error;
   }
-  const preservationIssues = await baselinePreservationIssues(workspace.workspacePath, workspace.baseCommit);
+  const preservationIssues = await unapprovedPreservationIssues(workspace.id, workspace.workspacePath, workspace.baseCommit);
   if (preservationIssues.length) throw new DomainError(`Preservation review required: ${preservationIssues.map(issue => `${issue.path}: ${issue.reason}`).join("\n")}`);
   const status = await repositoryStatus(workspace.workspacePath);
   if (
@@ -1262,7 +1262,7 @@ export async function createCodingCommit(productId: string, workspaceId: string)
     if (message === BASELINE_UNRESOLVED) throw new DomainError(BASELINE_UNRESOLVED);
     throw error;
   }
-  const preservationIssues = await baselinePreservationIssues(workspace.workspacePath, workspace.baseCommit);
+  const preservationIssues = await unapprovedPreservationIssues(workspace.id, workspace.workspacePath, workspace.baseCommit);
   if (preservationIssues.length) throw new DomainError(`Preservation review required: ${preservationIssues.map(issue => `${issue.path}: ${issue.reason}`).join("\n")}`);
   const status = await repositoryStatus(workspace.workspacePath);
   if (

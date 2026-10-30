@@ -235,7 +235,8 @@ describe("not-executable context follows the registered adapters", () => {
   });
 
   it("does not say HTTP requests or database-backed tests are unavailable while http-blackbox can run them", () => {
-    vi.stubEnv("VERIFICATION_DATABASE_ADMIN_URL", "postgresql://verifier@127.0.0.1:5433/postgres");
+    vi.stubEnv("APF_CONTAINER_VERIFICATION_READY", "1");
+    vi.stubEnv("VERIFICATION_DATABASE_ADMIN_URL", "");
     const inspection = inspectImplementation({ workspacePath: sampleProject() });
     expect(inspection.capabilities.find((item) => item.adapterId === "http-blackbox")?.available).toBe(true);
     const line = inspection.context.split("\n").find((item) => item.startsWith("Not executable for this implementation"));
@@ -246,7 +247,8 @@ describe("not-executable context follows the registered adapters", () => {
     expect(line).toContain("browser or UI interaction");
   });
 
-  it("still lists HTTP and database tests as not executable when no verification database is configured", () => {
+  it("still lists HTTP and database tests as not executable when container verification is disabled", () => {
+    vi.stubEnv("APF_CONTAINER_VERIFICATION_READY", "0");
     vi.stubEnv("VERIFICATION_DATABASE_ADMIN_URL", "");
     const inspection = inspectImplementation({ workspacePath: sampleProject() });
     expect(inspection.capabilities.find((item) => item.adapterId === "http-blackbox")?.available).toBe(false);
