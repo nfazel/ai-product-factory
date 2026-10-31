@@ -76,6 +76,7 @@ enum AgentRunStatus {
 }
 
 model Product {
+  reworkAmendments ReworkAmendment[]
   planningGenerations PlanningGeneration[]
   planningPublications PlanningPublication[]
   requirementsContextPins RequirementsContextPin[]
@@ -254,6 +255,7 @@ model Decision {
 }
 
 model Approval {
+  reworkEvents ReworkEvent[]
   requirementsReceipt RequirementsApprovalReceipt?
   developmentScopeEvent DevelopmentScopeEvent?
   id           String         @id @default(cuid())
@@ -1090,6 +1092,7 @@ model ComponentTrace {
 }
 
 model ImplementationPlan {
+  reworkAmendments ReworkAmendment[]
   id                     String     @id @default(cuid())
   productId              String
   productSliceId         String?
@@ -1117,6 +1120,7 @@ model ImplementationPlan {
 }
 
 model ImplementationTask {
+  reworkBinding ReworkTaskBinding?
   id                     String                   @id @default(cuid())
   implementationPlanId   String
   workItemId             String?
@@ -3509,6 +3513,7 @@ model DevelopmentScope {
   @@index([productId,featureId,createdAt])
 }
 model DevelopmentScopeRevision {
+  reworkAmendments ReworkAmendment[]
   id String @id @default(cuid())
   scopeId String
   version Int
@@ -3711,4 +3716,47 @@ model PlanningPublication {
   baseline RequirementsBaseline? @relation(fields:[baselineId,productId],references:[id,productId],onDelete:Restrict,onUpdate:Restrict)
   finalPin RequirementsContextPin? @relation(fields:[finalPinId],references:[id],onDelete:Restrict,onUpdate:Restrict)
   @@unique([productId,idempotencyKey])
+}
+
+// Narrow unchanged-requirements rework package. No general planning/candidate workflow.
+model ReworkAmendment {
+ id String @id
+ productId String
+ planId String
+ scopeRevisionId String
+ manifest Json
+ digest String
+ idempotencyKey String
+ requestDigest String
+ createdAt DateTime @default(now())
+ product Product @relation(fields:[productId],references:[id],onDelete:Restrict,onUpdate:Restrict)
+ plan ImplementationPlan @relation(fields:[planId],references:[id],onDelete:Restrict,onUpdate:Restrict)
+ revision DevelopmentScopeRevision @relation(fields:[scopeRevisionId],references:[id],onDelete:Restrict,onUpdate:Restrict)
+ bindings ReworkTaskBinding[]
+ events ReworkEvent[]
+ @@unique([productId,idempotencyKey])
+}
+model ReworkEvent {
+ id String @id
+ amendmentId String
+ scopeRevisionId String
+ type String
+ manifest Json
+ digest String
+ signature String
+ approvalId String @unique
+ idempotencyKey String
+ requestDigest String
+ createdAt DateTime @default(now())
+ amendment ReworkAmendment @relation(fields:[amendmentId],references:[id],onDelete:Restrict,onUpdate:Restrict)
+ approval Approval @relation(fields:[approvalId],references:[id],onDelete:Restrict,onUpdate:Restrict)
+ @@unique([amendmentId,type])
+ @@unique([amendmentId,idempotencyKey])
+}
+
+model ReworkTaskBinding {
+ taskId String @id
+ amendmentId String
+ task ImplementationTask @relation(fields:[taskId],references:[id],onDelete:Restrict,onUpdate:Restrict)
+ amendment ReworkAmendment @relation(fields:[amendmentId],references:[id],onDelete:Restrict,onUpdate:Restrict)
 }

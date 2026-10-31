@@ -1,3 +1,4 @@
+import {assertLegacyCodingWorkspace} from "@/modules/rework/guard";
 import "server-only";
 
 import { db } from "@/lib/db";
@@ -37,6 +38,7 @@ export async function recoverApprovedPlansAfterProviderFailure(productId?: strin
   for (const plan of plans) {
     const workspace = workspaces.find((item) => item.id === plan.workspaceId);
     if (!workspace) continue;
+    await assertLegacyCodingWorkspace(workspace.productId,workspace.id);
     const run = runs.find((item) => item.productId === workspace.productId && implementInput(item.input)?.workspaceId === plan.workspaceId);
     if (!run || run.status !== "FAILED") continue;
     const output = run.output && typeof run.output === "object" ? run.output as { errorCategory?: unknown } : null;
@@ -70,6 +72,7 @@ export async function restoreApprovedPlanAfterValidationFailure(productId?: stri
     select: { id: true, productId: true, status: true, input: true, output: true },
   });
   for (const workspace of workspaces) {
+    await assertLegacyCodingWorkspace(workspace.productId,workspace.id);
     const run = runs.find((item) => item.productId === workspace.productId && implementInput(item.input)?.workspaceId === workspace.id);
     if (!run) continue;
     const output = run.output && typeof run.output === "object" ? run.output as { outcome?: unknown; errorCategory?: unknown } : null;

@@ -1,3 +1,4 @@
+import {assertLegacyCodingTask} from "@/modules/rework/guard";
 import "server-only";
 
 import type { Prisma } from "@/generated/prisma/client";
@@ -91,6 +92,7 @@ export async function insertWorkspace(input: {
   branchName: string;
   baseCommit: string;
 }) {
+  await assertLegacyCodingTask(input.productId,input.implementationTaskId);
   return db.repositoryWorkspace.create({
     data: {
       repositoryId: input.repositoryId,

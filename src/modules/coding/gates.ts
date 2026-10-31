@@ -1,3 +1,4 @@
+import {assertLegacyCodingTask} from "@/modules/rework/guard";
 import "server-only";
 
 import { assessCodingReadiness } from "@/modules/governance/coding-readiness";
@@ -6,6 +7,7 @@ import { findOccupyingWorkspace, latestPolicy, loadTaskGraph } from "@/modules/c
 import { DomainError } from "@/modules/shared/errors";
 
 export async function codingEntryBlockers(productId: string, taskId: string) {
+  await assertLegacyCodingTask(productId,taskId);
   const readiness = await assessCodingReadiness(productId);
   const reasons = [...readiness.blockers];
   const task = await loadTaskGraph(productId, taskId);

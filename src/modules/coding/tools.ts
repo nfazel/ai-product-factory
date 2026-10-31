@@ -1,3 +1,4 @@
+import {assertLegacyCodingWorkspace} from "@/modules/rework/guard";
 import "server-only";
 
 import fs from "node:fs";
@@ -58,6 +59,7 @@ export type ToolResult = {
 const WRITE_ACTIONS = new Set(["WRITE_FILE", "CREATE_FILE", "DELETE_FILE"]);
 
 export async function executeRepositoryTool(context: ToolContext, request: ToolRequest): Promise<ToolResult> {
+  await assertLegacyCodingWorkspace(context.productId,context.workspaceId);
   const outcome = await apply(context, request);
   await recordToolEvent({
     workspaceId: context.workspaceId,

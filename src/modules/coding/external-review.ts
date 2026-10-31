@@ -1,3 +1,4 @@
+import {assertLegacyCodingWorkspace} from "@/modules/rework/guard";
 import {AuthorityUnavailableError} from '@/modules/verification/authority-status';
 import "server-only";
 
@@ -46,6 +47,7 @@ async function entry(root: string, commit: string, file: string) {
 
 /** Read-only, complete commit manifest. Full SHAs only; no user-controlled refs. */
 export async function prepareExternalReview(productId: string, workspaceId: string, sourceCommit: string, rootOverride?: string): Promise<ExternalManifest> {
+ await assertLegacyCodingWorkspace(productId,workspaceId);
   const { scope } = await workspaceScope(productId, workspaceId);
   if (!/^[a-f0-9]{40}$/.test(sourceCommit) || !/^[a-f0-9]{40}$/.test(scope.baseCommit)) throw new DomainError("Resolved full commit SHAs are required.");
   const root = rootOverride ?? (await resolveProductRepository(productId)).localPath;
@@ -74,6 +76,7 @@ export async function prepareExternalReview(productId: string, workspaceId: stri
  * Possessing a configured review credential is required in addition to naming
  * an actor. Caller-supplied names do not establish authority. */
 export async function approveExternalReview(input: { productId: string; workspaceId: string; sourceCommit: string; digest: string; reviewedIssues: { path: string; reason: string }[]; credential: string; actor: { id: string; name: string }; reason: string }) {
+ await assertLegacyCodingWorkspace(input.productId,input.workspaceId);
   requireReviewCredential(input.credential, configuredKey());
   if (!input.actor.id.trim() || !input.actor.name.trim() || /^(?:codex|coding agent|verification agent|testing agent)$/i.test(input.actor.name.trim()) || input.reason.trim().length < 12) throw new DomainError("A human operator attribution and substantive review reason are required.");
   const manifest = await prepareExternalReview(input.productId, input.workspaceId, input.sourceCommit);
@@ -165,6 +168,7 @@ export async function unapprovedPreservationIssues(workspaceId: string, root: st
 }
 
 export async function importExternalCommit(input: { productId: string; workspaceId: string; sourceCommit: string; digest: string; credential: string }) {
+ await assertLegacyCodingWorkspace(input.productId,input.workspaceId);
   requireReviewCredential(input.credential, configuredKey());
   const manifest = await prepareExternalReview(input.productId, input.workspaceId, input.sourceCommit);
   if (manifestDigest(manifest) !== input.digest) throw new DomainError("External import manifest is no longer current.");

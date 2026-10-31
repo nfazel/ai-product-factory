@@ -131,3 +131,11 @@ export async function getDevelopmentScope(input:ScopeLocation){
  }
  return {scopeId:value.id,productId:value.productId,featureId:value.featureId,feedbackId:value.feedbackId,status,version:revision.version,digest:revision.digest,manifest,blockers,history:value.revisions.map(r=>({id:r.id,version:r.version,digest:r.digest,manifest:r.manifest as unknown as ScopeManifest,at:r.createdAt.toISOString()})),decisions:value.events.map(e=>({id:e.id,revisionId:e.revisionId,type:e.type,digest:e.scopeDigest,actor:e.actorName,reason:e.reason,at:e.createdAt.toISOString(),superseded:e.revisionId!==revision.id}))};
 }
+
+/** Narrow historical authority reader for controlled rework; never re-signs old decisions. */
+export async function readScopeAuthorityForRework(input:ScopeLocation,revisionId:string,reader:Reader=db){
+ const value=await read(reader,input),revision=value.revisions.at(-1),event=value.events.find(e=>e.revisionId===revisionId);
+ if(!revision||revision.id!==revisionId||!event||event.type!=='APPROVED'||hash(revision.manifest)!==revision.digest||!authenticDecision(event,input,revision.digest))throw new DomainError('Exact current protected scope approval is required.');
+ const manifest=revision.manifest as unknown as ScopeManifest;if(approvalBlockers(manifest).length)throw new DomainError('Scope baseline is not eligible for rework.');
+ return{revision,event,manifest};
+}

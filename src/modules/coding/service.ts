@@ -1,3 +1,4 @@
+import {assertLegacyCodingTask,assertLegacyCodingWorkspace} from "@/modules/rework/guard";
 import "server-only";
 import {currentRequirementsForView,criteriaForView,artifactRequirementsForView,requirementsViewLabel} from "@/modules/requirements-baseline/presentation";
 
@@ -136,6 +137,7 @@ function draftFor(task: TaskGraph, policy: NonNullable<Awaited<ReturnType<typeof
 }
 
 export async function approveImplementationTask(productId: string, taskId: string, options?: { actorName?: string }) {
+  await assertLegacyCodingTask(productId,taskId);
   const actor = options?.actorName ?? getCurrentActor().name;
   assertHuman(actor);
   const task = await loadTaskGraph(productId, taskId);
@@ -161,6 +163,7 @@ export async function approveImplementationTask(productId: string, taskId: strin
 
 /** Return a completed implementation to the existing human approval and coding cycle. */
 export async function requestCompletedTaskCorrection(productId: string, taskId: string, reason: string) {
+  await assertLegacyCodingTask(productId,taskId);
   const actor = getCurrentActor().name;
   assertHuman(actor);
   const explanation = reason.trim();
@@ -222,6 +225,7 @@ export async function requestCompletedTaskCorrection(productId: string, taskId: 
 }
 
 export async function startCodingTask(productId: string, taskId: string) {
+  await assertLegacyCodingTask(productId,taskId);
   const gate = await assertCodingEntry(productId, taskId);
   await prepareAI();
   if (!isAIConfigured()) throw new AgentNotConfiguredError("CODING");
@@ -318,6 +322,7 @@ export async function startCodingTask(productId: string, taskId: string) {
 }
 
 export async function approveExecutionPlan(productId: string, workspaceId: string, options?: { actorName?: string }) {
+  await assertLegacyCodingWorkspace(productId,workspaceId);
   const actor = options?.actorName ?? getCurrentActor().name;
   assertHuman(actor);
   const workspace = await requireActiveContract(productId, workspaceId);
@@ -408,6 +413,7 @@ function withPlanAuthorisedPaths(allowedPaths: string[], planFiles: string[]) {
 }
 
 export async function requestExecutionPlanChanges(productId: string, workspaceId: string, changeRequest: string, actorName?: string) {
+  await assertLegacyCodingWorkspace(productId,workspaceId);
   const actor = actorName ?? getCurrentActor().name;
   assertHuman(actor);
   const note = changeRequest.trim();
@@ -457,6 +463,7 @@ export async function requestExecutionPlanChanges(productId: string, workspaceId
 }
 
 export async function proposeCoherentExecutionPlan(productId: string, workspaceId: string) {
+  await assertLegacyCodingWorkspace(productId,workspaceId);
   const workspace = await requireActiveContract(productId, workspaceId);
   const plan = workspace.plan;
   if (!plan || !["APPROVED", "ESCALATED"].includes(plan.status)) {
@@ -604,6 +611,7 @@ async function executionFlight(
 }
 
 export async function reviseExecutionPlan(productId: string, workspaceId: string) {
+  await assertLegacyCodingWorkspace(productId,workspaceId);
   const workspace = await requireActiveContract(productId, workspaceId);
   const plan = workspace.plan;
   if (plan?.status !== "CHANGES_REQUESTED") {
@@ -690,6 +698,7 @@ export async function requestCodingChanges(input: {
   affectedFiles: string[];
   actorName?: string;
 }) {
+  await assertLegacyCodingWorkspace(input.productId,input.workspaceId);
   const actor = input.actorName ?? getCurrentActor().name;
   assertHuman(actor);
   const workspace = await requireActiveContract(input.productId, input.workspaceId);
@@ -845,6 +854,7 @@ function sourceStamps(root: string, files: { path: string }[]) {
 }
 
 export async function approveCodeChanges(productId: string, workspaceId: string, options?: { actorName?: string }) {
+  await assertLegacyCodingWorkspace(productId,workspaceId);
   const actor = options?.actorName ?? getCurrentActor().name;
   assertHuman(actor);
   const workspace = await requireActiveContract(productId, workspaceId);
@@ -937,6 +947,7 @@ export async function approveCodeChanges(productId: string, workspaceId: string,
 }
 
 export async function restoreUnapprovedChange(productId: string, workspaceId: string, filePath: string) {
+  await assertLegacyCodingWorkspace(productId,workspaceId);
   const actor = getCurrentActor().name;
   assertHuman(actor);
   const workspace = await requireActiveContract(productId, workspaceId);
@@ -1011,6 +1022,7 @@ export async function restoreUnapprovedChange(productId: string, workspaceId: st
 }
 
 export async function proposeOutOfScopePlan(productId: string, workspaceId: string, filePath: string) {
+  await assertLegacyCodingWorkspace(productId,workspaceId);
   const actor = getCurrentActor().name;
   assertHuman(actor);
   const workspace = await requireActiveContract(productId, workspaceId);
@@ -1076,6 +1088,7 @@ export async function proposeOutOfScopePlan(productId: string, workspaceId: stri
  * Creates a new proposed version; does not approve the plan or run the Coding Agent.
  */
 export async function repairProposedPlanCoverage(productId: string, workspaceId: string) {
+  await assertLegacyCodingWorkspace(productId,workspaceId);
   const actor = getCurrentActor().name;
   assertHuman(actor);
   const workspace = await requireActiveContract(productId, workspaceId);
@@ -1145,6 +1158,7 @@ export async function repairProposedPlanCoverage(productId: string, workspaceId:
 }
 
 export async function rejectCodeChanges(productId: string, workspaceId: string, feedback: string) {
+  await assertLegacyCodingWorkspace(productId,workspaceId);
   const actor = getCurrentActor().name;
   assertHuman(actor);
   const workspace = await findWorkspace(productId, workspaceId);
@@ -1164,6 +1178,7 @@ export async function rejectCodeChanges(productId: string, workspaceId: string, 
 }
 
 export async function abandonWorkspace(productId: string, workspaceId: string) {
+  await assertLegacyCodingWorkspace(productId,workspaceId);
   const workspace = await findWorkspace(productId, workspaceId);
   if (!workspace) throw new DomainError("Coding workspace not found.", "NOT_FOUND");
   await saveWorkspace(workspaceId, { status: "ABANDONED", completedAt: new Date() });
@@ -1182,6 +1197,7 @@ export async function abandonWorkspace(productId: string, workspaceId: string) {
 }
 
 export async function createCodingCommit(productId: string, workspaceId: string) {
+  await assertLegacyCodingWorkspace(productId,workspaceId);
   const workspace = await requireActiveContract(productId, workspaceId);
   if (workspace.status !== "READY_FOR_REVIEW") {
     throw new DomainError("Create the approved commit while the workspace is ready for review.");
@@ -1302,10 +1318,12 @@ export async function createCodingCommit(productId: string, workspaceId: string)
 }
 
 export async function retryCodingTask(productId: string, workspaceId: string) {
+  await assertLegacyCodingWorkspace(productId,workspaceId);
   return continueCoding(productId, workspaceId, "retry");
 }
 
 export async function repairCodingTask(productId: string, workspaceId: string) {
+  await assertLegacyCodingWorkspace(productId,workspaceId);
   await recoverApprovedPlansAfterProviderFailure(productId);
   await restoreApprovedPlanAfterValidationFailure(productId);
   const initial = await requireActiveContract(productId, workspaceId);
@@ -1368,6 +1386,7 @@ export async function repairCodingTask(productId: string, workspaceId: string) {
 }
 
 export async function resumeCodingTask(productId: string, workspaceId: string) {
+  await assertLegacyCodingWorkspace(productId,workspaceId);
   return continueCoding(productId, workspaceId, "start");
 }
 
@@ -1391,6 +1410,7 @@ function withCompiledContract(
 }
 
 export async function recordRepairResult(productId: string, workspaceId: string) {
+  await assertLegacyCodingWorkspace(productId,workspaceId);
   const workspace = await requireActiveContract(productId, workspaceId);
   if (workspace.status === "ACTIVE") throw new DomainError("A repair is already running. No further repair has been started.");
   if (!(await unrecordedRepairResult(productId, workspace))) throw new DomainError("There is no unrecorded repair result to save.");
@@ -1429,6 +1449,7 @@ export async function recordRepairResult(productId: string, workspaceId: string)
  * Use when implementation was completed or repaired manually after a failed AI coding run.
  */
 export async function validateExistingImplementation(productId: string, workspaceId: string) {
+  await assertLegacyCodingWorkspace(productId,workspaceId);
   const actor = getCurrentActor().name;
   assertHuman(actor);
   const workspace = await requireActiveContract(productId, workspaceId);
@@ -1851,6 +1872,7 @@ async function settleFailedImplementRun(productId: string, workspaceId: string) 
 }
 
 export async function regenerateCodingContract(productId: string, workspaceId: string) {
+  await assertLegacyCodingWorkspace(productId,workspaceId);
   const workspace = await findWorkspace(productId, workspaceId);
   if (!workspace) throw new DomainError("Coding workspace not found.", "NOT_FOUND");
   const task = await loadTaskGraph(productId, workspace.implementationTaskId);
@@ -1886,6 +1908,7 @@ export async function regenerateCodingContract(productId: string, workspaceId: s
 }
 
 export async function applyCodingTool(productId: string, workspaceId: string, request: Parameters<typeof executeRepositoryTool>[1]) {
+  await assertLegacyCodingWorkspace(productId,workspaceId);
   const workspace = await findWorkspace(productId, workspaceId);
   if (!workspace?.contract) throw new DomainError("Coding workspace not found.", "NOT_FOUND");
   return executeRepositoryTool(

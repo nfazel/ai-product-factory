@@ -1,3 +1,4 @@
+import {assertLegacyCodingWorkspace} from "@/modules/rework/guard";
 import "server-only";
 
 import fs from "node:fs";
@@ -86,6 +87,7 @@ export const codingRunner: AgentRunner = {
     await assertCodingRun(request);
   },
   async execute(request) {
+    await assertLegacyCodingWorkspace(request.productId,text(request.input.workspaceId));
     const phase = request.input.phase === "implement" ? "implement" : request.input.phase === "repair" ? "repair" : "plan";
     const workspace = await requireWorkspace(request.productId, text(request.input.workspaceId));
     if (phase === "plan") return runPlan(workspace);
@@ -96,6 +98,7 @@ export const codingRunner: AgentRunner = {
 
 async function assertCodingRun(request: AgentExecutionRequest) {
   const workspaceId = text(request.input.workspaceId);
+  await assertLegacyCodingWorkspace(request.productId,workspaceId);
   if (!workspaceId) throw new DomainError("Coding execution requires an isolated workspace.");
   const workspace = await findWorkspace(request.productId, workspaceId);
   if (!workspace?.contract) throw new DomainError("Coding execution requires an isolated workspace.");
