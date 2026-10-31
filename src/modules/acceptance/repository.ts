@@ -1,4 +1,5 @@
 import "server-only";
+import {currentRequirementsForView,criteriaForView} from "@/modules/requirements-baseline/presentation";
 import {assertOrdinaryCriterionWrites} from "@/modules/requirements-baseline/context";
 
 import { db } from "@/lib/db";
@@ -16,11 +17,13 @@ function toCriterion(row: AcceptanceCriterion): AcceptanceCriterion {
 }
 
 export async function listCriteria(workItemId: string) {
-  const rows = await db.acceptanceCriterion.findMany({
-    where: { workItemId },
-    orderBy: { createdAt: "asc" },
-  });
-  return rows.map(toCriterion);
+  return db.$transaction(async tx=>{
+    const owner=await tx.workItem.findUnique({where:{id:workItemId},select:{productId:true}});
+    if(!owner)return [];
+    const context=await currentRequirementsForView(owner.productId,tx);
+    const rows=await tx.acceptanceCriterion.findMany({where:{workItemId},orderBy:{createdAt:"asc"}});
+    return criteriaForView(context,rows,workItemId).map(toCriterion);
+  },{isolationLevel:"RepeatableRead"});
 }
 
 export async function insertCriterion(input: {

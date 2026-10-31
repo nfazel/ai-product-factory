@@ -1,4 +1,5 @@
 import "server-only";
+import {currentRequirementsForView,criteriaForView,artifactRequirementsForView,requirementsViewLabel} from "@/modules/requirements-baseline/presentation";
 
 import type { ArchitectureSection } from "@/domain/constants";
 import { db } from "@/lib/db";
@@ -653,6 +654,7 @@ export async function getCodingReadiness(productId: string) {
 }
 
 export async function getBuildWorkspace(productId: string) {
+  const viewContext=await currentRequirementsForView(productId);
   const [gate, context, development, architecture, plan, proposal, planProposal, coding, nfrs, governance, codingExecution] =
     await Promise.all([
     architectureEntryBlockers(productId).catch((error: unknown) => {
@@ -684,6 +686,14 @@ export async function getBuildWorkspace(productId: string) {
     getCodingView(productId),
   ]);
   if (!gate || !governance) return null;
+  if(plan)for(const task of plan.tasks)if(task.workItem)task.workItem.acceptanceCriteria=criteriaForView(viewContext,task.workItem.acceptanceCriteria,task.workItem.id);
+  const requirementsPresentation={current:requirementsViewLabel(viewContext),artifacts:await Promise.all(([
+    architecture?{label:"Architecture",kind:"SOLUTION_ARCHITECTURE",id:architecture.id}:null,
+    plan?{label:"Implementation plan",kind:"IMPLEMENTATION_PLAN",id:plan.id}:null,
+    proposal?{label:"Architecture proposal",kind:"ARCHITECTURE_PROPOSAL",id:proposal.id}:null,
+    planProposal?{label:"Plan proposal",kind:"ARCHITECTURE_PROPOSAL",id:planProposal.id}:null,
+  ].filter((a):a is NonNullable<typeof a>=>a!==null)).map(async a=>({label:a.label,...await artifactRequirementsForView(productId,a.kind,a.id,viewContext)})))};
+  for(const task of codingExecution?.tasks??[])if(task.workspace?.requirementsContext)requirementsPresentation.artifacts.push({label:`Coding workspace: ${task.title}`,...task.workspace.requirementsContext});
   const readiness = assessTechnicalReadiness(readinessInput(architecture, plan, nfrs.length));
   return {
     product: gate.product,
@@ -697,6 +707,7 @@ export async function getBuildWorkspace(productId: string) {
     readiness,
     coding,
     codingExecution,
+    requirementsPresentation,
     governance,
     diagram: architecture ? diagram(architecture.components, architecture.relationships) : "",
   };

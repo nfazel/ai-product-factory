@@ -1,3 +1,4 @@
+import {RequirementsContextStatus} from "@/components/build/requirements-context";
 import { Suspense } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -54,7 +55,8 @@ async function Definition({ params }: { params: Promise<{ id: string }> }) {
   await markDynamic();
   const { id } = await params;
   const [workspace, guidance] = await Promise.all([getDefinitionWorkspace(id), getProductGuidance(id)]);
-  if (!workspace || !workspace.definition || !guidance) notFound();
+  if (!workspace || !guidance) notFound();
+  const definition=workspace.definition??{status:"NOT_STARTED" as const,seededDemo:false,reviewRequired:false,reviewReason:"",reviewSummary:""};
   const clarification = await loadClarificationPresentation(
     id,
     workspace.questions.map((question) => ({
@@ -66,15 +68,16 @@ async function Definition({ params }: { params: Promise<{ id: string }> }) {
     })),
   );
 
-  const approved = workspace.definition.status === "APPROVED";
+  const approved = definition.status === "APPROVED";
   const showReview =
-    workspace.definition.status === "READY_FOR_REVIEW" || workspace.sufficientlyDeveloped;
+    definition.status === "READY_FOR_REVIEW" || workspace.sufficientlyDeveloped;
   const epics = workspace.workItems.filter((item) => item.type === "EPIC");
   const features = workspace.workItems.filter((item) => item.type === "FEATURE");
   const stories = workspace.workItems.filter((item) => item.type === "STORY");
 
   return (
     <div className="space-y-6">
+      <RequirementsContextStatus current={workspace.requirementsContext}/>
       <header className="rounded-2xl border bg-card p-4 sm:p-5">
         <p className="text-xs font-medium tracking-[0.14em] text-muted-foreground uppercase">
           Define
@@ -83,10 +86,10 @@ async function Definition({ params }: { params: Promise<{ id: string }> }) {
           <div className="space-y-2">
             <h1 className="text-xl font-semibold">Product definition</h1>
             <p className="text-sm text-muted-foreground">
-              Status: {DEFINITION_STATUS_LABEL[workspace.definition.status]}
+              Status: {DEFINITION_STATUS_LABEL[definition.status]}
             </p>
             <p className="text-sm font-medium">{workspace.readiness.summary}</p>
-            {workspace.definition.seededDemo ? (
+            {definition.seededDemo ? (
               <p className="text-sm leading-6 text-amber-900">
                 Demo data. These outcomes, capabilities, and backlog links were prepared for the sample product. They were not produced by a Requirements Agent run.
               </p>
@@ -105,11 +108,11 @@ async function Definition({ params }: { params: Promise<{ id: string }> }) {
                 body={workspace.aiNotice?.body}
               />
             ) : null}
-            {workspace.definition.reviewRequired ? (
-              <ClarificationHold productId={workspace.product.id} target="DEFINITION" reason={workspace.definition.reviewReason} />
+            {definition.reviewRequired ? (
+              <ClarificationHold productId={workspace.product.id} target="DEFINITION" reason={definition.reviewReason} />
             ) : null}
-            {workspace.definition.reviewSummary ? (
-              <p className="text-sm leading-6">{workspace.definition.reviewSummary}</p>
+            {definition.reviewSummary ? (
+              <p className="text-sm leading-6">{definition.reviewSummary}</p>
             ) : null}
             {workspace.buildBlockers.length > 0 ? (
               <div>
@@ -129,7 +132,7 @@ async function Definition({ params }: { params: Promise<{ id: string }> }) {
           <DefinitionControls
             productId={workspace.product.id}
             showReview={showReview}
-            readyToApprove={workspace.definition.status === "READY_FOR_REVIEW"}
+            readyToApprove={definition.status === "READY_FOR_REVIEW"}
             approved={approved}
           />
         </div>

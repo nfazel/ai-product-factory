@@ -1,4 +1,5 @@
 import "server-only";
+import {currentRequirementsForView,requirementsViewLabel} from "@/modules/requirements-baseline/presentation";
 
 import { db } from "@/lib/db";
 import { describeAIConfiguration } from "@/modules/ai/config";
@@ -615,6 +616,8 @@ export async function acknowledgeRequirementsChange(productId: string) {
 export async function getIntakeWorkspace(productId: string) {
   const product = await db.product.findUnique({ where: { id: productId } });
   if (!product) return null;
+  const viewContext=await currentRequirementsForView(productId);
+  const currentCriterionIds=new Set(viewContext.members.map(m=>m.criterionId));
   const [sources, latest] = await Promise.all([
     db.requirementSource.findMany({ where: { productId }, orderBy: { createdAt: "asc" } }),
     db.requirementsAnalysis.findFirst({
@@ -632,7 +635,7 @@ export async function getIntakeWorkspace(productId: string) {
   const current =
     latest?.status === "CURRENT" &&
     active.every((source) => latest.sources.some((link) => link.sourceId === source.id && link.sourceHash === source.sourceHash));
-  const requirements = latest?.requirements ?? [];
+  const requirements = (latest?.requirements ?? []).map(item=>({...item,traces:item.traces.filter(t=>t.targetKind!=="ACCEPTANCE_CRITERION"||currentCriterionIds.has(t.targetId))}));
   const findings = latest?.findings ?? [];
   const questions = latest?.questions ?? [];
   const readiness = assessIntakeReadiness({
@@ -655,6 +658,7 @@ export async function getIntakeWorkspace(productId: string) {
     product,
     sources,
     analysis: latest,
+    requirementsContext:requirementsViewLabel(viewContext),
     current: Boolean(current),
     requirements,
     findings,

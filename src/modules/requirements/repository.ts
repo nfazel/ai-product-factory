@@ -1,4 +1,6 @@
 import "server-only";
+import {criteriaForView} from "@/modules/requirements-baseline/presentation";
+import type {RequirementsContext} from "@/modules/requirements-baseline/context";
 import {assertOrdinaryCriterionWrites} from "@/modules/requirements-baseline/context";
 
 import { Prisma } from "@/generated/prisma/client";
@@ -432,7 +434,7 @@ export async function commitAcceptedProposal(input: {
   });
 }
 
-export async function definitionSnapshot(productId: string) {
+export async function definitionSnapshot(productId: string, viewContext?: RequirementsContext) {
   const [
     definition,
     outcomes,
@@ -488,7 +490,7 @@ export async function definitionSnapshot(productId: string) {
     questions,
     assumptions,
     workItems,
-    criteria,
+    criteria: viewContext ? criteriaForView(viewContext,criteria) : criteria,
     dependencyLinks,
   };
 }

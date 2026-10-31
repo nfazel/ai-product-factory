@@ -1,4 +1,5 @@
 import "server-only";
+import {currentRequirementsForView,criteriaForView,requirementsViewLabel} from "@/modules/requirements-baseline/presentation";
 
 import {
   ASSUMPTION_STATUS_LABEL,
@@ -404,7 +405,7 @@ export async function getStoryTraceability(workItemId: string) {
     epic: epic ? { id: epic.id, title: epic.title } : null,
     capability: capability ? { id: capability.id, name: capability.name } : null,
     outcome: outcome ? { id: outcome.id, title: outcome.title, sourceBriefId: outcome.sourceBriefId } : null,
-    criteria: snapshotWork.acceptanceCriteria.map((criterion) => ({
+    criteria: criteriaForView(await currentRequirementsForView(snapshotWork.productId),snapshotWork.acceptanceCriteria,snapshotWork.id).map((criterion) => ({
       id: criterion.id,
       description: criterion.description,
     })),
@@ -417,9 +418,9 @@ export async function getDefinitionWorkspace(productId: string) {
     throw error;
   });
   if (!gate) return null;
-  await ensureDefinition(productId);
+  const viewContext=await currentRequirementsForView(productId);
   const [snapshot, proposal, brief, blockers] = await Promise.all([
-    definitionSnapshot(productId),
+    definitionSnapshot(productId,viewContext),
     findOpenProposal(productId),
     findCurrentBrief(productId),
     buildProgressionBlockers(productId),
@@ -505,6 +506,7 @@ export async function getDefinitionWorkspace(productId: string) {
     Boolean(slice) &&
     highQuestions.length === 0;
   return {
+    requirementsContext:requirementsViewLabel(viewContext),
     product: gate.product,
     ...(await aiWorkspaceGate("product definition")),
     entryReasons: gate.reasons,

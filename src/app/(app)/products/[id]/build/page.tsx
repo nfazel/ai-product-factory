@@ -1,3 +1,4 @@
+import {RequirementsContextStatus} from "@/components/build/requirements-context";
 import {inspectBuildVerification} from '@/modules/build/verification-view';
 import {FeatureReviews} from '@/components/build/feature-reviews';
 import { Suspense } from "react";
@@ -135,6 +136,7 @@ async function Build({
 
   return (
     <div className="space-y-6">
+      <RequirementsContextStatus {...workspace.requirementsPresentation}/>
       <header className="rounded-2xl border bg-card p-4 sm:p-5">
         <p className="text-xs font-medium tracking-[0.14em] text-muted-foreground uppercase">
           Build overview

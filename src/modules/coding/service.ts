@@ -1,4 +1,5 @@
 import "server-only";
+import {currentRequirementsForView,criteriaForView,artifactRequirementsForView,requirementsViewLabel} from "@/modules/requirements-baseline/presentation";
 
 import fs from "node:fs";
 import path from "node:path";
@@ -32,7 +33,6 @@ import {
   trimRedundantSchemaScope,
   validationFailureDisposition,
 } from "@/modules/coding/bootstrap";
-import { commandOutputFromMetadata } from "@/modules/coding/command-output";
 import { recoverApprovedPlansAfterProviderFailure, restoreApprovedPlanAfterValidationFailure } from "@/modules/coding/restore-approval";
 import {
   assessImplementationCompleteness,
@@ -1144,73 +1144,6 @@ export async function repairProposedPlanCoverage(productId: string, workspaceId:
   return findWorkspace(productId, workspaceId);
 }
 
-async function recordOutOfScopeFindings(productId: string, workspace: {
-  id: string;
-  status: string;
-  productId?: string;
-  workspacePath: string;
-  implementationTaskId: string;
-  plan: { status?: string; version?: number; setupCommands: unknown; validationCommands: unknown; filesExpectedToChange?: unknown; steps?: unknown } | null;
-  evidence: { command: string; result: string; exitCode: number | null; createdAt: Date; completedAt: Date | null; description?: string }[];
-  diff: { files: unknown; patch?: string } | null;
-}) {
-  if (workspace.status !== "READY_FOR_REVIEW") return;
-  const review = codeReviewFor(workspace);
-  const hash = hashText(workspace.diff?.patch ?? "");
-  const actor = getCurrentActor().name;
-  await db.$transaction(async (tx) => {
-    await tx.$executeRaw`SELECT id FROM "RepositoryWorkspace" WHERE id = ${workspace.id} FOR UPDATE`;
-    for (const file of review.outOfScope) {
-      const marker = `OUT_OF_SCOPE_CHANGE ${file.path} ${file.verb}`;
-      if (workspace.evidence.some((item) => item.description?.startsWith(marker))) continue;
-      const existing = await tx.codingEvidence.findFirst({
-        where: { workspaceId: workspace.id, description: { startsWith: marker } },
-        select: { id: true },
-      });
-      if (existing) {
-        workspace.evidence.push({
-          command: "",
-          result: "OUT_OF_SCOPE",
-          exitCode: null,
-          createdAt: new Date(),
-          completedAt: new Date(),
-          description: marker,
-        });
-        continue;
-      }
-      const recordedAt = new Date();
-      await tx.codingEvidence.create({
-        data: {
-          workspaceId: workspace.id,
-          implementationTaskId: workspace.implementationTaskId,
-          type: "STATIC_ANALYSIS",
-          source: "REPOSITORY",
-          description: `${marker}. Snapshot ${hash}.`,
-          result: "OUT_OF_SCOPE",
-          completedAt: recordedAt,
-        },
-      });
-      await tx.activity.create({
-        data: {
-          productId,
-          type: "CODING_POLICY_DENIED",
-          description: `${marker} on execution plan v${workspace.plan?.version ?? "unknown"}. Snapshot ${hash}.`,
-          actor,
-          createdAt: recordedAt,
-        },
-      });
-      workspace.evidence.push({
-        command: "",
-        result: "OUT_OF_SCOPE",
-        exitCode: null,
-        createdAt: recordedAt,
-        completedAt: recordedAt,
-        description: marker,
-      });
-    }
-  });
-}
-
 export async function rejectCodeChanges(productId: string, workspaceId: string, feedback: string) {
   const actor = getCurrentActor().name;
   assertHuman(actor);
@@ -1980,9 +1913,7 @@ export async function applyCodingTool(productId: string, workspaceId: string, re
 }
 
 export async function getCodingView(productId: string) {
-  await recoverApprovedPlansAfterProviderFailure(productId);
-  await restoreApprovedPlanAfterValidationFailure(productId);
-  await backfillEvidenceOutput(productId);
+  const viewContext=await currentRequirementsForView(productId);
   const product = await db.product.findUnique({ where: { id: productId } });
   if (!product) return null;
   const [readiness, occupying, tasks, policy, workspaces, architecture] = await Promise.all([
@@ -2018,13 +1949,12 @@ export async function getCodingView(productId: string) {
     where: { productId, agentType: "CODING" },
     orderBy: { createdAt: "asc" },
   });
-  const repository = await db.repository.findUnique({ where: { productId }, select: { localPath: true } });
+  const observedDiffs=new Map<string,Awaited<ReturnType<typeof captureWorkspaceDiff>>>();
   const reviewMeta = new Map<string, { snapshotDrifted: boolean; baselineUnresolved: boolean }>();
   for (const workspace of workspaces) {
     if (workspace.status !== "READY_FOR_REVIEW") continue;
     let snapshotDrifted = false;
     let baselineUnresolved = false;
-    if (repository?.localPath) ensureWorktreeLink(workspace.workspacePath, repository.localPath);
     try {
       const status = await repositoryStatus(workspace.workspacePath);
       snapshotDrifted = validationSnapshotDrifted({
@@ -2033,29 +1963,12 @@ export async function getCodingView(productId: string) {
         baseCommit: workspace.baseCommit,
         workingTreeDirty: status.dirty,
       });
-      const diff = await captureWorkspaceDiff(workspace.workspacePath, repository?.localPath, {
+      const diff = await captureWorkspaceDiff(workspace.workspacePath, undefined, {
         baseCommit: workspace.baseCommit,
         requireBaselineWhenClean: true,
       });
       if (diff.files.length > 0) {
-        workspace.diff = await db.codingDiff.upsert({
-          where: { workspaceId: workspace.id },
-          create: {
-            workspaceId: workspace.id,
-            files: diff.files,
-            additions: diff.additions,
-            deletions: diff.deletions,
-            patch: diff.patch,
-            truncated: diff.truncated,
-          },
-          update: {
-            files: diff.files,
-            additions: diff.additions,
-            deletions: diff.deletions,
-            patch: diff.patch,
-            truncated: diff.truncated,
-          },
-        });
+        observedDiffs.set(workspace.id,diff);
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : "";
@@ -2063,14 +1976,16 @@ export async function getCodingView(productId: string) {
       // Otherwise the review stays closed until the worktree diff can be read.
     }
     reviewMeta.set(workspace.id, { snapshotDrifted, baselineUnresolved });
-    await recordOutOfScopeFindings(productId, workspace);
   }
+  const artifactContexts=new Map(await Promise.all(workspaces.map(async w=>[w.id,await artifactRequirementsForView(productId,"CODING_WORKSPACE",w.id,viewContext)] as const)));
+  for(const task of tasks)if(task.workItem)task.workItem.acceptanceCriteria=criteriaForView(viewContext,task.workItem.acceptanceCriteria,task.workItem.id);
   const repositoryConfigured = await productRepositoryReady(productId);
   const integrationBase = repositoryConfigured ? await describeCodingBase(productId) : null;
   return {
     readiness,
     repositoryConfigured,
     integrationBase,
+    requirementsContext:requirementsViewLabel(viewContext),
     occupyingWorkspaceId: occupying?.id ?? null,
     tasks: tasks.map((task) => {
       const workspace = workspaces.find((item) => item.implementationTaskId === task.id) ?? null;
@@ -2129,7 +2044,7 @@ export async function getCodingView(productId: string) {
         && workspace.status !== "COMPLETED",
       );
       const codeReview = workspace
-        ? codeReviewFor(workspace, reviewMeta.get(workspace.id) ?? {})
+        ? codeReviewFor({...workspace,diff:observedDiffs.get(workspace.id)??workspace.diff}, reviewMeta.get(workspace.id) ?? {})
         : null;
       const policyFlight = workspace?.plan ? compileExecutionContract({
         planVersion: workspace.plan.version,
@@ -2152,6 +2067,7 @@ export async function getCodingView(productId: string) {
         workspace: workspace
           ? {
               id: workspace.id,
+              requirementsContext:artifactContexts.get(workspace.id),
               status: workspace.status,
               branchName: workspace.branchName,
               baseCommit: workspace.baseCommit,
@@ -2160,7 +2076,7 @@ export async function getCodingView(productId: string) {
               staleReason: workspace.staleReason || workspace.contract?.staleReason || "",
               contract: workspace.contract,
               plan: workspace.plan,
-              diff: workspace.diff,
+              diff: observedDiffs.get(workspace.id)??workspace.diff,
               evidence: workspace.evidence,
               toolEvents: workspace.toolEvents,
               agentRun: agentRun ? { status: agentRun.status, input: agentRun.input, output: agentRun.output, startedAt: agentRun.startedAt, completedAt: agentRun.completedAt } : null,
@@ -2268,27 +2184,6 @@ export async function getCodingView(productId: string) {
   };
 }
 
-async function backfillEvidenceOutput(productId: string) {
-  const evidence = await db.codingEvidence.findMany({
-    where: { workspace: { productId }, output: "", command: { not: "" } },
-    select: { id: true, workspaceId: true, command: true, startedAt: true, completedAt: true },
-  });
-  if (evidence.length === 0) return;
-  const events = await db.codingToolEvent.findMany({
-    where: { workspace: { productId }, action: "RUN_COMMAND" },
-    select: { workspaceId: true, command: true, metadata: true, createdAt: true },
-  });
-  for (const item of evidence) {
-    const event = events.find((candidate) => {
-      if (candidate.workspaceId !== item.workspaceId || candidate.command !== item.command) return false;
-      if (!item.startedAt || !item.completedAt) return false;
-      return candidate.createdAt >= item.startedAt && candidate.createdAt <= item.completedAt;
-    });
-    const output = commandOutputFromMetadata(event?.metadata);
-    if (!output) continue;
-    await db.codingEvidence.update({ where: { id: item.id }, data: { output } });
-  }
-}
 
 function implementationGapsFor(workspace: { workspacePath: string; plan: { steps?: unknown } | null }) {
   const steps = asStrings(workspace.plan?.steps);
@@ -2500,5 +2395,7 @@ function taskBlockers(
 
 export async function previewCodingTask(productId: string, taskId: string) {
   const gate = await codingEntryBlockers(productId, taskId);
-  return { blockers: gate.reasons, task: gate.task };
+  const context=await currentRequirementsForView(productId);
+  if(gate.task?.workItem)gate.task.workItem.acceptanceCriteria=criteriaForView(context,gate.task.workItem.acceptanceCriteria,gate.task.workItem.id);
+  return { blockers: gate.reasons, task: gate.task, requirementsContext:requirementsViewLabel(context) };
 }
