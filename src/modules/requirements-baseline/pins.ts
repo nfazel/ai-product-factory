@@ -16,6 +16,7 @@ function proof(row:{id:string;productId:string;baselineId:string;operationKind:s
 export async function readRequirementsPin(reader:ContextReader,productId:string,pinId:string){
  await assertRequirementsSchema(reader);
  const row=await reader.requirementsContextPin.findFirst({where:{id:pinId,productId}});if(!row)throw new RequirementsContextError('NOT_FOUND','Requirements pin not found in this product.');
+ if(row.formatVersion===2)return (await import('./planning-pins')).readPlanningPin(reader,productId,pinId);
  const parsed=manifestSchema.safeParse(row.manifest);if(!parsed.success||row.formatVersion!==1||row.digest!==hash(row.manifest)||!validRequirementsContext(proof(row),row.signature))throw new RequirementsContextError('INTEGRITY','Requirements pin proof is invalid or unavailable.');
  const manifest=parsed.data,context=await resolvePinnedSnapshot(reader,productId,row.baselineId);
  if(manifest.productId!==productId||manifest.operationKind!==row.operationKind||manifest.operationId!==row.operationId||manifest.baseline.id!==row.baselineId||canonicalJson(manifest.baseline)!==canonicalJson(context.baseline)||canonicalJson(manifest.members)!==canonicalJson(context.members)||new Set(manifest.selectedCriterionIds).size!==manifest.selectedCriterionIds.length||manifest.selectedCriterionIds.some(id=>!manifest.members.some(m=>m.criterionId===id)))throw new RequirementsContextError('INTEGRITY','Requirements pin binding does not match its exact captured baseline.');

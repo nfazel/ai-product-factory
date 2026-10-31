@@ -252,6 +252,7 @@ model Decision {
 }
 
 model Approval {
+  requirementsReceipt RequirementsApprovalReceipt?
   developmentScopeEvent DevelopmentScopeEvent?
   id           String         @id @default(cuid())
   productId    String
@@ -3610,6 +3611,7 @@ model RequirementsBaselineSelection {
 
 // Prospective server capture only: no operation or approval is created.
 model RequirementsContextPin {
+  approvalReceipt RequirementsApprovalReceipt?
   id String @id
   productId String
   baselineId String
@@ -3626,4 +3628,28 @@ model RequirementsContextPin {
   baseline RequirementsBaseline @relation(fields:[baselineId,productId],references:[id,productId],onDelete:Restrict,onUpdate:Restrict)
   @@unique([productId,idempotencyKey])
   @@unique([operationKind,operationId])
+}
+
+
+model RequirementsApprovalReceipt {
+  id String @id
+  pinId String @unique
+  approvalId String @unique
+  productId String
+  targetKind String
+  targetId String
+  targetRevision String
+  baselineId String
+  decision String
+  formatVersion Int @default(1)
+  manifest Json
+  digest String
+  signature String
+  idempotencyKey String
+  requestDigest String
+  createdAt DateTime @default(now())
+  pin RequirementsContextPin @relation(fields:[pinId],references:[id],onDelete:Restrict,onUpdate:Restrict)
+  approval Approval @relation(fields:[approvalId],references:[id],onDelete:Restrict,onUpdate:Restrict)
+  @@unique([productId,idempotencyKey])
+  @@unique([productId,targetKind,targetId,targetRevision,baselineId])
 }
