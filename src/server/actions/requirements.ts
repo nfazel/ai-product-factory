@@ -43,8 +43,8 @@ export async function generateDefinitionAction(
   const parsed = productIdSchema.safeParse(formValues(formData));
   if (!parsed.success) return invalidState(parsed.error.issues);
   try {
-    await generateProductDefinition(parsed.data.productId);
-    return done(parsed.data.productId, "A product definition proposal is ready for review. Nothing was added to the backlog.");
+    await generateProductDefinition(parsed.data.productId, typeof formData.get("idempotencyKey")==="string" ? String(formData.get("idempotencyKey")) : undefined);
+    return done(parsed.data.productId, "An immutable definition candidate was published without selecting it or changing the backlog. Candidate selection is not yet available.");
   } catch (error) {
     return actionFailure(error);
   }
@@ -57,8 +57,8 @@ export async function regenerateSectionAction(
   const parsed = regenerateSchema.safeParse(formValues(formData));
   if (!parsed.success) return invalidState(parsed.error.issues);
   try {
-    await regenerateDefinitionSection(parsed.data.productId, parsed.data.section);
-    return done(parsed.data.productId, "That section of the proposal was regenerated. Accepted and edited items were kept.");
+    await regenerateDefinitionSection(parsed.data.productId, parsed.data.section, typeof formData.get("idempotencyKey")==="string" ? String(formData.get("idempotencyKey")) : undefined);
+    return done(parsed.data.productId, "A new unselected candidate was published. The existing proposal and its review history were preserved.");
   } catch (error) {
     return actionFailure(error);
   }

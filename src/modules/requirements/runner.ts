@@ -1,6 +1,6 @@
 import "server-only";
 
-import { AGENT_CATALOG } from "@/domain/constants";
+import {assertDefinitionCandidateRequest,runDefinitionCandidate} from "./candidate";
 import { aiRunEvidence } from "@/modules/ai/evidence";
 import { getAIProvider, isAIConfigured } from "@/modules/ai/provider";
 import { definitionEntryBlockers } from "@/modules/requirements/gates";
@@ -8,25 +8,19 @@ import {
   REQUIREMENTS_SYSTEM_PROMPT,
   requirementsMessages,
 } from "@/modules/requirements/prompt";
-import { mergeRegeneratedSection } from "@/modules/requirements/proposal";
 import {
   findOpenProposal,
-  insertProposal,
   listRecentRequirementRuns,
-  saveProposalPayload,
   saveReviewSummary,
 } from "@/modules/requirements/repository";
 import {
   requirementsResponseSchema,
-  toStoredProposal,
 } from "@/modules/requirements/schema";
-import { assertProposalReferences } from "@/modules/requirements/validate";
 import { listDecisions } from "@/modules/decision/service";
 import { db } from "@/lib/db";
 import { definitionIntakeLines } from "@/modules/intake/service";
 import { DomainError } from "@/modules/shared/errors";
 import type { AgentRunner } from "@/modules/agent/types";
-import type { DefinitionSection } from "@/domain/constants";
 
 const refusal =
   "The requirements agent returned a response that did not match the required definition structure. Nothing was written to the product definition. You can retry.";
@@ -36,22 +30,19 @@ export const requirementsRunner: AgentRunner = {
   isConfigured() {
     return isAIConfigured();
   },
+  async assertCanRun(request) {
+    if(request.input.mode!=="review") await assertDefinitionCandidateRequest(request.productId,request.input);
+  },
   async execute(request) {
+    if(request.input.mode!=="review") return runDefinitionCandidate(request.productId,request.input);
     const gate = await definitionEntryBlockers(request.productId);
     if (gate.reasons.length > 0 || !gate.brief) {
       throw new DomainError(gate.reasons.join(" "));
     }
 
-    const mode =
-      request.input.mode === "regenerate" || request.input.mode === "review"
-        ? request.input.mode
-        : "generate";
-    const section =
-      typeof request.input.section === "string" ? request.input.section : undefined;
+    const mode = "review" as const;
+    const section = undefined;
     const open = await findOpenProposal(request.productId);
-    if (mode === "regenerate" && !open) {
-      throw new DomainError("There is no open proposal to regenerate.");
-    }
 
     const [decisions, runs, workItems, outcomes, capabilities, assumptions, intake] =
       await Promise.all([
@@ -157,39 +148,6 @@ export const requirementsRunner: AgentRunner = {
       };
     }
 
-    const stored =
-      mode === "regenerate" && open
-        ? mergeRegeneratedSection(open.payload, parsed.data, section as DefinitionSection)
-        : toStoredProposal(parsed.data);
-
-    try {
-      assertProposalReferences(stored);
-    } catch (error) {
-      if (error instanceof DomainError) {
-        throw new DomainError(`${error.message} The product definition was not changed.`);
-      }
-      throw error;
-    }
-
-    const proposal =
-      mode === "regenerate" && open
-        ? await saveProposalPayload(open.id, stored, open.status === "PARTIALLY_COMMITTED" ? "PARTIALLY_COMMITTED" : "OPEN")
-        : await insertProposal({
-            productId: request.productId,
-            summary: stored.assistantSummary,
-            payload: stored,
-          });
-
-    return {
-      output: {
-        mode,
-        proposalId: proposal.id,
-        summary: stored.assistantSummary,
-        ...aiRunEvidence(result),
-        actor: AGENT_CATALOG.REQUIREMENTS.name,
-        approved: false,
-      },
-      estimatedCost: null,
-    };
+    throw new DomainError("Unsupported commentary operation.");
   },
 };

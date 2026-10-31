@@ -1,4 +1,5 @@
 import "server-only";
+import {generateDefinitionCandidate} from "./candidate";
 import {currentRequirementsForView,criteriaForView,requirementsViewLabel} from "@/modules/requirements-baseline/presentation";
 
 import {
@@ -46,33 +47,27 @@ async function requireGate(productId: string) {
   return gate;
 }
 
-export async function generateProductDefinition(productId: string) {
+export async function generateProductDefinition(productId: string, idempotencyKey?: string) {
   await requireGate(productId);
-  const run = await executeAgent({
-    productId,
-    agentType: "REQUIREMENTS",
-    input: { mode: "generate" },
-  });
+  const run = await generateDefinitionCandidate({productId,idempotencyKey});
   await recordActivity({
     productId,
     type: "DEFINITION_GENERATED",
-    description: "Requirements Agent proposed a product definition. It is not approved and it is not on the backlog until a person commits it.",
+    description: "Requirements Agent published an immutable, unselected definition candidate. Selection and approval are not enabled for this candidate.",
     actor: "Requirements Agent",
   });
   return run;
 }
 
-export async function regenerateDefinitionSection(productId: string, section: DefinitionSection) {
+export async function regenerateDefinitionSection(productId: string, section: DefinitionSection, idempotencyKey?: string) {
   await requireGate(productId);
-  const run = await executeAgent({
-    productId,
-    agentType: "REQUIREMENTS",
-    input: { mode: "regenerate", section },
-  });
+  const source=await findOpenProposal(productId);
+  if(!source)throw new DomainError("There is no open definition proposal to regenerate.");
+  const run = await generateDefinitionCandidate({productId,mode:"regenerate",section,sourceProposalId:source.id,idempotencyKey});
   await recordActivity({
     productId,
     type: "DEFINITION_GENERATED",
-    description: `Requirements Agent regenerated the ${DEFINITION_SECTION_LABEL[section].toLowerCase()} section of the open proposal.`,
+    description: `Requirements Agent regenerated the ${DEFINITION_SECTION_LABEL[section].toLowerCase()} section into a new unselected candidate; the open proposal was preserved.`,
     actor: "Requirements Agent",
   });
   return run;

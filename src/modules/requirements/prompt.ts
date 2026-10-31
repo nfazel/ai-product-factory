@@ -70,7 +70,7 @@ Governance:
 - storyTempId on a question or assumption is empty when the item is product-wide.
 - targetValue is empty when the brief does not state a number. Do not invent one.
 
-When asked to regenerate one section, return a complete structured response, but only change the requested section. Reuse existing temporary ids for items that should remain. Put new items on fresh ids. Leave every other array empty and repeat the current first slice unchanged when you are not regenerating the slice. Human-edited and already accepted items will be kept by the application even if you omit them.`;
+When asked to regenerate one section, return a complete structured response, but only change the requested section. Reuse existing temporary ids for items that should remain. Put new items on fresh ids. Return every required array in full, including unchanged sections, and repeat the current first slice unchanged when you are not regenerating the slice. Human-edited and already accepted items will be kept by the application even if you omit them.`;
 
 export type RequirementsContext = {
   productName: string;

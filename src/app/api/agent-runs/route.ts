@@ -1,3 +1,4 @@
+import {generateDefinitionCandidate} from "@/modules/requirements/candidate";
 import { executeAgent, listAgentRuns } from "@/modules/agent/service";
 import { AGENT_TYPES } from "@/domain/constants";
 import { jsonData, jsonError, readJson, toErrorResponse } from "@/server/http";
@@ -26,6 +27,9 @@ export async function POST(request: Request) {
   if (!body?.productId) return jsonError(400, "productId is required.");
 
   try {
+    if(agentType==="REQUIREMENTS"&&body.input?.mode!=="review") {
+      return jsonData(await generateDefinitionCandidate({...body.input,productId:body.productId}));
+    }
     const result = await executeAgent({
       productId: body.productId,
       workItemId: body.workItemId,
