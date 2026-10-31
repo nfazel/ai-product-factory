@@ -85,6 +85,7 @@ async function Definition({ params }: { params: Promise<{ id: string }> }) {
         <div className="mt-2 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="space-y-2">
             <h1 className="text-xl font-semibold">Product definition</h1>
+            <Link prefetch={false} className="text-sm underline" href={`/definition-candidates/${encodeURIComponent(id)}`}>Inspect immutable published candidates</Link>
             <p className="text-sm text-muted-foreground">
               Status: {DEFINITION_STATUS_LABEL[definition.status]}
             </p>

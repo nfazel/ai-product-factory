@@ -14,7 +14,8 @@ import {planningHash,planningSnapshot} from '@/modules/requirements-baseline/pla
 import {REQUIREMENTS_SYSTEM_PROMPT} from './prompt';
 import {requirementsResponseSchema,storedProposalSchema,toStoredProposal} from './schema';
 import {mergeRegeneratedSection} from './proposal';
-import {assertProposalReferences} from './validate';
+import {validateDefinitionCandidate} from './validate';
+export {validateDefinitionCandidate} from './validate';
 import {DomainError} from '@/modules/shared/errors';
 
 const contract='IMMUTABLE_DEFINITION_CANDIDATE_V1';
@@ -95,13 +96,6 @@ export async function assertDefinitionCandidateRequest(productId:string,input:Re
  if(g.row.digest!==input.generationDigest)fail('Generation identity/digest mismatch.');
  const s=checkSnapshot(g);if(input.mode!==s.mode||input.section!==(s.section??undefined))fail('Generation mode or section differs from reservation.');
  await db.$transaction(tx=>applicable(tx,g),{isolationLevel:'Serializable',timeout:60000});return g;
-}
-export function validateDefinitionCandidate(value:unknown){
- const p=storedProposalSchema.parse(value);if(!p.outcomes.length||!p.capabilities.length||!p.epics.length||!p.features.length)fail("Incomplete definition candidate hierarchy.");assertProposalReferences(p);
- for(const section of DEFINITION_SECTIONS){const items=p[section];for(const item of Array.isArray(items)?items:[items])if(item&&(item.reviewStatus!=='PENDING'||item.edited||item.committedId||item.replacesId))fail('A new candidate cannot carry approval or committed identity.');}
- const edges=new Map<string,string[]>();for(const d of p.dependencies)edges.set(d.fromTempId,[...(edges.get(d.fromTempId)??[]),d.toTempId]);
- const active=new Set<string>(),done=new Set<string>();const visit=(id:string)=>{if(active.has(id))fail('Proposal dependencies contain a cycle.');if(done.has(id))return;active.add(id);for(const n of edges.get(id)??[])visit(n);active.delete(id);done.add(id)};for(const id of edges.keys())visit(id);
- return p;
 }
 /** The model consumes only the authenticated capture; live queries above are rejection checks only. */
 export async function runDefinitionCandidate(productId:string,input:Record<string,unknown>){

@@ -1,3 +1,5 @@
+import {DEFINITION_SECTIONS} from "@/domain/constants";
+import {storedProposalSchema} from "./schema";
 import { DomainError } from "@/modules/shared/errors";
 import type { StoredProposal } from "@/modules/requirements/schema";
 
@@ -98,4 +100,13 @@ export function assertProposalReferences(proposal: StoredProposal) {
       );
     }
   }
+}
+
+function rejectCandidate(message:string):never{throw new DomainError(message)}
+export function validateDefinitionCandidate(value:unknown){
+ const p=storedProposalSchema.parse(value);if(!p.outcomes.length||!p.capabilities.length||!p.epics.length||!p.features.length)rejectCandidate("Incomplete definition candidate hierarchy.");assertProposalReferences(p);
+ for(const section of DEFINITION_SECTIONS){const items=p[section];for(const item of Array.isArray(items)?items:[items])if(item&&(item.reviewStatus!=='PENDING'||item.edited||item.committedId||item.replacesId))rejectCandidate('A new candidate cannot carry approval or committed identity.');}
+ const edges=new Map<string,string[]>();for(const d of p.dependencies)edges.set(d.fromTempId,[...(edges.get(d.fromTempId)??[]),d.toTempId]);
+ const active=new Set<string>(),done=new Set<string>();const visit=(id:string)=>{if(active.has(id))rejectCandidate('Proposal dependencies contain a cycle.');if(done.has(id))return;active.add(id);for(const n of edges.get(id)??[])visit(n);active.delete(id);done.add(id)};for(const id of edges.keys())visit(id);
+ return p;
 }
