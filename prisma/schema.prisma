@@ -76,6 +76,9 @@ enum AgentRunStatus {
 }
 
 model Product {
+  requirementsBaselines RequirementsBaseline[]
+  criterionLineages CriterionLineage[]
+  requirementsBaselineSelections RequirementsBaselineSelection[]
   developmentScopes DevelopmentScope[]
   id               String        @id @default(cuid())
   name             String
@@ -142,6 +145,7 @@ model Product {
 }
 
 model WorkItem {
+  criterionLineages CriterionLineage[]
   developmentScopes DevelopmentScope[]
   id          String         @id @default(cuid())
   productId   String
@@ -212,6 +216,8 @@ model WorkItemDependency {
 }
 
 model AcceptanceCriterion {
+  baselineMemberships RequirementsBaselineMember[]
+  lineage CriterionLineage?
   id          String                    @id @default(cuid())
   workItemId  String
   description String
@@ -3536,4 +3542,66 @@ model DevelopmentScopeEvent {
   approval Approval @relation(fields:[approvalId],references:[id],onDelete:Restrict,onUpdate:Restrict)
   @@unique([scopeId,idempotencyKey])
   @@unique([revisionId,scopeId])
+}
+
+// F1a records existing membership only; no amendments or approval authority.
+model RequirementsBaseline {
+  id String @id
+  productId String
+  version Int
+  digest String
+  manifest Json
+  provenance Json
+  createdAt DateTime @default(now())
+  product Product @relation(fields:[productId],references:[id],onDelete:Restrict,onUpdate:Restrict)
+  members RequirementsBaselineMember[]
+  selection RequirementsBaselineSelection?
+  @@unique([productId,version])
+  @@unique([id,productId])
+}
+model RequirementsBaselineMember {
+  baselineId String
+  criterionId String
+  workItemId String
+  description String
+  baseline RequirementsBaseline @relation(fields:[baselineId],references:[id],onDelete:Restrict,onUpdate:Restrict)
+  criterion AcceptanceCriterion @relation(fields:[criterionId],references:[id],onDelete:Restrict,onUpdate:Restrict)
+  @@id([baselineId,criterionId])
+}
+model CriterionLineage {
+  criterionId String @id
+  productId String
+  workItemId String
+  rootId String
+  generation Int
+  predecessorId String? @unique
+  createdAt DateTime @default(now())
+  criterion AcceptanceCriterion @relation(fields:[criterionId],references:[id],onDelete:Restrict,onUpdate:Restrict)
+  product Product @relation(fields:[productId],references:[id],onDelete:Restrict,onUpdate:Restrict)
+  workItem WorkItem @relation(fields:[workItemId],references:[id],onDelete:Restrict,onUpdate:Restrict)
+  predecessor CriterionLineage? @relation("CriterionSuccessor",fields:[predecessorId],references:[criterionId],onDelete:Restrict,onUpdate:Restrict)
+  successor CriterionLineage? @relation("CriterionSuccessor")
+  root CriterionLineage @relation("CriterionRoot",fields:[rootId],references:[criterionId],onDelete:Restrict,onUpdate:Restrict)
+  descendants CriterionLineage[] @relation("CriterionRoot")
+  @@unique([rootId,generation])
+  @@index([productId])
+}
+// Immutable initial effective pointer and protected capture receipt, NOT an approval.
+model RequirementsBaselineSelection {
+  id String @id
+  productId String
+  sequence Int
+  baselineId String @unique
+  digest String
+  actorKind String
+  actorId String
+  actorName String
+  signature String
+  idempotencyKey String
+  requestDigest String
+  createdAt DateTime @default(now())
+  product Product @relation(fields:[productId],references:[id],onDelete:Restrict,onUpdate:Restrict)
+  baseline RequirementsBaseline @relation(fields:[baselineId,productId],references:[id,productId],onDelete:Restrict,onUpdate:Restrict)
+  @@unique([baselineId,productId])
+  @@unique([productId,sequence])
 }
