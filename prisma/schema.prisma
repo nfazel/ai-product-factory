@@ -90,6 +90,7 @@ model Product {
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
 
+  featureFeedback FeatureFeedback[]
   featureReviewEvents FeatureReviewEvent[]
   workItems         WorkItem[]
   decisions         Decision[]
@@ -163,6 +164,7 @@ model WorkItem {
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
 
+  featureFeedback FeatureFeedback[]
   featureReviewEvents FeatureReviewEvent[]
   product    Product    @relation(fields: [productId], references: [id], onDelete: Cascade)
   parent     WorkItem?  @relation("WorkItemHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
@@ -3427,4 +3429,45 @@ model FeatureReviewEvent {
 
   @@unique([featureId,idempotencyKey])
   @@index([productId,featureId,createdAt])
+}
+
+// Intent and conversation history only; confirmation grants no implementation authority.
+model FeatureFeedback {
+  id String @id @default(cuid())
+  productId String
+  featureId String
+  originalText String
+  context Json
+  contextDigest String
+  actorId String
+  actorName String
+  idempotencyKey String
+  requestDigest String
+  createdAt DateTime @default(now())
+  product Product @relation(fields:[productId],references:[id],onDelete:Restrict,onUpdate:Restrict)
+  feature WorkItem @relation(fields:[featureId],references:[id],onDelete:Restrict,onUpdate:Restrict)
+  events FeatureFeedbackEvent[]
+  @@unique([productId,featureId,idempotencyKey])
+  @@index([productId,featureId,createdAt])
+}
+
+model FeatureFeedbackEvent {
+  id String @id @default(cuid())
+  feedbackId String
+  revision Int
+  type String
+  payload Json
+  context Json
+  contextDigest String
+  digest String
+  actorKind String
+  actorId String
+  actorName String
+  signature String @default("")
+  idempotencyKey String
+  requestDigest String
+  createdAt DateTime @default(now())
+  feedback FeatureFeedback @relation(fields:[feedbackId],references:[id],onDelete:Restrict,onUpdate:Restrict)
+  @@unique([feedbackId,revision])
+  @@unique([feedbackId,idempotencyKey])
 }

@@ -1,3 +1,4 @@
+import {inspectBuildVerification} from '@/modules/build/verification-view';
 import {FeatureReviews} from '@/components/build/feature-reviews';
 import { Suspense } from "react";
 import Link from "next/link";
@@ -81,13 +82,14 @@ async function Build({
   const { id } = await params;
   const query = await searchParams;
   await revalidateProductRepositoryAccess(id);
-  const [workspace, prove, guidance, repository, installationRepositories] = await Promise.all([
+  const [workspace, verificationObservation, guidance, repository, installationRepositories] = await Promise.all([
     getBuildWorkspace(id),
-    getProveView(id),
+    inspectBuildVerification(()=>getProveView(id)),
     getProductGuidance(id),
     getProductRepositoryView(id),
     loadInstallationRepositoryChoices(),
   ]);
+  const prove=verificationObservation.view;
   if (!workspace || !guidance) notFound();
   const architectureQuestions = workspace.architecture?.questions ?? [];
   const governanceQuestions = workspace.governance.review?.questions ?? [];
@@ -194,6 +196,7 @@ async function Build({
 
       <BuildReadiness coding={workspace.coding} />
 
+      {verificationObservation.unavailable&&<p role="alert" className="rounded border p-3">Technical verification status is temporarily unavailable. Feedback remains available; acceptance still requires current independent technical approval.</p>}
       <Suspense fallback={<p>Loading feature reviews…</p>}><FeatureReviews productId={id}/></Suspense>
       <BuildOverview
         productId={id}

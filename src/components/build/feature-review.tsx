@@ -1,10 +1,12 @@
 'use client';
 import {useRef,useState,useTransition,type FormEvent} from 'react';
 import type {FeatureReviewView} from '@/modules/feature-review/presentation';
+import {FeatureFeedbackPanel} from './feature-feedback';
 import {featureReviewAction} from '@/server/actions/feature-review';
 import type {ActionState} from '@/lib/action-state';
 const labels:Record<string,string>={ACCEPTED:'Accepted',DEFERRED:'Review later',REVIEW_REQUIRED:'Review required',AWAITING_ACCEPTANCE:'Awaiting acceptance',UNAVAILABLE:'Verification status unavailable',ARCHIVED:'Archived'};
 export function FeatureReviewCard({productId,feature}:{productId:string;feature:FeatureReviewView}){
+ const [feedbackOpen,setFeedbackOpen]=useState(false);
  const [state,setState]=useState<ActionState>({status:'idle'}),[pending,start]=useTransition(),[ack,setAck]=useState<string[]>([]);const form=useRef<HTMLFormElement>(null),key=useRef({payload:'',id:''});
  const unavailable=feature.status==='UNAVAILABLE',closed=feature.status==='ARCHIVED';
  function submit(event:FormEvent<HTMLFormElement>){event.preventDefault();const element=event.currentTarget;const origin=window.location;if(origin.protocol!=='https:'&&!['localhost','127.0.0.1','[::1]'].includes(origin.hostname)){setState({status:'error',message:'Open this workspace on localhost or HTTPS before entering operator confirmation.'});return}
@@ -23,9 +25,11 @@ export function FeatureReviewCard({productId,feature}:{productId:string;feature:
    <label className="block text-sm">Local operator confirmation<input className="block rounded border p-2" type="password" name="credential" required autoComplete="off" aria-label="Local operator confirmation"/></label>
    <p className="text-xs text-muted-foreground">Use the protected local operator credential. It is cleared on submission and is not saved with the review.</p>
    <label className="block text-sm">Review note (optional)<textarea name="reason" maxLength={2000} className="block rounded border p-2"/></label>
-   <div className="flex gap-3"><button type="submit" name="decision" value="ACCEPTED" disabled={!feature.eligible||pending||!feature.concerns.every(concern=>ack.includes(concern.id))||feature.status==='ACCEPTED'} className="rounded border px-3 py-2 disabled:opacity-50">Accept Feature</button><button type="submit" name="decision" value="DEFERRED" disabled={pending||feature.status==='ACCEPTED'} className="rounded border px-3 py-2 disabled:opacity-50">Review Later</button></div>
+   <div className="flex gap-3"><button type="submit" name="decision" value="ACCEPTED" disabled={!feature.eligible||pending||!feature.concerns.every(concern=>ack.includes(concern.id))||feature.status==='ACCEPTED'} className="rounded border px-3 py-2 disabled:opacity-50">Accept Feature</button><button type="submit" name="decision" value="DEFERRED" disabled={pending||feature.status==='ACCEPTED'} className="rounded border px-3 py-2 disabled:opacity-50">Review Later</button><button type="button" onClick={()=>setFeedbackOpen(true)} className="rounded border px-3 py-2">Request Changes</button></div>
    <p className="text-xs">Acceptance is a business decision for this verified version. Review Later does not stop other development.</p>
   </form>}
+  {closed&&<button type="button" onClick={()=>setFeedbackOpen(true)}>Feedback history</button>}
+  {feedbackOpen&&<FeatureFeedbackPanel key={`${productId}:${feature.featureId}`} productId={productId} featureId={feature.featureId} title={feature.title} onClose={()=>setFeedbackOpen(false)} readOnly={closed}/>}
   {state.message&&<p role={state.status==='error'?'alert':'status'}>{state.message}</p>}
   <details><summary>Technical governance details</summary><ul>{feature.blockers.map(b=><li key={b}>{b}</li>)}</ul><ul>{feature.technical.map(t=><li key={t.taskId}>{t.taskId}: {t.verdict} · {t.current?'Current approval':'Not current'} · Mandatory controls {t.mandatoryPassed?'passed':'incomplete'}</li>)}</ul><p>Review reference: <code>{feature.digest}</code></p></details>
   <details><summary>Review history ({feature.history.length})</summary>{feature.history.length?<ol>{feature.history.map(h=><li key={h.id}>{h.decision} · {h.actor} · <time dateTime={h.at}>{h.at}</time>{h.reason&&<p>{h.reason}</p>}{h.version&&<p className="text-xs break-all">Version: {h.version} · Review reference: {h.digest}</p>}</li>)}</ol>:<p>No formal review decisions recorded.</p>}</details>

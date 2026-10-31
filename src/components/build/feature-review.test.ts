@@ -1,3 +1,4 @@
+vi.mock('@/server/actions/feature-feedback',()=>({featureFeedbackAction:vi.fn()}));
 import {createElement} from 'react';import {renderToStaticMarkup} from 'react-dom/server';import {describe,it,expect,vi} from 'vitest';
 vi.mock('@/server/actions/feature-review',()=>({featureReviewAction:vi.fn()}));
 import {FeatureReviewCard} from './feature-review';
