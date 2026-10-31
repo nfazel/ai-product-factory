@@ -2,7 +2,7 @@ import 'server-only';
 import {canonicalJson,contentHash} from '@/modules/coding/external-manifest';
 import {rejectOperatorSecret} from '@/modules/feature-review/authorization';
 import {RequirementsContextError,type ContextReader} from './context';
-export const planningKinds=['DEFINITION_PROPOSAL','PRODUCT_DEFINITION','SOLUTION_ARCHITECTURE','IMPLEMENTATION_PLAN'] as const;
+export const planningKinds=['ARCHITECTURE_PROPOSAL','DEFINITION_PROPOSAL','PRODUCT_DEFINITION','SOLUTION_ARCHITECTURE','IMPLEMENTATION_PLAN'] as const;
 export type PlanningKind=typeof planningKinds[number];
 export const planningHash=(value:unknown)=>contentHash(canonicalJson(value));
 /** Explicit new-format projection only. Legacy serializers never call this. */
@@ -15,6 +15,7 @@ export function planningSnapshot(kind:PlanningKind,value:unknown){const snapshot
 /** Loads exact semantic content; operational task status does not replace a content revision. */
 export async function loadPlanningTarget(tx:ContextReader,productId:string,kind:PlanningKind,id:string){
  let row:unknown;
+ if(kind==='ARCHITECTURE_PROPOSAL')row=await tx.architectureProposal.findFirst({where:{id,productId}});
  if(kind==='DEFINITION_PROPOSAL')row=await tx.definitionProposal.findFirst({where:{id,productId}});
  if(kind==='SOLUTION_ARCHITECTURE')row=await tx.solutionArchitecture.findFirst({where:{id,productId},include:{components:{orderBy:{id:'asc'},include:{traces:{orderBy:{id:'asc'}}}},relationships:{orderBy:{id:'asc'}},decisions:{orderBy:{id:'asc'}},questions:{orderBy:{id:'asc'}},findings:{orderBy:{id:'asc'}},dataEntities:{orderBy:{id:'asc'}},integrations:{orderBy:{id:'asc'}},technologies:{orderBy:{id:'asc'}},nfrCoverages:{orderBy:{id:'asc'}}}});
  if(kind==='IMPLEMENTATION_PLAN'){

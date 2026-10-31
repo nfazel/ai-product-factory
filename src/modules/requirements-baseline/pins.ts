@@ -16,6 +16,7 @@ function proof(row:{id:string;productId:string;baselineId:string;operationKind:s
 export async function readRequirementsPin(reader:ContextReader,productId:string,pinId:string){
  await assertRequirementsSchema(reader);
  const row=await reader.requirementsContextPin.findFirst({where:{id:pinId,productId}});if(!row)throw new RequirementsContextError('NOT_FOUND','Requirements pin not found in this product.');
+ if(row.formatVersion===3)return (await import('./generation')).readGenerationInputPin(reader,productId,pinId);
  if(row.formatVersion===2)return (await import('./planning-pins')).readPlanningPin(reader,productId,pinId);
  const parsed=manifestSchema.safeParse(row.manifest);if(!parsed.success||row.formatVersion!==1||row.digest!==hash(row.manifest)||!validRequirementsContext(proof(row),row.signature))throw new RequirementsContextError('INTEGRITY','Requirements pin proof is invalid or unavailable.');
  const manifest=parsed.data,context=await resolvePinnedSnapshot(reader,productId,row.baselineId);

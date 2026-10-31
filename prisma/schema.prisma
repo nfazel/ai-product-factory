@@ -76,6 +76,8 @@ enum AgentRunStatus {
 }
 
 model Product {
+  planningGenerations PlanningGeneration[]
+  planningPublications PlanningPublication[]
   requirementsContextPins RequirementsContextPin[]
   requirementsBaselines RequirementsBaseline[]
   criterionLineages CriterionLineage[]
@@ -3548,6 +3550,8 @@ model DevelopmentScopeEvent {
 
 // F1a records existing membership only; no amendments or approval authority.
 model RequirementsBaseline {
+  generations PlanningGeneration[]
+  publications PlanningPublication[]
   contextPins RequirementsContextPin[]
   id String @id
   productId String
@@ -3611,6 +3615,8 @@ model RequirementsBaselineSelection {
 
 // Prospective server capture only: no operation or approval is created.
 model RequirementsContextPin {
+  generationInput PlanningGeneration?
+  generationPublication PlanningPublication?
   approvalReceipt RequirementsApprovalReceipt?
   id String @id
   productId String
@@ -3652,4 +3658,57 @@ model RequirementsApprovalReceipt {
   approval Approval @relation(fields:[approvalId],references:[id],onDelete:Restrict,onUpdate:Restrict)
   @@unique([productId,idempotencyKey])
   @@unique([productId,targetKind,targetId,targetRevision,baselineId])
+}
+
+model PlanningGeneration {
+  id String @id
+  productId String
+  purpose String
+  mode String
+  artifactKind String
+  artifactId String @unique
+  artifactVersion Int?
+  baselineId String?
+  inputPinId String? @unique
+  inputIdentity String
+  inputDigest String
+  manifest Json
+  digest String
+  signature String
+  idempotencyKey String
+  requestDigest String
+  createdAt DateTime @default(now())
+  product Product @relation(fields:[productId],references:[id],onDelete:Restrict,onUpdate:Restrict)
+  baseline RequirementsBaseline? @relation(fields:[baselineId,productId],references:[id,productId],onDelete:Restrict,onUpdate:Restrict)
+  inputPin RequirementsContextPin? @relation(fields:[inputPinId],references:[id],onDelete:Restrict,onUpdate:Restrict)
+  publication PlanningPublication?
+  @@unique([productId,idempotencyKey])
+  @@unique([productId,artifactKind,artifactVersion])
+}
+
+model PlanningPublication {
+  id String @id
+  generationId String @unique
+  productId String
+  purpose String
+  mode String
+  artifactKind String
+  artifactId String @unique
+  artifactRevision String
+  contentDigest String
+  baselineId String?
+  finalPinId String? @unique
+  inputIdentity String
+  inputDigest String
+  manifest Json
+  digest String
+  signature String
+  idempotencyKey String
+  requestDigest String
+  createdAt DateTime @default(now())
+  generation PlanningGeneration @relation(fields:[generationId],references:[id],onDelete:Restrict,onUpdate:Restrict)
+  product Product @relation(fields:[productId],references:[id],onDelete:Restrict,onUpdate:Restrict)
+  baseline RequirementsBaseline? @relation(fields:[baselineId,productId],references:[id,productId],onDelete:Restrict,onUpdate:Restrict)
+  finalPin RequirementsContextPin? @relation(fields:[finalPinId],references:[id],onDelete:Restrict,onUpdate:Restrict)
+  @@unique([productId,idempotencyKey])
 }
