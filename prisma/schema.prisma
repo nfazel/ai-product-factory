@@ -76,6 +76,7 @@ enum AgentRunStatus {
 }
 
 model Product {
+  developmentScopes DevelopmentScope[]
   id               String        @id @default(cuid())
   name             String
   description      String
@@ -141,6 +142,7 @@ model Product {
 }
 
 model WorkItem {
+  developmentScopes DevelopmentScope[]
   id          String         @id @default(cuid())
   productId   String
   parentId    String?
@@ -243,6 +245,7 @@ model Decision {
 }
 
 model Approval {
+  developmentScopeEvent DevelopmentScopeEvent?
   id           String         @id @default(cuid())
   productId    String
   workItemId   String?
@@ -3433,6 +3436,7 @@ model FeatureReviewEvent {
 
 // Intent and conversation history only; confirmation grants no implementation authority.
 model FeatureFeedback {
+  developmentScopes DevelopmentScope[]
   id String @id @default(cuid())
   productId String
   featureId String
@@ -3452,6 +3456,7 @@ model FeatureFeedback {
 }
 
 model FeatureFeedbackEvent {
+  developmentScopes DevelopmentScope[]
   id String @id @default(cuid())
   feedbackId String
   revision Int
@@ -3470,4 +3475,65 @@ model FeatureFeedbackEvent {
   feedback FeatureFeedback @relation(fields:[feedbackId],references:[id],onDelete:Restrict,onUpdate:Restrict)
   @@unique([feedbackId,revision])
   @@unique([feedbackId,idempotencyKey])
+}
+
+// Detached development intent. No work, plan or coding workspace is created.
+model DevelopmentScope {
+  id String @id @default(cuid())
+  productId String
+  featureId String
+  feedbackId String
+  confirmationEventId String @unique
+  actorId String
+  actorName String
+  idempotencyKey String
+  requestDigest String
+  createdAt DateTime @default(now())
+  product Product @relation(fields:[productId],references:[id],onDelete:Restrict,onUpdate:Restrict)
+  feature WorkItem @relation(fields:[featureId],references:[id],onDelete:Restrict,onUpdate:Restrict)
+  feedback FeatureFeedback @relation(fields:[feedbackId],references:[id],onDelete:Restrict,onUpdate:Restrict)
+  confirmation FeatureFeedbackEvent @relation(fields:[confirmationEventId],references:[id],onDelete:Restrict,onUpdate:Restrict)
+  revisions DevelopmentScopeRevision[]
+  events DevelopmentScopeEvent[]
+  @@unique([productId,featureId,idempotencyKey])
+  @@index([productId,featureId,createdAt])
+}
+model DevelopmentScopeRevision {
+  id String @id @default(cuid())
+  scopeId String
+  version Int
+  manifest Json
+  digest String
+  actorKind String
+  actorId String
+  actorName String
+  idempotencyKey String
+  requestDigest String
+  createdAt DateTime @default(now())
+  scope DevelopmentScope @relation(fields:[scopeId],references:[id],onDelete:Restrict,onUpdate:Restrict)
+  decision DevelopmentScopeEvent?
+  @@unique([scopeId,version])
+  @@unique([scopeId,idempotencyKey])
+  @@unique([id,scopeId])
+}
+model DevelopmentScopeEvent {
+  id String @id @default(cuid())
+  scopeId String
+  revisionId String @unique
+  type String
+  scopeDigest String
+  reason String
+  actorKind String
+  actorId String
+  actorName String
+  signature String
+  approvalId String @unique
+  idempotencyKey String
+  requestDigest String
+  createdAt DateTime @default(now())
+  scope DevelopmentScope @relation(fields:[scopeId],references:[id],onDelete:Restrict,onUpdate:Restrict)
+  revision DevelopmentScopeRevision @relation(fields:[revisionId,scopeId],references:[id,scopeId],onDelete:Restrict,onUpdate:Restrict)
+  approval Approval @relation(fields:[approvalId],references:[id],onDelete:Restrict,onUpdate:Restrict)
+  @@unique([scopeId,idempotencyKey])
+  @@unique([revisionId,scopeId])
 }

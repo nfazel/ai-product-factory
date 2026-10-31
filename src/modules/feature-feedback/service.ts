@@ -41,18 +41,18 @@ async function append(tx:Reader,scope:Scope,revision:number,type:string,payload:
  return receipt(event);
 }
 /** Public read projection excludes signed proof, but preserves immutable intent history. */
-export async function getFeedback(scope:Scope){
- const thread=await read(db,scope),{head,revision,digest}=headOf(thread);
+export async function getFeedback(scope:Scope,reader:Reader=db){
+ const thread=await read(reader,scope),{head,revision,digest}=headOf(thread);
  let status=terminal.has(head?.type??'')?head!.type:head?.type==='AI_ANALYSIS'?(head.payload as {analysis:FeedbackAnalysis}).analysis.status:'AWAITING_ANALYSIS';
  if(head?.type==='CONFIRMED'){
   const {signature,digest:eventDigest,...data}=head;
   const payload={...data,createdAt:data.createdAt.toISOString()};
   const target=thread.events.find(event=>event.revision===head.revision-1),reviewed=head.payload as {reviewedDigest:string;reviewedRevision:number};
   if(hash(payload)!==eventDigest||!validFeedbackDecision({kind:'FEATURE_FEEDBACK_EVENT',...payload,digest:eventDigest},signature,head)||target?.type!=='AI_ANALYSIS'||(target.payload as {analysis:FeedbackAnalysis}).analysis.status!=='PROPOSAL'||reviewed.reviewedDigest!==target.digest||reviewed.reviewedRevision!==target.revision)status='CONFIRMATION_UNAVAILABLE';
-  else try{const current=await feedbackContext(scope.productId,scope.featureId);if(contextDigest(current)!==head.contextDigest||(current.build.repositoryId&&(!current.build.available||!current.build.clean)))status='CONFIRMED_STALE'}catch{status='CONFIRMATION_UNAVAILABLE'}
+  else try{const current=await feedbackContext(scope.productId,scope.featureId,reader);if(contextDigest(current)!==head.contextDigest||(current.build.repositoryId&&(!current.build.available||!current.build.clean)))status='CONFIRMED_STALE'}catch{status='CONFIRMATION_UNAVAILABLE'}
  }
  let contextStatus:'CURRENT'|'STALE'|'UNAVAILABLE'|null=null;
- if(head?.type==='AI_ANALYSIS')try{const current=await feedbackContext(scope.productId,scope.featureId);contextStatus=contextDigest(current)===head.contextDigest&&(!current.build.repositoryId||(current.build.available&&current.build.clean))?'CURRENT':'STALE'}catch{contextStatus='UNAVAILABLE'}
+ if(head?.type==='AI_ANALYSIS')try{const current=await feedbackContext(scope.productId,scope.featureId,reader);contextStatus=contextDigest(current)===head.contextDigest&&(!current.build.repositoryId||(current.build.available&&current.build.clean))?'CURRENT':'STALE'}catch{contextStatus='UNAVAILABLE'}
  return {...thread,events:thread.events.map(({signature,...event})=>{void signature;return event}),revision,digest,status,contextStatus,confirmed:status==='CONFIRMED'};
 }
 
@@ -101,4 +101,16 @@ export async function listFeedback(productId:string,featureId:string,cursor?:str
  if(cursor&&!await db.featureFeedback.findFirst({where:{id:cursor,productId,featureId},select:{id:true}}))throw new DomainError('Conversation cursor does not belong to this feature.','NOT_FOUND');
  const rows=await db.featureFeedback.findMany({where:{productId,featureId},orderBy:[{createdAt:'desc'},{id:'desc'}],take:21,...(cursor?{cursor:{id:cursor},skip:1}:{}),select:{id:true,originalText:true,createdAt:true,events:{orderBy:{revision:'desc'},take:1,select:{type:true,payload:true}}}});
  return {items:rows.slice(0,20),nextCursor:rows.length>20?rows[19].id:null};
+}
+
+/** Server-only proof reference for downstream intent planning. No coding authority. */
+export async function confirmedFeedbackSource(scope:Scope,reader:Reader=db){
+ const state=await getFeedback(scope,reader);
+ if(!state.confirmed)throw new DomainError('A current protected human-confirmed proposal is required.',state.status==='CONFIRMED_STALE'?'CONFLICT':'INVALID');
+ const thread=await read(reader,scope),confirmation=thread.events.at(-1)!;
+ const proposal=thread.events.find(event=>event.revision===confirmation.revision-1)!;
+ const {signature:proposalSignature,digest:proposalDigest,...proposalData}=proposal;void proposalSignature;
+ if(hash({...proposalData,createdAt:proposal.createdAt.toISOString()})!==proposalDigest)throw new DomainError('Confirmed proposal content proof is invalid.');
+ const analysis=analysisSchema.parse((proposal.payload as {analysis:unknown}).analysis);
+ return {binding:{feedbackId:thread.id,proposalEventId:proposal.id,proposalRevision:proposal.revision,proposalDigest:proposal.digest,proposalContentDigest:hash(analysis),confirmationEventId:confirmation.id,confirmationDigest:confirmation.digest,confirmationProofDigest:contentHash(confirmation.signature),confirmationActorId:confirmation.actorId},analysis,context:confirmation.context as unknown as FeedbackContext};
 }
