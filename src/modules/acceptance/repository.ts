@@ -1,4 +1,5 @@
 import "server-only";
+import {assertOrdinaryCriterionWrites} from "@/modules/requirements-baseline/context";
 
 import { db } from "@/lib/db";
 import type { AcceptanceCriterion } from "@/modules/acceptance/types";
@@ -26,8 +27,10 @@ export async function insertCriterion(input: {
   workItemId: string;
   description: string;
 }) {
-  const row = await db.acceptanceCriterion.create({
-    data: { workItemId: input.workItemId, description: input.description },
+  const row = await db.$transaction(async tx => {
+    const owner=await tx.workItem.findUniqueOrThrow({where:{id:input.workItemId},select:{productId:true}});
+    await assertOrdinaryCriterionWrites(tx,owner.productId);
+    return tx.acceptanceCriterion.create({data:{workItemId:input.workItemId,description:input.description}});
   });
   return toCriterion(row);
 }

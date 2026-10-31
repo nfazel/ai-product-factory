@@ -1,4 +1,5 @@
 import "server-only";
+import {assertOrdinaryCriterionWrites} from "@/modules/requirements-baseline/context";
 
 import { Prisma } from "@/generated/prisma/client";
 import { db } from "@/lib/db";
@@ -147,6 +148,7 @@ export async function commitAcceptedProposal(input: {
 }) {
   return db.$transaction(async (tx) => {
     const payload: StoredProposal = structuredClone(input.payload);
+    if(payload.acceptanceCriteria.some(item=>item.reviewStatus==='ACCEPTED'&&!item.committedId))await assertOrdinaryCriterionWrites(tx,input.productId);
     const skipped: string[] = [];
     const ids = new Map<string, string>();
     rememberCommitted(ids, payload.outcomes);

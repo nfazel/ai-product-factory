@@ -76,6 +76,7 @@ enum AgentRunStatus {
 }
 
 model Product {
+  requirementsContextPins RequirementsContextPin[]
   requirementsBaselines RequirementsBaseline[]
   criterionLineages CriterionLineage[]
   requirementsBaselineSelections RequirementsBaselineSelection[]
@@ -3546,6 +3547,7 @@ model DevelopmentScopeEvent {
 
 // F1a records existing membership only; no amendments or approval authority.
 model RequirementsBaseline {
+  contextPins RequirementsContextPin[]
   id String @id
   productId String
   version Int
@@ -3604,4 +3606,24 @@ model RequirementsBaselineSelection {
   baseline RequirementsBaseline @relation(fields:[baselineId,productId],references:[id,productId],onDelete:Restrict,onUpdate:Restrict)
   @@unique([baselineId,productId])
   @@unique([productId,sequence])
+}
+
+// Prospective server capture only: no operation or approval is created.
+model RequirementsContextPin {
+  id String @id
+  productId String
+  baselineId String
+  operationKind String
+  operationId String
+  formatVersion Int @default(1)
+  manifest Json
+  digest String
+  signature String
+  idempotencyKey String
+  requestDigest String
+  createdAt DateTime @default(now())
+  product Product @relation(fields:[productId],references:[id],onDelete:Restrict,onUpdate:Restrict)
+  baseline RequirementsBaseline @relation(fields:[baselineId,productId],references:[id,productId],onDelete:Restrict,onUpdate:Restrict)
+  @@unique([productId,idempotencyKey])
+  @@unique([operationKind,operationId])
 }
