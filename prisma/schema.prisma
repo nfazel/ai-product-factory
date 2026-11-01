@@ -1121,6 +1121,7 @@ model ImplementationPlan {
 
 model ImplementationTask {
   reworkBinding ReworkTaskBinding?
+  reworkCodingDecisions ReworkEvent[]
   id                     String                   @id @default(cuid())
   implementationPlanId   String
   workItemId             String?
@@ -3741,6 +3742,8 @@ model ReworkEvent {
  amendmentId String
  scopeRevisionId String
  type String
+ taskId String?
+ task ImplementationTask? @relation(fields:[taskId],references:[id],onDelete:Restrict,onUpdate:Restrict)
  manifest Json
  digest String
  signature String
@@ -3750,7 +3753,7 @@ model ReworkEvent {
  createdAt DateTime @default(now())
  amendment ReworkAmendment @relation(fields:[amendmentId],references:[id],onDelete:Restrict,onUpdate:Restrict)
  approval Approval @relation(fields:[approvalId],references:[id],onDelete:Restrict,onUpdate:Restrict)
- @@unique([amendmentId,type])
+ @@unique([amendmentId,type,taskId])
  @@unique([amendmentId,idempotencyKey])
 }
 

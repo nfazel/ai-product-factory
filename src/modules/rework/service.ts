@@ -94,3 +94,52 @@ async function validateActivation(tx:Reader,a:Awaited<ReturnType<typeof load>>,e
  return{activationId:e.id,taskIds:ids,state:'ACTIVATED_CODING_BLOCKED' as const,grantsCodingAuthority:false as const};
 }
 export async function inspectReworkActivation(productId:string,amendmentId:string){return locked(productId,async tx=>{const a=await load(tx,productId,amendmentId),e=await tx.reworkEvent.findFirst({where:{amendmentId,type:'ACTIVATED'}});if(!e)throw new DomainError('Amendment has not been activated.');return validateActivation(tx,a,e);})}
+
+// Phase 2a: a protected task decision is recorded, but does not unlock any execution path.
+const codingApprovalSchema=z.object({productId:z.string().min(1),taskId:z.string().min(1),amendmentId:z.string().min(1),scopeRevisionId:z.string().min(1),reviewedDigest:z.string().regex(/^[a-f0-9]{64}$/),credential:z.string(),idempotencyKey:z.string()}).strict();
+export type ReworkCodingApproval=Omit<z.infer<typeof codingApprovalSchema>,'productId'|'taskId'>;
+async function assertCodingDecisionSchema(tx:Reader){
+ const result=await tx.$queryRaw<{ready:boolean}[]>`SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='ReworkEvent' AND column_name='taskId') AND EXISTS(SELECT 1 FROM pg_trigger WHERE tgrelid=to_regclass('public."ReworkEvent"') AND tgname='ReworkEvent_coding_binding' AND NOT tgisinternal AND tgenabled IN ('O','A')) AS ready`;
+ if(!result[0]?.ready)throw new DomainError('Protected rework coding decision schema or guard unavailable.');
+}
+async function codingTarget(tx:Reader,productId:string,taskId:string){
+ await assertCodingDecisionSchema(tx);
+ const binding=await tx.reworkTaskBinding.findUnique({where:{taskId}});
+ if(!binding)throw new DomainError('An activated managed rework task is required.');
+ const a=await load(tx,productId,binding.amendmentId),activation=await tx.reworkEvent.findFirst({where:{amendmentId:a.row.id,type:'ACTIVATED'}}),approval=await tx.reworkEvent.findFirst({where:{amendmentId:a.row.id,type:'APPROVED'}});
+ if(!activation||!approval)throw new DomainError('Protected amendment approval and activation are required.');
+ await verifyEvent(tx,approval,a);await validateActivation(tx,a,activation);
+ const task=a.m.tasks.find(t=>t.id===taskId);if(!task)throw new DomainError('Task is outside the activated amendment.');
+ const review={kind:'REWORK_TASK_CODING_REVIEW',version:1,productId,taskId,task,planId:a.m.planId,amendmentId:a.row.id,amendmentDigest:a.row.digest,scopeRevisionId:a.m.scopeRevisionId,scopeDigest:a.m.scopeDigest,amendmentApproval:{id:approval.id,digest:approval.digest},activation:{id:activation.id,digest:activation.digest},context:(activation.manifest as Record<string,unknown>).after};
+ rejectOperatorSecret(review);return{a,review,reviewedDigest:hash(review)};
+}
+/** Read-only review target; neither reserves a workspace nor changes task status. */
+export async function getReworkTaskCodingReview(productId:string,taskId:string){return locked(productId,async tx=>{const target=await codingTarget(tx,productId,taskId);return{review:target.review,reviewedDigest:target.reviewedDigest,executionAuthorised:false as const};})}
+async function verifyCodingDecision(tx:Reader,row:NonNullable<Awaited<ReturnType<Reader['reworkEvent']['findFirst']>>>,target:Awaited<ReturnType<typeof codingTarget>>){
+ const m=await verifyEvent(tx,row,target.a),approval=m.approval as Record<string,unknown>;
+ if(row.type!=='TASK_CODING_APPROVED'||row.taskId!==target.review.taskId||row.scopeRevisionId!==target.review.scopeRevisionId||m.kind!=='REWORK_EVENT'||m.version!==2||m.taskId!==row.taskId||m.scopeRevisionId!==row.scopeRevisionId||m.codingDecision!=='APPROVED'||m.grantsCodingAuthority!==false||m.executionAuthorised!==false||m.reviewedDigest!==target.reviewedDigest||hash(m.review)!==target.reviewedDigest||approval.approvalType!=='IMPLEMENTATION_TASK'||approval.status!=='APPROVED'||approval.productId!==target.review.productId||approval.workItemId!==target.review.task.workItemId)throw new DomainError('Protected task coding decision is stale, mismatched or invalid.');
+ return m;
+}
+export async function approveReworkTaskForCoding(value:z.input<typeof codingApprovalSchema>){
+ const input=codingApprovalSchema.parse(value);key(input.idempotencyKey);const actor=confirmLocalOperator(input.credential),requestDigest=hash({...input,credential:undefined});
+ return locked(input.productId,async tx=>{
+  const target=await codingTarget(tx,input.productId,input.taskId),{a}=target;
+  if(input.amendmentId!==a.row.id||input.scopeRevisionId!==a.m.scopeRevisionId||input.reviewedDigest!==target.reviewedDigest)throw new DomainError('Reviewed task, scope, amendment or context changed.');
+  const retry=await tx.reworkEvent.findUnique({where:{amendmentId_idempotencyKey:{amendmentId:a.row.id,idempotencyKey:input.idempotencyKey}}});
+  if(retry){if(retry.requestDigest!==requestDigest)throw new DomainError('Conflicting coding approval retry.');await verifyCodingDecision(tx,retry,target);return tx.implementationTask.findUniqueOrThrow({where:{id:input.taskId}});}
+  const prior=await tx.reworkEvent.findFirst({where:{amendmentId:a.row.id,type:'TASK_CODING_APPROVED',taskId:input.taskId}});
+  if(prior){await verifyCodingDecision(tx,prior,target);return tx.implementationTask.findUniqueOrThrow({where:{id:input.taskId}});}
+  const now=new Date(),id=randomUUID(),approval=await tx.approval.create({data:{productId:input.productId,workItemId:target.review.task.workItemId,approvalType:'IMPLEMENTATION_TASK',status:'APPROVED',requestedAt:now,resolvedAt:now,approvedBy:actor.name,comments:`Protected rework task coding decision ${input.taskId}; reviewed digest ${target.reviewedDigest}. Execution remains blocked.`}});
+  const manifest={kind:'REWORK_EVENT',version:2,id,type:'TASK_CODING_APPROVED',taskId:input.taskId,amendmentId:a.row.id,amendmentDigest:a.row.digest,scopeRevisionId:a.m.scopeRevisionId,idempotencyKey:input.idempotencyKey,requestDigest,actor,approval:JSON.parse(JSON.stringify(approval)),at:now.toISOString(),codingDecision:'APPROVED',review:target.review,reviewedDigest:target.reviewedDigest,grantsCodingAuthority:false,executionAuthorised:false};rejectOperatorSecret(manifest);
+  const decision=await tx.reworkEvent.create({data:{id,amendmentId:a.row.id,scopeRevisionId:a.m.scopeRevisionId,taskId:input.taskId,type:'TASK_CODING_APPROVED',manifest:json(manifest),digest:hash(manifest),signature:sign(manifest,input.credential),approvalId:approval.id,idempotencyKey:input.idempotencyKey,requestDigest,createdAt:now}});
+  await verifyCodingDecision(tx,decision,target);
+  await tx.activity.create({data:{productId:input.productId,workItemId:target.review.task.workItemId,type:'CODING_TASK_APPROVED',actor:actor.name,description:`Protected human coding decision ${approval.id} for rework task ${input.taskId}; execution remains blocked.`}});
+  return tx.implementationTask.findUniqueOrThrow({where:{id:input.taskId}});
+ });
+}
+/** Historical decision remains immutable; current validity must always be re-established. */
+export async function inspectReworkTaskCodingApproval(productId:string,taskId:string){return locked(productId,async tx=>{
+ const target=await codingTarget(tx,productId,taskId),row=await tx.reworkEvent.findFirst({where:{amendmentId:target.a.row.id,type:'TASK_CODING_APPROVED',taskId}});
+ if(!row)throw new DomainError('Protected task coding approval has not been recorded.');await verifyCodingDecision(tx,row,target);
+ return{taskId,eventId:row.id,approvalId:row.approvalId,reviewedDigest:target.reviewedDigest,state:'CODING_APPROVED_EXECUTION_BLOCKED' as const,executionAuthorised:false as const};
+})}

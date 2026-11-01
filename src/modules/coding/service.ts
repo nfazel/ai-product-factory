@@ -136,7 +136,11 @@ function draftFor(task: TaskGraph, policy: NonNullable<Awaited<ReturnType<typeof
   });
 }
 
-export async function approveImplementationTask(productId: string, taskId: string, options?: { actorName?: string }) {
+export async function approveImplementationTask(productId: string, taskId: string, options?: { actorName?: string; reworkApproval?: import("@/modules/rework/service").ReworkCodingApproval }) {
+  if (options?.reworkApproval) {
+    const { approveReworkTaskForCoding } = await import("@/modules/rework/service");
+    return approveReworkTaskForCoding({ ...options.reworkApproval, productId, taskId });
+  }
   await assertLegacyCodingTask(productId,taskId);
   const actor = options?.actorName ?? getCurrentActor().name;
   assertHuman(actor);
