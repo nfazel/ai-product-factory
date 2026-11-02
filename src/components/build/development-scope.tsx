@@ -2,6 +2,7 @@
 import {useEffect,useRef,useState,useTransition,type FormEvent} from 'react';
 import {developmentScopeAction,type ScopeActionResult} from '@/server/actions/development-scope';
 import {OperatorCredentialField} from './operator-confirmation';
+import {DevelopmentTasksPanel} from './development-tasks';
 import type {DevelopmentScopeView} from '@/modules/development-scope/presentation';
 
 const states:Record<string,string>={DRAFT:'Scope drafted — waiting for your review',APPROVED:'Scope approved — no work has started',REJECTED:'Scope rejected',STALE:'Scope is out of date — the feature or proposal changed',UNAVAILABLE:'Scope cannot currently be confirmed'};
@@ -26,7 +27,7 @@ export function DevelopmentScopeContent({scope}:{scope:DevelopmentScopeView}){
 }
 
 export function DevelopmentScopePanel({productId,featureId,feedbackId,readOnly=false}:{productId:string;featureId:string;feedbackId:string;readOnly?:boolean}){
- const [scope,setScope]=useState<DevelopmentScopeView|null>(null),[loaded,setLoaded]=useState(false),[result,setResult]=useState<ScopeActionResult>({status:'success'}),[revising,setRevising]=useState(false),[pending,start]=useTransition();
+ const [scope,setScope]=useState<DevelopmentScopeView|null>(null),[loaded,setLoaded]=useState(false),[result,setResult]=useState<ScopeActionResult>({status:'success'}),[revising,setRevising]=useState(false),[taskState,setTaskState]=useState<string|null>(null),[pending,start]=useTransition();
  const nonce=useRef({payload:'',id:''});
  useEffect(()=>{let active=true;const value=new FormData();value.set('productId',productId);value.set('featureId',featureId);value.set('feedbackId',feedbackId);value.set('operation','LOAD');
   developmentScopeAction(value).then(next=>{if(!active)return;if(next.status==='success')setScope(next.scope??null);else setResult(next);setLoaded(true)}).catch(()=>{if(active){setResult({status:'error',message:'Scope could not load. Reload to retry.'});setLoaded(true)}});return()=>{active=false}},[productId,featureId,feedbackId]);
@@ -38,7 +39,7 @@ export function DevelopmentScopePanel({productId,featureId,feedbackId,readOnly=f
   const input=element.elements.namedItem('credential') as HTMLInputElement|null;if(input)input.value='';
   start(async()=>{try{const next=await developmentScopeAction(value);setResult(next);if(next.status==='success'){nonce.current={payload:'',id:''};if(next.scope!==undefined)setScope(next.scope);setRevising(false)}}catch{setResult({status:'error',message:'Connection lost. Reload before retrying.'})}finally{value.delete('credential')}});
  }
- const decidable=scope?.status==='DRAFT';
+ const decidable=scope?.status==='DRAFT',canRevise=decidable||(scope?.status==='APPROVED'&&(taskState==='NONE'||taskState==='REJECTED'));
  return <section aria-label="Development scope" className="space-y-3 rounded-xl border p-4">
   <h3 className="font-semibold">Development scope</h3>
   {!loaded&&<p role="status">Loading scope…</p>}
@@ -47,10 +48,9 @@ export function DevelopmentScopePanel({productId,featureId,feedbackId,readOnly=f
   {loaded&&!scope&&<p>Your confirmed proposal records what you want. The next step is a development scope: a precise, reviewable statement of what the AI is allowed to change.</p>}
   {loaded&&!scope&&!readOnly&&<form onSubmit={submit} className="space-y-3"><input type="hidden" name="operation" value="PREPARE"/><label className="block">Anything the scope should emphasise (optional)<textarea name="instructions" maxLength={20000} rows={2} className="block w-full rounded border p-2"/></label><Credential/><button type="submit" disabled={pending} className="rounded border px-3 py-2">Prepare development scope</button></form>}
   {scope&&<DevelopmentScopeContent scope={scope}/>}
-  {scope&&decidable&&!readOnly&&<div className="space-y-3">
-   <form key={`${scope.digest}:decide`} onSubmit={submit} className="space-y-3"><label className="block">Review note (optional)<textarea name="reason" maxLength={4000} rows={2} className="block w-full rounded border p-2"/></label><Credential/>
-    <div className="flex gap-3"><button type="submit" name="operation" value="APPROVE" disabled={pending||!!scope.blockers.length} className="rounded border px-3 py-2 disabled:opacity-50">Approve scope</button><button type="submit" name="operation" value="REJECT" disabled={pending} className="rounded border px-3 py-2">Reject scope</button></div></form>
-   {!revising?<button type="button" disabled={pending} onClick={()=>setRevising(true)}>Revise scope</button>:<form key={`${scope.digest}:revise`} onSubmit={submit} className="space-y-3"><input type="hidden" name="operation" value="REVISE"/><label className="block">What should the scope change?<textarea name="instructions" required maxLength={20000} rows={3} className="block w-full rounded border p-2"/></label><Credential/><div className="flex gap-3"><button type="submit" disabled={pending} className="rounded border px-3 py-2">Send revision</button><button type="button" onClick={()=>setRevising(false)}>Cancel</button></div></form>}
-  </div>}
+  {scope&&decidable&&!readOnly&&<form key={`${scope.digest}:decide`} onSubmit={submit} className="space-y-3"><label className="block">Review note (optional)<textarea name="reason" maxLength={4000} rows={2} className="block w-full rounded border p-2"/></label><Credential/>
+    <div className="flex gap-3"><button type="submit" name="operation" value="APPROVE" disabled={pending||!!scope.blockers.length} className="rounded border px-3 py-2 disabled:opacity-50">Approve scope</button><button type="submit" name="operation" value="REJECT" disabled={pending} className="rounded border px-3 py-2">Reject scope</button></div></form>}
+  {scope&&canRevise&&!readOnly&&<div className="space-y-3">{!revising?<button type="button" disabled={pending} onClick={()=>setRevising(true)}>{decidable?'Revise scope':'Revise scope (it will need approving again)'}</button>:<form key={`${scope.digest}:revise`} onSubmit={submit} className="space-y-3"><input type="hidden" name="operation" value="REVISE"/><label className="block">What should the scope change?<textarea name="instructions" required maxLength={20000} rows={3} className="block w-full rounded border p-2"/></label><Credential/><div className="flex gap-3"><button type="submit" disabled={pending} className="rounded border px-3 py-2">Send revision</button><button type="button" onClick={()=>setRevising(false)}>Cancel</button></div></form>}</div>}
+  {scope?.status==='APPROVED'&&<DevelopmentTasksPanel key={scope.digest} productId={productId} featureId={featureId} feedbackId={feedbackId} readOnly={readOnly} onState={setTaskState}/>}
  </section>;
 }
