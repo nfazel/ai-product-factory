@@ -119,6 +119,8 @@ export async function decideDevelopmentScope(input:HeadRequest&{decision:'APPROV
  });
 }
 /** Inspection never reconciles acceptance or records permanent invalidation. */
+/** Read-only lookup of the scope prepared from a confirmed conversation, if any. */
+export async function findDevelopmentScopeId(input:{productId:string;featureId:string;feedbackId:string}){return(await db.developmentScope.findFirst({where:input,select:{id:true}}))?.id??null}
 export async function getDevelopmentScope(input:ScopeLocation){
  const value=await read(db,input),revision=value.revisions.at(-1)!;
  const manifest=revision.manifest as unknown as ScopeManifest,blockers=approvalBlockers(manifest);

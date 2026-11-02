@@ -1,6 +1,7 @@
 'use client';
 import {useEffect,useRef,useState,useTransition,type FormEvent} from 'react';
 import {featureFeedbackAction} from '@/server/actions/feature-feedback';
+import {DevelopmentScopePanel} from './development-scope';
 import type {ConversationView,ConversationList,FeedbackActionResult} from '@/modules/feature-feedback/presentation';
 const states:Record<string,string>={AWAITING_ANALYSIS:'Waiting for AI analysis',CLARIFICATION:'Your answer is needed',PROPOSAL:'Proposal ready for review',CONFIRMED:'Proposal confirmed',REJECTED:'Proposal rejected',CANCELLED:'Conversation cancelled',CONFIRMED_STALE:'Confirmed proposal refers to an older feature version',CONFIRMATION_UNAVAILABLE:'Confirmation authority cannot currently be established'};
 const decisions:Record<string,string>={RESPONSE:'Your answer',REVISION_REQUESTED:'Your requested revision',CONFIRMED:'You confirmed the proposal',REJECTED:'You rejected the proposal',CANCELLED:'You cancelled the conversation'};
@@ -51,6 +52,7 @@ export function FeatureFeedbackPanel({productId,featureId,title,onClose,readOnly
    <div className="space-y-4 min-w-0">{conversation?<FeedbackConversationContent conversation={conversation}/>:<p>Describe the outcome you want, what is happening now, or what should work differently.</p>}
     {pending&&<p role="status" aria-live="polite">Working with your feedback…</p>}
     {result.message&&<p role={result.status==='error'?'alert':'status'}>{result.message}</p>}
+    {conversation?.confirmed&&<DevelopmentScopePanel key={conversation.id} productId={productId} featureId={featureId} feedbackId={conversation.id} readOnly={readOnly}/>}
     {readOnly?<p>This feature is archived. Conversation history is read-only.</p>:<>
     {!conversation&&<FeedbackTextForm operation="START" pending={pending} onSubmit={submit}/>}
     {conversation&&(clarify||action==='REVISE'||action==='REJECT')&&<div><FeedbackTextForm key={`${conversation.digest}:${action??'RESPOND'}`} operation={action??'RESPOND'} pending={pending} onSubmit={submit}/>{action&&<button type="button" onClick={()=>setMode(null)}>Back to proposal</button>}</div>}
