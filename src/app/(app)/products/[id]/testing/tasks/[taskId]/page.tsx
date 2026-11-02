@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 
 import { PageSkeleton } from "@/components/feedback/states";
 import { VerificationWorkspace } from "@/components/prove/verification-workspace";
+import { RuntimeReviewSection } from "@/components/prove/runtime-review-section";
 import { parseProveTab, summariseProveTask } from "@/modules/prove/task-status";
 import { getCodingView } from "@/modules/coding/service";
 import { getProveView } from "@/modules/verification/service";
@@ -48,14 +49,19 @@ async function ProveTask({
   const codingTask = coding?.tasks.find((item) => item.id === taskId);
   const plan = codingTask?.workspace?.plan ?? null;
   return (
-    <VerificationWorkspace
-      productId={id}
-      task={task}
-      sessions={sessions}
-      row={row}
-      planVersion={plan?.version ?? null}
-      planStatus={plan?.status ?? null}
-      activeTab={parseProveTab(tab)}
-    />
+    <div className="space-y-6">
+      <Suspense fallback={null}>
+        <RuntimeReviewSection productId={id} taskId={taskId} />
+      </Suspense>
+      <VerificationWorkspace
+        productId={id}
+        task={task}
+        sessions={sessions}
+        row={row}
+        planVersion={plan?.version ?? null}
+        planStatus={plan?.status ?? null}
+        activeTab={parseProveTab(tab)}
+      />
+    </div>
   );
 }
