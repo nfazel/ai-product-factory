@@ -5,6 +5,7 @@ import { architectureRunner } from "@/modules/architecture/runner";
 import { codingRunner } from "@/modules/coding/runner";
 import { verificationRunner } from "@/modules/verification/runner";
 import { productDiscoveryRunner } from "@/modules/discovery/runner";
+import { designRunner } from "@/modules/design/runner";
 import { governanceRunner } from "@/modules/governance/runner";
 import { requirementsRunner } from "@/modules/requirements/runner";
 
@@ -15,6 +16,7 @@ export function ensureAgentsRegistered() {
   registerAgentRunner(productDiscoveryRunner);
   registerAgentRunner(requirementsRunner);
   registerAgentRunner(architectureRunner);
+  registerAgentRunner(designRunner);
   registerAgentRunner(governanceRunner);
   registerAgentRunner(codingRunner);
   registerAgentRunner(verificationRunner);

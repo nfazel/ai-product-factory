@@ -56,6 +56,7 @@ export const APPROVAL_TYPES = [
   "PRODUCT_DISCOVERY",
   "PRODUCT_DEFINITION",
   "SOLUTION_ARCHITECTURE",
+  "UI_DESIGN",
   "IMPLEMENTATION_PLAN",
   "ENGINEERING_GOVERNANCE",
   "CODING_POLICY",
@@ -203,6 +204,7 @@ export const AGENT_TYPES = [
   "PRODUCT_DISCOVERY",
   "REQUIREMENTS",
   "ARCHITECTURE",
+  "UX_DESIGN",
   "SECURITY",
   "PLANNING",
   "CODING",
@@ -368,6 +370,7 @@ export const APPROVAL_TYPE_LABEL: Record<ApprovalType, string> = {
   PRODUCT_DISCOVERY: "Product Brief",
   PRODUCT_DEFINITION: "Product Definition",
   SOLUTION_ARCHITECTURE: "Design",
+  UI_DESIGN: "Screen design",
   IMPLEMENTATION_PLAN: "Delivery plan",
   ENGINEERING_GOVERNANCE: "Engineering review",
   CODING_POLICY: "Coding rules",
@@ -756,6 +759,11 @@ export const AGENT_CATALOG: Record<
     name: "Architecture Agent",
     responsibility:
       "Propose a solution architecture and an implementation plan for an approved product slice. It does not write production code.",
+  },
+  UX_DESIGN: {
+    name: "UI/UX Design Agent",
+    responsibility:
+      "Propose the screens and how people move between them, as simple clickable pictures, for a person to review and improve before any code is written. It does not write production code or approve its own work.",
   },
   SECURITY: {
     name: "Security & Engineering Governance Agent",

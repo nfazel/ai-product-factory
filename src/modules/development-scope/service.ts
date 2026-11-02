@@ -7,6 +7,7 @@ import {confirmLocalOperator,rejectOperatorSecret} from '@/modules/feature-revie
 import {confirmedFeedbackSource} from '@/modules/feature-feedback/service';
 import {getAIProvider,isAIConfigured,prepareAI} from '@/modules/ai/provider';
 import {DomainError} from '@/modules/shared/errors';
+import {approvedDesignReference} from '@/modules/design/read';
 import {scopeContentSchema,type ScopeContent} from './schema';
 import {SCOPE_SYSTEM_PROMPT} from './prompt';
 import {signScopeDecision,validScopeDecision} from './proof';
@@ -51,7 +52,7 @@ function approvalBlockers(manifest:ScopeManifest){
 }
 async function draft(source:Source,input:ReturnType<typeof edit>,actorId:string,previous?:ScopeContent){
  if(input.content){validateContent(input.content,source);return{content:input.content,origin:{kind:'HUMAN' as const,requestedBy:actorId,instructions:input.instructions}}}
- const data={confirmedProposal:source.analysis,baseline:source.context,previousScope:previous??null,instructions:input.instructions};rejectOperatorSecret(data);
+ const data={confirmedProposal:source.analysis,baseline:source.context,previousScope:previous??null,instructions:input.instructions,approvedDesign:await approvedDesignReference(source.context.productId)};rejectOperatorSecret(data);
  if(canonicalJson(data).length>200000)throw new DomainError('Scope drafting context exceeds its size limit.');
  await prepareAI();if(!isAIConfigured())throw new DomainError('AI is not configured. No scope was changed.');
  const result=await(await getAIProvider()).generate({systemPrompt:SCOPE_SYSTEM_PROMPT,messages:[{role:'user',content:canonicalJson(data)}],responseSchema:scopeContentSchema,schemaName:'development_scope',purpose:'development-scope'});

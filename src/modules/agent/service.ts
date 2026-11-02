@@ -98,6 +98,7 @@ const AGENT_CAPABILITY: Record<string, string> = {
   PRODUCT_DISCOVERY: "Discovery",
   REQUIREMENTS: "product definition",
   ARCHITECTURE: "architecture",
+  UX_DESIGN: "UI/UX design",
   SECURITY: "engineering governance",
   CODING: "coding",
   TESTING: "verification",
