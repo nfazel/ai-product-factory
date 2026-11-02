@@ -1,5 +1,5 @@
 import {RequirementsContextStatus} from "@/components/build/requirements-context";
-import {LivePreviewPanel} from "@/components/build/live-preview";
+import {LivePreviewSection} from "@/components/build/live-preview-section";
 import {inspectBuildVerification} from '@/modules/build/verification-view';
 import {FeatureReviews} from '@/components/build/feature-reviews';
 import { Suspense } from "react";
@@ -200,7 +200,7 @@ async function Build({
       <BuildReadiness coding={workspace.coding} />
 
       {verificationObservation.unavailable&&<p role="alert" className="rounded border p-3">Technical verification status is temporarily unavailable. Feedback remains available; acceptance still requires current independent technical approval.</p>}
-      <LivePreviewPanel productId={id}/>
+      <Suspense fallback={<p>Loading preview…</p>}><LivePreviewSection productId={id}/></Suspense>
       <Suspense fallback={<p>Loading feature reviews…</p>}><FeatureReviews productId={id}/></Suspense>
       <BuildOverview
         productId={id}

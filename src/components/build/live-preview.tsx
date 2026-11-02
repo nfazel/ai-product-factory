@@ -3,9 +3,11 @@ import {useEffect,useState,useTransition} from 'react';
 import {previewAction,type PreviewActionResult} from '@/server/actions/preview';
 import type {PreviewView} from '@/modules/preview/helpers';
 import {routeLabel} from '@/modules/preview/helpers';
+import {FeatureFeedbackPanel} from './feature-feedback';
 
 const sizes={phone:{label:'Phone',width:390},tablet:{label:'Tablet',width:768},desktop:{label:'Desktop',width:null}} as const;
 type Size=keyof typeof sizes;
+export type PreviewFeature={id:string;title:string};
 
 /** Presentational: the running app inside a sandboxed frame, at a chosen screen size. */
 export function PreviewFrame({preview,size,path='/',onGo}:{preview:PreviewView;size:Size;path?:string;onGo?:(path:string)=>void}){
@@ -17,13 +19,29 @@ export function PreviewFrame({preview,size,path='/',onGo}:{preview:PreviewView;s
  </div>;
 }
 
-export function LivePreviewPanel({productId}:{productId:string}){
- const [preview,setPreview]=useState<PreviewView|null>(null),[loaded,setLoaded]=useState(false),[result,setResult]=useState<PreviewActionResult>({status:'success'}),[size,setSize]=useState<Size>('phone'),[path,setPath]=useState('/'),[pending,start]=useTransition();
+/** The running app with the feedback conversation beside it (below it on narrow screens or wide frames). */
+export function PreviewWorkbench({productId,preview,size,path,onGo,features,feedbackOpen,featureId,onOpenFeedback,onCloseFeedback,onFeature}:{productId:string;preview:PreviewView;size:Size;path:string;onGo:(path:string)=>void;features:PreviewFeature[];feedbackOpen:boolean;featureId:string;onOpenFeedback:()=>void;onCloseFeedback:()=>void;onFeature:(id:string)=>void}){
+ const feature=features.find(item=>item.id===featureId)??features[0],sideBySide=size==='phone'&&feedbackOpen;
+ return <div className={`flex flex-col gap-4 ${sideBySide?'lg:flex-row lg:items-start':''}`}>
+  <div className={sideBySide?'lg:w-[26rem] lg:shrink-0':'min-w-0'}><PreviewFrame preview={preview} size={size} path={path} onGo={onGo}/></div>
+  <div className="min-w-0 flex-1 space-y-3">
+   {!features.length&&<p>This product has no features to give feedback on yet.</p>}
+   {!!features.length&&!feedbackOpen&&<button type="button" onClick={onOpenFeedback} className="rounded border px-3 py-2">Give feedback on what you see</button>}
+   {!!features.length&&feedbackOpen&&feature&&<>
+    <label className="block text-sm">Which feature is this about?<select value={feature.id} onChange={event=>onFeature(event.target.value)} className="mt-1 block w-full rounded border p-2">{features.map(item=><option key={item.id} value={item.id}>{item.title}</option>)}</select></label>
+    <FeatureFeedbackPanel key={feature.id} productId={productId} featureId={feature.id} title={feature.title} onClose={onCloseFeedback}/>
+   </>}
+  </div>
+ </div>;
+}
+
+export function LivePreviewPanel({productId,features=[]}:{productId:string;features?:PreviewFeature[]}){
+ const [preview,setPreview]=useState<PreviewView|null>(null),[loaded,setLoaded]=useState(false),[result,setResult]=useState<PreviewActionResult>({status:'success'}),[size,setSize]=useState<Size>('phone'),[path,setPath]=useState('/'),[feedbackOpen,setFeedbackOpen]=useState(false),[featureId,setFeatureId]=useState(features[0]?.id??''),[pending,start]=useTransition();
  const call=(operation:string)=>{const value=new FormData();value.set('productId',productId);value.set('operation',operation);return previewAction(value)};
  useEffect(()=>{let active=true;call('STATUS').then(next=>{if(!active)return;if(next.preview)setPreview(next.preview);else setResult(next);setLoaded(true)}).catch(()=>{if(active){setResult({status:'error',message:'Preview status could not load. Reload to retry.'});setLoaded(true)}});return()=>{active=false}},
   // eslint-disable-next-line react-hooks/exhaustive-deps
   [productId]);
- function act(operation:'START'|'STOP'){start(async()=>{try{const next=await call(operation);setResult(next);if(next.preview)setPreview(next.preview)}catch{setResult({status:'error',message:'Connection lost. Reload before retrying.'})}})}
+ function act(operation:'START'|'STOP'){start(async()=>{try{const next=await call(operation);setResult(next);if(next.preview)setPreview(next.preview);if(operation==='STOP')setFeedbackOpen(false)}catch{setResult({status:'error',message:'Connection lost. Reload before retrying.'})}})}
  const running=preview?.state==='RUNNING';
  return <section aria-label="Live preview" className="space-y-3 rounded-xl border p-4">
   <h2 className="text-lg font-semibold">Live preview</h2>
@@ -34,7 +52,7 @@ export function LivePreviewPanel({productId}:{productId:string}){
   {loaded&&!running&&<button type="button" disabled={pending} onClick={()=>act('START')} className="rounded border px-3 py-2">Start preview</button>}
   {loaded&&running&&preview&&<>
    <div className="flex flex-wrap items-center gap-3" role="group" aria-label="Screen size">{(Object.keys(sizes) as Size[]).map(key=><button key={key} type="button" aria-pressed={size===key} onClick={()=>setSize(key)} className="rounded border px-3 py-1 aria-pressed:font-semibold">{sizes[key].label}</button>)}<button type="button" disabled={pending} onClick={()=>act('STOP')} className="ml-auto rounded border px-3 py-1">Stop preview</button></div>
-   <PreviewFrame preview={preview} size={size} path={path} onGo={setPath}/>
+   <PreviewWorkbench productId={productId} preview={preview} size={size} path={path} onGo={setPath} features={features} feedbackOpen={feedbackOpen} featureId={featureId} onOpenFeedback={()=>setFeedbackOpen(true)} onCloseFeedback={()=>setFeedbackOpen(false)} onFeature={setFeatureId}/>
   </>}
  </section>;
 }
