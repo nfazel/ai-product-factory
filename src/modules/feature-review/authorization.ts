@@ -17,3 +17,15 @@ export function signFeatureDecision(value:unknown){const key=process.env[KEY];if
 export function validFeatureDecision(value:unknown,signature:string){try{if(typeof signature!=='string'||!/^[a-f0-9]{64}$/.test(signature))return false;return timingSafeEqual(Buffer.from(signature,'hex'),Buffer.from(signFeatureDecision(value),'hex'))}catch{return false}}
 
 export function operatorConfirmationAvailable(){return Boolean(process.env[KEY]&&Buffer.byteLength(process.env[KEY]!)>=32)}
+
+/**
+ * Proof-of-concept switch. OPERATOR_CONFIRMATION=off lets the local human's click stand in for typing the credential;
+ * the server then supplies its own configured key at the action boundary, so signing and proofs are unchanged.
+ * The default is ON. The same-origin/localhost checks in the server actions still apply.
+ */
+export function operatorConfirmationRequired(){return process.env.OPERATOR_CONFIRMATION?.trim().toLowerCase()!=='off'}
+export function resolveOperatorCredential(supplied:string){
+ if(operatorConfirmationRequired())return supplied;
+ const key=process.env[KEY];
+ return key&&Buffer.byteLength(key)>=32?key:supplied;
+}

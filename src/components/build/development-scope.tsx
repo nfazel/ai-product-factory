@@ -1,12 +1,13 @@
 'use client';
 import {useEffect,useRef,useState,useTransition,type FormEvent} from 'react';
 import {developmentScopeAction,type ScopeActionResult} from '@/server/actions/development-scope';
+import {OperatorCredentialField} from './operator-confirmation';
 import type {DevelopmentScopeView} from '@/modules/development-scope/presentation';
 
 const states:Record<string,string>={DRAFT:'Scope drafted — waiting for your review',APPROVED:'Scope approved — no work has started',REJECTED:'Scope rejected',STALE:'Scope is out of date — the feature or proposal changed',UNAVAILABLE:'Scope cannot currently be confirmed'};
 const kinds:Record<string,string>={DEFECT:'Issue to fix',ENHANCEMENT:'Enhancement',REQUIREMENT_CHANGE:'Requirement change',NEW_FEATURE:'New feature'};
 function List({title,items}:{title:string;items:string[]}){return items.length?<div><h5 className="font-medium">{title}</h5><ul className="list-disc pl-5">{items.map((item,i)=><li key={i}>{item}</li>)}</ul></div>:null}
-function Credential(){return <label className="block text-sm">Local operator confirmation<input type="password" name="credential" required autoComplete="off" className="block rounded border p-2"/><span className="text-xs text-muted-foreground">Cleared on submission; never saved.</span></label>}
+function Credential(){return <OperatorCredentialField/>}
 
 export function DevelopmentScopeContent({scope}:{scope:DevelopmentScopeView}){
  const c=scope.content,risks=Object.values(c.risks).flat();

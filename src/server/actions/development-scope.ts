@@ -3,7 +3,7 @@ import {headers} from 'next/headers';
 import {prepareDevelopmentScope,reviseDevelopmentScope,decideDevelopmentScope,getDevelopmentScope,findDevelopmentScopeId,developmentScopeView} from '@/modules/development-scope';
 import type {DevelopmentScopeView} from '@/modules/development-scope';
 import {confirmedFeedbackSource} from '@/modules/feature-feedback/service';
-import {confirmLocalOperator,operatorConfirmationAvailable} from '@/modules/feature-review/authorization';
+import {confirmLocalOperator,operatorConfirmationAvailable,resolveOperatorCredential} from '@/modules/feature-review/authorization';
 import {DomainError} from '@/modules/shared/errors';
 
 export type ScopeActionResult={status:'success'|'error';message?:string;scope?:DevelopmentScopeView|null};
@@ -26,7 +26,7 @@ export async function developmentScopeAction(data:FormData):Promise<ScopeActionR
   const load=async(scopeId:string|null)=>scopeId?developmentScopeView(await getDevelopmentScope({productId,featureId,scopeId})):null;
   if(operation==='LOAD')return{status:'success',scope:await load(await findDevelopmentScopeId({productId,featureId,feedbackId}))};
   if(!['PREPARE','REVISE','APPROVE','REJECT'].includes(operation))throw new DomainError('Choose a scope action.');
-  const credential=text('credential'),nonce=text('idempotencyKey');
+  const credential=resolveOperatorCredential(text('credential')),nonce=text('idempotencyKey');
   if(!/^[A-Za-z0-9:_-]{8,90}$/.test(nonce))throw new DomainError('A unique scope request key is required.');
   requireOperator(credential);
   const instructions=text('instructions').trim()||undefined;

@@ -2,6 +2,7 @@
 import {useRef,useState,useTransition,type FormEvent} from 'react';
 import type {FeatureReviewView} from '@/modules/feature-review/presentation';
 import {FeatureFeedbackPanel} from './feature-feedback';
+import {OperatorCredentialField} from './operator-confirmation';
 import {featureReviewAction} from '@/server/actions/feature-review';
 import type {ActionState} from '@/lib/action-state';
 const labels:Record<string,string>={ACCEPTED:'Accepted',DEFERRED:'Review later',REVIEW_REQUIRED:'Review required',AWAITING_ACCEPTANCE:'Awaiting acceptance',UNAVAILABLE:'Verification status unavailable',ARCHIVED:'Archived'};
@@ -22,8 +23,7 @@ export function FeatureReviewCard({productId,feature}:{productId:string;feature:
   {!!feature.concerns.length&&<fieldset className="space-y-2"><legend>Non-blocking concerns — acknowledge each before accepting</legend>{feature.concerns.map(c=><label key={c.id} className="block text-sm"><input form={`review-form-${feature.featureId}`} type="checkbox" name="concern" value={c.id} checked={ack.includes(c.id)} onChange={e=>setAck(a=>e.target.checked?[...a,c.id]:a.filter(id=>id!==c.id))}/>{' '}{c.text}</label>)}</fieldset>}
   {!closed&&<form id={`review-form-${feature.featureId}`} ref={form} onSubmit={submit} className="space-y-2">
    <input type="hidden" name="productId" value={productId}/><input type="hidden" name="featureId" value={feature.featureId}/><input type="hidden" name="digest" value={feature.digest}/>
-   <label className="block text-sm">Local operator confirmation<input className="block rounded border p-2" type="password" name="credential" required autoComplete="off" aria-label="Local operator confirmation"/></label>
-   <p className="text-xs text-muted-foreground">Use the protected local operator credential. It is cleared on submission and is not saved with the review.</p>
+   <OperatorCredentialField note="Use the protected local operator credential. It is cleared on submission and is not saved with the review."/>
    <label className="block text-sm">Review note (optional)<textarea name="reason" maxLength={2000} className="block rounded border p-2"/></label>
    <div className="flex gap-3"><button type="submit" name="decision" value="ACCEPTED" disabled={!feature.eligible||pending||!feature.concerns.every(concern=>ack.includes(concern.id))||feature.status==='ACCEPTED'} className="rounded border px-3 py-2 disabled:opacity-50">Accept Feature</button><button type="submit" name="decision" value="DEFERRED" disabled={pending||feature.status==='ACCEPTED'} className="rounded border px-3 py-2 disabled:opacity-50">Review Later</button><button type="button" onClick={()=>setFeedbackOpen(true)} className="rounded border px-3 py-2">Request Changes</button></div>
    <p className="text-xs">Acceptance is a business decision for this verified version. Review Later does not stop other development.</p>

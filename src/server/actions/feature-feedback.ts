@@ -2,6 +2,7 @@
 import {headers} from 'next/headers';
 import {submitFeedback,getFeedback,listFeedback,analyseFeedback,decideFeedback} from '@/modules/feature-feedback/service';
 import {conversationView,conversationList,type FeedbackActionResult} from '@/modules/feature-feedback/presentation';
+import {resolveOperatorCredential} from '@/modules/feature-review/authorization';
 import {DomainError} from '@/modules/shared/errors';
 import {AIFailure} from '@/modules/ai/failures';
 // Curated provider failures and the service's own analysis outcomes; other errors may carry provider diagnostics.
@@ -20,7 +21,7 @@ export async function featureFeedbackAction(data:FormData):Promise<FeedbackActio
   if(operation==='LOAD')return{status:'success',conversation:conversationView(await getFeedback({productId,featureId,feedbackId}))};
   if(!['START','ANALYSE','RESPOND','REVISE','CONFIRM','REJECT','CANCEL'].includes(operation))throw new DomainError('Choose a feedback action.');
   if(operation==='CONFIRM'&&text('acknowledged')!=='yes')throw new DomainError('Explicitly acknowledge that you reviewed this exact proposal.');
-  const credential=text('credential'),nonce=text('idempotencyKey');
+  const credential=resolveOperatorCredential(text('credential')),nonce=text('idempotencyKey');
   if(!/^[A-Za-z0-9:_-]{8,90}$/.test(nonce))throw new DomainError('A unique feedback request key is required.');
   if(operation==='START'){
    const thread=await submitFeedback({productId,featureId,originalText:text('text'),idempotencyKey:`${nonce}:submit`});feedbackId=thread.id;recorded=true;

@@ -2,6 +2,7 @@
 import {headers} from 'next/headers';
 import {revalidatePath} from 'next/cache';
 import {recordFeatureReview} from '@/modules/feature-review/service';
+import {resolveOperatorCredential} from '@/modules/feature-review/authorization';
 import type {ActionState} from '@/lib/action-state';
 import {DomainError} from '@/modules/shared/errors';
 export async function featureReviewAction(_previous:ActionState,data:FormData):Promise<ActionState>{
@@ -13,7 +14,7 @@ export async function featureReviewAction(_previous:ActionState,data:FormData):P
   if(!['ACCEPTED','DEFERRED'].includes(decision))return{status:'error',message:'Choose Accept Feature or Review Later.'};
   const productId=text('productId'),featureId=text('featureId');
   if(!productId||!featureId)return{status:'error',message:'The feature could not be identified.'};
-  const outcome=await recordFeatureReview({productId,featureId,decision:decision as 'ACCEPTED'|'DEFERRED',reviewedDigest:text('digest'),idempotencyKey:text('idempotencyKey'),credential:text('credential'),acknowledgedConcerns:data.getAll('concern').filter((value):value is string=>typeof value==='string'),reason:text('reason')});
+  const outcome=await recordFeatureReview({productId,featureId,decision:decision as 'ACCEPTED'|'DEFERRED',reviewedDigest:text('digest'),idempotencyKey:text('idempotencyKey'),credential:resolveOperatorCredential(text('credential')),acknowledgedConcerns:data.getAll('concern').filter((value):value is string=>typeof value==='string'),reason:text('reason')});
   revalidatePath(`/products/${productId}/build`);revalidatePath(`/products/${productId}/releases`);
   if(decision==='ACCEPTED'&&outcome.review.status!=='ACCEPTED')return{status:'error',message:'The earlier decision is retained, but current feature acceptance requires a fresh review.'};
   return{status:'success',message:decision==='ACCEPTED'?'Feature acceptance recorded for the reviewed version.':'Review deferred. Work on other features can continue.'};

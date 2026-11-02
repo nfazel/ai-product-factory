@@ -2,6 +2,7 @@
 import {useEffect,useRef,useState,useTransition,type FormEvent} from 'react';
 import {featureFeedbackAction} from '@/server/actions/feature-feedback';
 import {DevelopmentScopePanel} from './development-scope';
+import {OperatorCredentialField} from './operator-confirmation';
 import type {ConversationView,ConversationList,FeedbackActionResult} from '@/modules/feature-feedback/presentation';
 const states:Record<string,string>={AWAITING_ANALYSIS:'Waiting for AI analysis',CLARIFICATION:'Your answer is needed',PROPOSAL:'Proposal ready for review',CONFIRMED:'Proposal confirmed',REJECTED:'Proposal rejected',CANCELLED:'Conversation cancelled',CONFIRMED_STALE:'Confirmed proposal refers to an older feature version',CONFIRMATION_UNAVAILABLE:'Confirmation authority cannot currently be established'};
 const decisions:Record<string,string>={RESPONSE:'Your answer',REVISION_REQUESTED:'Your requested revision',CONFIRMED:'You confirmed the proposal',REJECTED:'You rejected the proposal',CANCELLED:'You cancelled the conversation'};
@@ -22,7 +23,7 @@ export function FeedbackConversationContent({conversation}:{conversation:Convers
  <p className="text-sm">Proposal confirmation records intent only. It does not change approved requirements, start development, or verify or accept this feature.</p>
  </div>;
 }
-function Credential(){return <label className="block text-sm">Local operator confirmation<input type="password" name="credential" required autoComplete="off" className="block rounded border p-2"/><span className="text-xs text-muted-foreground">Cleared on submission; never saved with the conversation.</span></label>}
+function Credential(){return <OperatorCredentialField note="Cleared on submission; never saved with the conversation."/>}
 export function FeedbackTextForm({operation,pending,onSubmit}:{operation:'START'|'RESPOND'|'REVISE'|'REJECT';pending:boolean;onSubmit:(event:FormEvent<HTMLFormElement>)=>void}){
  const label=operation==='START'?'Your feedback':operation==='REVISE'?'How should the proposal change?':operation==='REJECT'?'Reason (optional)':'Your answer';
  const button=operation==='START'?'Send feedback':operation==='REVISE'?'Send revision':operation==='REJECT'?'Reject proposal':'Send answer';
