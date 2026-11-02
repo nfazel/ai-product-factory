@@ -15,4 +15,9 @@ export const analysisSchema=z.object({
  if(new Set(value.questions.map(q=>q.id)).size!==value.questions.length)ctx.addIssue({code:'custom',message:'Question identities must be distinct.'});
  if(value.classification==='NEW_FEATURE'&&value.scope!=='SEPARATE_BACKLOG_FEATURE')ctx.addIssue({code:'custom',message:'New features require separate backlog scope.'});
 });
+/** Per-request schema so structured-output repair can correct requirement references outside the feature. */
+export function analysisSchemaFor(requirementIds:string[]){
+ const allowed=new Set(requirementIds),hint=requirementIds.length?`Use only these IDs: ${requirementIds.slice(0,10).join(', ')}`:'This feature has no requirement IDs; use an empty list';
+ return analysisSchema.superRefine((value,ctx)=>{if(value.proposal?.affectedRequirementIds.some(id=>!allowed.has(id)))ctx.addIssue({code:'custom',path:['proposal','affectedRequirementIds'],message:`Unknown requirement ID. ${hint}.`})});
+}
 export type FeedbackAnalysis=z.infer<typeof analysisSchema>;

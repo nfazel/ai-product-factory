@@ -3,20 +3,27 @@ import {randomUUID} from 'node:crypto';
 import {db} from '@/lib/db';
 import type {Prisma} from '@/generated/prisma/client';
 import {canonicalJson,contentHash} from '@/modules/coding/external-manifest';
-import {confirmLocalOperator,rejectOperatorSecret} from '@/modules/feature-review/authorization';
+import {confirmLocalOperator,operatorConfirmationAvailable,rejectOperatorSecret} from '@/modules/feature-review/authorization';
 import {getAIProvider,isAIConfigured,prepareAI} from '@/modules/ai/provider';
 import {DomainError} from '@/modules/shared/errors';
 import {feedbackContext,contextDigest,type FeedbackContext} from './context';
-import {analysisSchema,type FeedbackAnalysis} from './schema';
+import {analysisSchema,analysisSchemaFor,type FeedbackAnalysis} from './schema';
 import {FEEDBACK_SYSTEM_PROMPT} from './prompt';
 import {signFeedbackDecision,validFeedbackDecision} from './proof';
 
 type Reader=Prisma.TransactionClient;
 type Scope={productId:string;featureId:string;feedbackId:string};
-type Request=Scope&{credential:string;idempotencyKey:string;expectedRevision:number;reviewedDigest:string};
+type Request=Scope&{credential?:string;idempotencyKey:string;expectedRevision:number;reviewedDigest:string};
 const json=(value:unknown):Prisma.InputJsonValue=>JSON.parse(JSON.stringify(value));
 const hash=(value:unknown)=>contentHash(canonicalJson(value));
 const receipt=(event:{id:string;revision:number;digest:string})=>({eventId:event.id,revision:event.revision,digest:event.digest});
+// Conversational attribution is explicitly unverified and never approval authority.
+const participant={kind:'LOCAL_PARTICIPANT',id:'local-feedback-participant',name:'Local participant (unverified)'};
+const protectedDecisions=new Set(['CONFIRM','REJECT','CANCEL']);
+function protectedOperator(credential?:string){
+ if(!operatorConfirmationAvailable())throw new DomainError('Protected operator confirmation is unavailable. Ask the local operator to configure it before making this decision.');
+ try{return confirmLocalOperator(credential??'')}catch{throw new DomainError('Local operator confirmation was not accepted. Use the credential for this environment; no decision was recorded.')}
+}
 const terminal=new Set(['CONFIRMED','REJECTED','CANCELLED']);
 function key(value:string){if(!/^[A-Za-z0-9:_-]{8,128}$/.test(value))throw new DomainError('A unique request key is required.');rejectOperatorSecret(value)}
 function text(value:string){if(typeof value!=='string'||!value.trim()||value.length>20000)throw new DomainError('Feedback must contain 1–20000 characters.');rejectOperatorSecret(value);return value}
@@ -32,10 +39,14 @@ async function read(reader:Reader,scope:Scope){
 function headOf(thread:Awaited<ReturnType<typeof read>>){const head=thread.events.at(-1);return{head,revision:head?.revision??0,digest:head?.digest??thread.contextDigest}}
 function expectHead(thread:Awaited<ReturnType<typeof read>>,request:Request){const state=headOf(thread);if(!Number.isInteger(request.expectedRevision)||request.expectedRevision!==state.revision||request.reviewedDigest!==state.digest||terminal.has(state.head?.type??''))throw new DomainError('The conversation or proposal changed; inspect the current version.','CONFLICT');return state}
 function replay(thread:Awaited<ReturnType<typeof read>>,requestId:string,requestDigest:string){const event=thread.events.find(e=>e.idempotencyKey===requestId);if(event&&event.requestDigest!==requestDigest)throw new DomainError('Request key already belongs to a different decision.','CONFLICT');return event}
-async function append(tx:Reader,scope:Scope,revision:number,type:string,payload:unknown,context:FeedbackContext,requestId:string,requestDigest:string,credential:string,ai=false){
- rejectOperatorSecret({payload,context});const actor=confirmLocalOperator(credential);
- const data={id:randomUUID(),feedbackId:scope.feedbackId,revision,type,payload:json(payload),context:json(context),contextDigest:contextDigest(context),actorKind:ai?'AI':'LOCAL_OPERATOR',actorId:ai?'configured-ai-provider':actor.id,actorName:ai?'Configured AI provider':actor.name,idempotencyKey:requestId,requestDigest,createdAt:new Date()};
- const digest=hash({...data,createdAt:data.createdAt.toISOString()}),signature=ai?'':signFeedbackDecision({kind:'FEATURE_FEEDBACK_EVENT',...data,createdAt:data.createdAt.toISOString(),digest},credential);
+async function append(tx:Reader,scope:Scope,revision:number,type:string,payload:unknown,context:FeedbackContext,requestId:string,requestDigest:string,credential:string|undefined,ai=false){
+ rejectOperatorSecret({payload,context});const protectedDecision=['CONFIRMED','REJECTED','CANCELLED'].includes(type),actor=protectedDecision?protectedOperator(credential):participant;
+ if(!ai&&!protectedDecision){
+  const ready=await tx.$queryRaw<{ready:boolean}[]>`SELECT COALESCE(bool_or(position('LOCAL_PARTICIPANT' IN pg_get_constraintdef(oid))>0),false) AS ready FROM pg_constraint WHERE conrelid=to_regclass('public."FeatureFeedbackEvent"') AND conname='FeatureFeedbackEvent_proof_check'`;
+  if(!ready[0]?.ready)throw new DomainError('Feedback storage needs an update before clarification or revision can be saved. Ask the local operator to apply the reviewed conversational-feedback migration; your response was not saved.');
+ }
+ const data={id:randomUUID(),feedbackId:scope.feedbackId,revision,type,payload:json(payload),context:json(context),contextDigest:contextDigest(context),actorKind:ai?'AI':actor.kind,actorId:ai?'configured-ai-provider':actor.id,actorName:ai?'Configured AI provider':actor.name,idempotencyKey:requestId,requestDigest,createdAt:new Date()};
+ const digest=hash({...data,createdAt:data.createdAt.toISOString()}),signature=protectedDecision?signFeedbackDecision({kind:'FEATURE_FEEDBACK_EVENT',...data,createdAt:data.createdAt.toISOString(),digest},credential!):'';
  const event=await tx.featureFeedbackEvent.create({data:{...data,digest,signature}});
  await tx.activity.create({data:{productId:scope.productId,workItemId:scope.featureId,type:'WORK_ITEM_UPDATED',description:`Feature feedback ${type.toLowerCase()} recorded. No implementation or approval state changed.`,actor:ai?'Configured AI provider':actor.name}});
  return receipt(event);
@@ -56,32 +67,33 @@ export async function getFeedback(scope:Scope,reader:Reader=db){
  return {...thread,events:thread.events.map(({signature,...event})=>{void signature;return event}),revision,digest,status,contextStatus,confirmed:status==='CONFIRMED'};
 }
 
-export async function submitFeedback(input:{productId:string;featureId:string;originalText:string;credential:string;idempotencyKey:string}){
- const actor=confirmLocalOperator(input.credential);key(input.idempotencyKey);const originalText=text(input.originalText),requestDigest=hash({productId:input.productId,featureId:input.featureId,originalText,actor});
+export async function submitFeedback(input:{productId:string;featureId:string;originalText:string;credential?:string;idempotencyKey:string}){
+ const actor=participant;key(input.idempotencyKey);const originalText=text(input.originalText),requestDigest=hash({productId:input.productId,featureId:input.featureId,originalText,actor});
  return locked(`submit:${input.productId}:${input.featureId}`,async tx=>{
   const previous=await tx.featureFeedback.findUnique({where:{productId_featureId_idempotencyKey:{productId:input.productId,featureId:input.featureId,idempotencyKey:input.idempotencyKey}}});
   if(previous){if(previous.requestDigest!==requestDigest)throw new DomainError('Request key already used for different feedback.','CONFLICT');await read(tx,{...input,feedbackId:previous.id});return previous}
-  const context=await feedbackContext(input.productId,input.featureId,tx);confirmLocalOperator(input.credential);
+  const context=await feedbackContext(input.productId,input.featureId,tx);
   const thread=await tx.featureFeedback.create({data:{productId:input.productId,featureId:input.featureId,originalText,context:json(context),contextDigest:contextDigest(context),actorId:actor.id,actorName:actor.name,idempotencyKey:input.idempotencyKey,requestDigest}});
   await tx.activity.create({data:{productId:input.productId,workItemId:input.featureId,type:'WORK_ITEM_UPDATED',description:'Feature feedback submitted. No implementation or approval state changed.',actor:actor.name}});
   return thread;
  });
 }
 export async function analyseFeedback(input:Request){
- const actor=confirmLocalOperator(input.credential);key(input.idempotencyKey);const requestDigest=hash({operation:'ANALYSE',productId:input.productId,featureId:input.featureId,feedbackId:input.feedbackId,expectedRevision:input.expectedRevision,reviewedDigest:input.reviewedDigest,actor});
+ const actor=participant;key(input.idempotencyKey);const requestDigest=hash({operation:'ANALYSE',productId:input.productId,featureId:input.featureId,feedbackId:input.feedbackId,expectedRevision:input.expectedRevision,reviewedDigest:input.reviewedDigest,actor});
  const initial=await read(db,input);const previous=replay(initial,input.idempotencyKey,requestDigest);if(previous)return receipt(previous);
  const state=expectHead(initial,input);if(state.head&&!['RESPONSE','REVISION_REQUESTED'].includes(state.head.type))throw new DomainError('Respond or request revision before another analysis.');
  const context=await feedbackContext(input.productId,input.featureId);rejectOperatorSecret({context,feedback:initial.originalText,events:initial.events});
- const conversation={originalFeedback:initial.originalText,context,history:initial.events.map(e=>({revision:e.revision,type:e.type,payload:e.payload}))};
+ const requirementIds=context.requirements.map(r=>r.id),schema=analysisSchemaFor(requirementIds);
+ const conversation={originalFeedback:initial.originalText,context,allowedRequirementIds:requirementIds,history:initial.events.map(e=>({revision:e.revision,type:e.type,payload:e.payload}))};
  if(canonicalJson(conversation).length>200000)throw new DomainError('Conversation exceeds the analysis limit. Start a scoped follow-up.');
  await prepareAI();if(!isAIConfigured())throw new DomainError('AI is not configured. Original feedback remains saved.');
- const provider=await getAIProvider();const generated=await provider.generate({systemPrompt:FEEDBACK_SYSTEM_PROMPT,messages:[{role:'user',content:canonicalJson(conversation)}],responseSchema:analysisSchema,schemaName:'feature_feedback_analysis',purpose:'feature-feedback'});
- const parsed=analysisSchema.safeParse(generated.data);if(!parsed.success)throw new DomainError('AI analysis did not match the feedback proposal schema.');
- const validIds=new Set(context.requirements.map(r=>r.id));if(parsed.data.proposal?.affectedRequirementIds.some(id=>!validIds.has(id)))throw new DomainError('AI proposal referenced requirements outside this feature.');
+ const provider=await getAIProvider();const generated=await provider.generate({systemPrompt:FEEDBACK_SYSTEM_PROMPT,messages:[{role:'user',content:canonicalJson(conversation)}],responseSchema:schema,schemaName:'feature_feedback_analysis',purpose:'feature-feedback'});
+ const parsed=schema.safeParse(generated.data);if(!parsed.success)throw new DomainError('AI analysis did not match the feedback proposal schema.');
+ const validIds=new Set(requirementIds);if(parsed.data.proposal?.affectedRequirementIds.some(id=>!validIds.has(id)))throw new DomainError('AI proposal referenced requirements outside this feature.');
  return locked(input.feedbackId,async tx=>{const thread=await read(tx,input),existing=replay(thread,input.idempotencyKey,requestDigest);if(existing)return receipt(existing);expectHead(thread,input);const current=await feedbackContext(input.productId,input.featureId,tx);if(contextDigest(current)!==contextDigest(context))throw new DomainError('Feature context changed during analysis. Retry against the current version.','CONFLICT');return append(tx,input,state.revision+1,'AI_ANALYSIS',{analysis:parsed.data,provider:generated.provider??'configured',model:generated.model,usage:generated.usage,requestedBy:actor},context,input.idempotencyKey,requestDigest,input.credential,true)});
 }
 export async function decideFeedback(input:Request&{decision:'CONFIRM'|'REVISE'|'REJECT'|'CANCEL'|'RESPOND';text?:string}){
- const actor=confirmLocalOperator(input.credential);key(input.idempotencyKey);if(!['CONFIRM','REVISE','REJECT','CANCEL','RESPOND'].includes(input.decision))throw new DomainError('Unknown feedback decision.');
+ const actor=protectedDecisions.has(input.decision)?protectedOperator(input.credential):participant;key(input.idempotencyKey);if(!['CONFIRM','REVISE','REJECT','CANCEL','RESPOND'].includes(input.decision))throw new DomainError('Unknown feedback decision.');
  const note=['RESPOND','REVISE'].includes(input.decision)?text(input.text??''):input.text===undefined?'':text(input.text);const requestDigest=hash({operation:input.decision,productId:input.productId,featureId:input.featureId,feedbackId:input.feedbackId,expectedRevision:input.expectedRevision,reviewedDigest:input.reviewedDigest,text:note,actor});
  return locked(input.feedbackId,async tx=>{const thread=await read(tx,input),previous=replay(thread,input.idempotencyKey,requestDigest);if(previous)return receipt(previous);const {head,revision}=expectHead(thread,input);const analysis=head?.type==='AI_ANALYSIS'?(head.payload as {analysis:FeedbackAnalysis}).analysis:null;
   if(input.decision==='CONFIRM'&&analysis?.status!=='PROPOSAL')throw new DomainError('Only a current actionable proposal can be confirmed.');
