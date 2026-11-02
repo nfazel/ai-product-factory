@@ -32,6 +32,7 @@ import { sanitizeFailureDetail, type VerificationFailureStage } from "@/modules/
 import { initialNfrEvidenceNote } from "@/modules/verification/nfr-evidence";
 import { buildVerificationContract } from "@/modules/verification/contract";
 import { verificationEntryBlockers } from "@/modules/verification/gates";
+import { blockersOrUnavailable } from "@/modules/verification/authority-status";
 import { attemptPolicy, attemptStateFor, type AttemptKind } from "@/modules/verification/attempt-policy";
 import { executeVerificationTool } from "@/modules/verification/tools";
 import {
@@ -149,7 +150,7 @@ async function assertAttemptAllowed(productId: string, taskId: string, kind: Att
     progress: state.progress,
     humanApproved: state.humanApproved,
     openAttempt: false,
-    entryBlockers: await verificationEntryBlockers(productId, taskId),
+    entryBlockers: await blockersOrUnavailable(() => verificationEntryBlockers(productId, taskId)),
   });
   if (!decision.allowed) throw new DomainError(decision.reason);
 }
@@ -712,7 +713,7 @@ export async function getProveView(productId: string) {
       id: task.id,
       title: task.title,
       status: task.status,
-      blockers: await verificationEntryBlockers(productId, task.id),
+      blockers: await blockersOrUnavailable(() => verificationEntryBlockers(productId, task.id)),
       // The approved criteria are the source of truth for the coverage report. They are read, never changed here.
       criteria: (task.workItem?.acceptanceCriteria ?? []).map((item) => ({ id: item.id, description: item.description })),
       trace: traceFor(task),
