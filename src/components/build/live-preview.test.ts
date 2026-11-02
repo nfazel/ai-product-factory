@@ -3,7 +3,7 @@ vi.mock('@/server/actions/preview',()=>({previewAction:vi.fn()}));
 vi.mock('@/server/actions/feature-feedback',()=>({featureFeedbackAction:vi.fn()}));
 vi.mock('@/server/actions/development-scope',()=>({developmentScopeAction:vi.fn()}));
 vi.mock('@/server/actions/rework',()=>({reworkAction:vi.fn()}));
-import {LivePreviewPanel,PreviewFrame,PreviewWorkbench} from './live-preview';
+import {LivePreviewPanel,PreviewFrame,PreviewPlatformNote,PreviewWorkbench} from './live-preview';
 import type {PreviewView} from '@/modules/preview/helpers';
 const running:PreviewView={state:'RUNNING',url:'http://127.0.0.1:4401',port:4401,commit:'78a33afbf213f57f30f94818e6433c4ce414dc49',commitSubject:'Complete Task 4',branch:'main',startedAt:'2026-11-02T10:00:00Z',pages:['/','/signup','/profile/setup']};
 const frame=(size:'phone'|'tablet'|'desktop',view=running)=>renderToStaticMarkup(createElement(PreviewFrame,{preview:view,size}));
@@ -27,3 +27,9 @@ describe('feedback beside the running app',()=>{
  it('says so when there is nothing to comment on',()=>{const html=bench({features:[]});expect(html).toContain('no features to give feedback on');expect(html).not.toContain('Give feedback')});
  it('falls back to the first feature if the selected one is unknown',()=>expect(bench({feedbackOpen:true,featureId:'missing'})).toContain('aria-label="Feedback for Card Discovery Feed"'));
 });
+describe('preview and the chosen platform',()=>{
+ const note=(platforms:Parameters<typeof PreviewPlatformNote>[0]['platforms'])=>renderToStaticMarkup(createElement(PreviewPlatformNote,{platforms}));
+ it('says nothing for a website, a mix including a website, or no choice',()=>{expect(note([])).toBe('');expect(note(['WEBSITE'])).toBe('');expect(note(['WEBSITE','IOS'])).toBe('')});
+ it('says up front that a native-only product cannot be previewed',()=>{const html=note(['ANDROID','IOS']);expect(html).toContain('planned as Android app and iOS app');expect(html).toContain('websites only')});
+});
+

@@ -28,6 +28,7 @@ import {
 } from "@/modules/discovery/repository";
 import { formatIntake, REVIEW_REQUEST } from "@/modules/discovery/prompt";
 import { countSufficientClarity } from "@/modules/discovery/merge";
+import { platformSummary, withTargetPlatforms, type PlatformId } from "@/modules/discovery/platform";
 import { findProductRow } from "@/modules/product/repository";
 import { updateProduct } from "@/modules/product/service";
 import { DomainError } from "@/modules/shared/errors";
@@ -177,6 +178,23 @@ export async function editProductBrief(input: {
     productId: input.productId,
     type: "DISCOVERY_BRIEF_EDITED",
     description: `Edited ${BRIEF_SECTION_LABEL[input.section]} on product brief v${saved.version}.`,
+  });
+  return saved;
+}
+
+/** Records where people will use the product. It is a brief edit, so an approved brief becomes a new draft to approve again. */
+export async function setTargetPlatforms(input: { productId: string; platforms: PlatformId[] }) {
+  const brief = await findCurrentBrief(input.productId);
+  if (!brief) throw new DomainError("Start product discovery before choosing where people will use the product.");
+  const saved = await saveBriefEdit({
+    productId: input.productId,
+    section: "constraints",
+    value: withTargetPlatforms(brief.constraints, input.platforms).join("\n"),
+  });
+  await recordActivity({
+    productId: input.productId,
+    type: "DISCOVERY_BRIEF_EDITED",
+    description: `Set target platforms to ${platformSummary(input.platforms)} on product brief v${saved.version}.`,
   });
   return saved;
 }

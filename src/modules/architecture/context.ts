@@ -6,6 +6,7 @@ import path from "node:path";
 import { db } from "@/lib/db";
 import { developmentContextInstruction } from "@/modules/architecture/development-context";
 import { findCurrentBrief } from "@/modules/discovery/repository";
+import { platformLabels, readTargetPlatforms } from "@/modules/discovery/platform";
 import { DomainError } from "@/modules/shared/errors";
 
 function listField(value: unknown) {
@@ -102,6 +103,7 @@ export async function loadArchitectureContext(productId: string) {
           inScope: listField(brief.inScope),
           outOfScope: listField(brief.outOfScope),
           constraints: listField(brief.constraints),
+          targetPlatforms: platformLabels(readTargetPlatforms(brief.constraints)),
           risks: listField(brief.risks),
           openQuestions: listField(brief.openQuestions),
         }

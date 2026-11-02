@@ -4,6 +4,7 @@ import {previewAction,type PreviewActionResult} from '@/server/actions/preview';
 import type {PreviewView} from '@/modules/preview/helpers';
 import {routeLabel} from '@/modules/preview/helpers';
 import {FeatureFeedbackPanel} from './feature-feedback';
+import {platformSummary,previewSupported,type PlatformId} from '@/modules/discovery/platform';
 
 const sizes={phone:{label:'Phone',width:390},tablet:{label:'Tablet',width:768},desktop:{label:'Desktop',width:null}} as const;
 type Size=keyof typeof sizes;
@@ -35,7 +36,12 @@ export function PreviewWorkbench({productId,preview,size,path,onGo,features,feed
  </div>;
 }
 
-export function LivePreviewPanel({productId,features=[]}:{productId:string;features?:PreviewFeature[]}){
+/** Said up front, so nobody expects a preview of a native app. */
+export function PreviewPlatformNote({platforms}:{platforms:PlatformId[]}){
+ return previewSupported(platforms)?null:<p role="note" className="rounded border p-2 text-sm">This product is planned as {platformSummary(platforms)}. The live preview runs websites only, so it may not show this product properly.</p>;
+}
+
+export function LivePreviewPanel({productId,features=[],platforms=[]}:{productId:string;features?:PreviewFeature[];platforms?:PlatformId[]}){
  const [preview,setPreview]=useState<PreviewView|null>(null),[loaded,setLoaded]=useState(false),[result,setResult]=useState<PreviewActionResult>({status:'success'}),[size,setSize]=useState<Size>('phone'),[path,setPath]=useState('/'),[feedbackOpen,setFeedbackOpen]=useState(false),[featureId,setFeatureId]=useState(features[0]?.id??''),[pending,start]=useTransition();
  const call=(operation:string)=>{const value=new FormData();value.set('productId',productId);value.set('operation',operation);return previewAction(value)};
  useEffect(()=>{let active=true;call('STATUS').then(next=>{if(!active)return;if(next.preview)setPreview(next.preview);else setResult(next);setLoaded(true)}).catch(()=>{if(active){setResult({status:'error',message:'Preview status could not load. Reload to retry.'});setLoaded(true)}});return()=>{active=false}},
@@ -46,6 +52,7 @@ export function LivePreviewPanel({productId,features=[]}:{productId:string;featu
  return <section aria-label="Live preview" className="space-y-3 rounded-xl border p-4">
   <h2 className="text-lg font-semibold">Live preview</h2>
   <p>Use the real app as it stands now. It runs as a private, throwaway copy on this computer, so anything you create in it is discarded when you stop it.</p>
+  <PreviewPlatformNote platforms={platforms}/>
   {!loaded&&<p role="status">Checking the preview…</p>}
   {pending&&<p role="status" aria-live="polite">Working… starting the preview can take up to a minute.</p>}
   {result.message&&<p role={result.status==='error'?'alert':'status'}>{result.message}</p>}

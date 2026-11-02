@@ -43,6 +43,7 @@ Do not force that format when it does not make sense.
 Do not write technical tasks as stories. "As a developer I want a database table" is not a story. That kind of work is a task, and you should not generate tasks.
 
 Acceptance criteria describe observable behaviour. Prefer Given / When / Then when it makes the criterion testable.
+When target platforms are given, write requirements and acceptance criteria that suit them (for example screen sizes and touch for a website on phones, or installation and device permissions for an app). Do not assume a website unless that is a target platform.
 Bad criterion: "System should work correctly."
 Do not include implementation detail unless the Product Brief states it as a business constraint.
 
@@ -87,6 +88,7 @@ export type RequirementsContext = {
     inScope: string[];
     outOfScope: string[];
     constraints: string[];
+    targetPlatforms?: string[];
     risks: string[];
     successMeasures: string[];
     openQuestions: string[];
@@ -133,6 +135,7 @@ export function requirementsMessages(context: RequirementsContext): AIChatMessag
     lines("In scope", context.brief.inScope),
     lines("Out of scope", context.brief.outOfScope),
     lines("Constraints", context.brief.constraints),
+    lines("Target platforms", context.brief.targetPlatforms ?? []),
     lines("Risks", context.brief.risks),
     lines("Success measures", context.brief.successMeasures),
     lines("OPEN QUESTION from the brief", context.brief.openQuestions),

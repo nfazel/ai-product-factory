@@ -11,6 +11,8 @@ import { AINotConfiguredNotice } from "@/components/ai/not-configured";
 import { IntakeExplore } from "@/components/intake/intake-explore";
 import { ClarificationHold } from "@/components/clarification/keep-version";
 import { BriefPanel } from "@/components/discovery/brief-panel";
+import { TargetPlatformPanel } from "@/components/discovery/target-platform";
+import { readTargetPlatforms } from "@/modules/discovery/platform";
 import { StartDiscoveryForm } from "@/components/discovery/start-form";
 import { PageSkeleton } from "@/components/feedback/states";
 import {
@@ -234,11 +236,18 @@ async function Discovery({
               approvals={workspace.approvals}
             />
           </section>
-          <BriefPanel
-            productId={product.id}
-            brief={brief}
-            editable={!workspace.viewingHistorical}
-          />
+          <div className="space-y-6">
+            <TargetPlatformPanel
+              productId={product.id}
+              chosen={readTargetPlatforms(brief.constraints)}
+              editable={!workspace.viewingHistorical}
+            />
+            <BriefPanel
+              productId={product.id}
+              brief={brief}
+              editable={!workspace.viewingHistorical}
+            />
+          </div>
         </div>
       )}
     </div>

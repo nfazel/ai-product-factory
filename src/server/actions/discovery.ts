@@ -9,8 +9,10 @@ import {
   requestDiscoveryReview,
   retryDiscovery,
   setAssumptionStatus,
+  setTargetPlatforms,
   startDiscovery,
 } from "@/modules/discovery/service";
+import { PLATFORMS, platformSummary, type PlatformId } from "@/modules/discovery/platform";
 import {
   assumptionStatusSchema,
   discoveryMessageSchema,
@@ -149,6 +151,28 @@ export async function moveToDefineAction(
     await moveDiscoveryToDefine(parsed.data.productId);
     refreshWorkspace(parsed.data.productId);
     return { status: "success", message: "Product moved to Define." };
+  } catch (error) {
+    return actionFailure(error);
+  }
+}
+
+export async function targetPlatformAction(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const productId = formData.get("productId");
+  if (typeof productId !== "string" || !productId.trim()) return { status: "error", message: "Choose a product first." };
+  const known = new Set<string>(PLATFORMS.map((item) => item.id));
+  const chosen = formData.getAll("platform").filter((value): value is string => typeof value === "string");
+  if (chosen.some((value) => !known.has(value))) return { status: "error", message: "Choose from the platforms listed." };
+  const platforms = PLATFORMS.map((item) => item.id).filter((id): id is PlatformId => chosen.includes(id));
+  try {
+    await setTargetPlatforms({ productId, platforms });
+    refreshWorkspace(productId);
+    return {
+      status: "success",
+      message: `Saved: ${platformSummary(platforms)}. The brief is now a draft to review and approve again.`,
+    };
   } catch (error) {
     return actionFailure(error);
   }

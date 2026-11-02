@@ -1,3 +1,4 @@
+import { platformLabels, readTargetPlatforms } from "@/modules/discovery/platform";
 import "server-only";
 
 import {assertDefinitionCandidateRequest,runDefinitionCandidate} from "./candidate";
@@ -87,6 +88,7 @@ export const requirementsRunner: AgentRunner = {
           inScope: texts(brief.inScope),
           outOfScope: texts(brief.outOfScope),
           constraints: texts(brief.constraints),
+          targetPlatforms: platformLabels(readTargetPlatforms(brief.constraints)),
           risks: texts(brief.risks),
           successMeasures: texts(brief.successMeasures),
           openQuestions: texts(brief.openQuestions),

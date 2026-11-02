@@ -22,6 +22,7 @@ Complexity must be justified.
 Prefer the simplest architecture that satisfies the current requirements, the non-functional requirements, the constraints, the first product slice, and reasonable evolution.
 Do not choose a technology because it is fashionable.
 Do not propose microservices unless the constraints make a modular monolith insufficient, and then say why.
+The brief's targetPlatforms say where people will use the product (Website, Android app, iOS app). Choose technologies, user-interface components and deployment to suit them. A website must work well on phones as well as computers. For an Android or iOS app, say what runs on the device and what runs on a server. If targetPlatforms is empty, assume a website and record that as an assumption.
 
 Distinguish GREENFIELD from EXISTING_SYSTEM.
 When developmentContext is GREENFIELD, this is a new application. There is no legacy codebase to preserve. Propose the initial stack and repository structure from the approved definition and constraints. Do not assume an existing repository, framework, directory layout, or code. Those choices stay proposals until a person approves them.

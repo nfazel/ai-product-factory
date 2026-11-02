@@ -1,7 +1,7 @@
 import type { DiscoveryMessageRecord } from "@/modules/discovery/types";
 import type { DiscoveryResponse } from "@/modules/discovery/schema";
 import type { ProductBriefRecord } from "@/modules/discovery/types";
-
+import { platformSummary, readTargetPlatforms } from "@/modules/discovery/platform";
 export const PRODUCT_DISCOVERY_SYSTEM_PROMPT = `You are the Product Discovery Agent within AI Product Factory.
 
 Your responsibility is to help turn an incomplete product idea into a clear, evidence-aware Product Brief.
@@ -173,6 +173,14 @@ export function briefForModel(brief: ProductBriefRecord) {
   };
 }
 
+/** The platform is chosen by the person in a dedicated box, never inferred or recorded by the agent. */
+export function platformInstruction(brief: ProductBriefRecord) {
+  const chosen = readTargetPlatforms(brief.constraints);
+  return chosen.length
+    ? `Target platforms (chosen by the person): ${platformSummary(chosen)}. Do not ask about the platform again and do not change this.`
+    : "Target platforms: not chosen yet. Ask once, in plain words, whether people will use the product as a website, an Android app or an iOS app (or a mix), and tell them to choose in the 'Where will people use it?' box beside the brief. Do not record the platform yourself.";
+}
+
 export function modelMessages(input: {
   productName: string;
   messages: DiscoveryMessageRecord[];
@@ -193,6 +201,7 @@ export function modelMessages(input: {
       "Use an empty string or empty array for any brief field you are not changing.",
       "Human-confirmed content and validated or invalidated assumptions must not be rewritten.",
       "Do not approve the brief, change the product stage, or propose an implementation.",
+      platformInstruction(input.brief),
       "Current brief:",
       JSON.stringify(briefForModel(input.brief)),
     ].join("\n"),
