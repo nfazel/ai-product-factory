@@ -1,0 +1,21 @@
+import {describe,it,expect} from 'vitest';
+import {PREVIEW_PORT_RANGE,looksLikePreviewProcess,pickPort,previewDatabaseId,previewEnv,routeLabel,routesFromPageFiles,safeProductId,tail,viewOf,type PreviewRecord} from './helpers';
+const record:PreviewRecord={productId:'prod-12345678',pid:4242,port:4401,commit:'a'.repeat(40),branch:'main',databaseName:'vf_x',startedAt:'2026-11-02T10:00:00Z'};
+describe('preview helpers',()=>{
+ it('derives a stable, verification-safe database id per product',()=>{const id=previewDatabaseId('prod-12345678');expect(id).toBe(previewDatabaseId('prod-12345678'));expect(id).toMatch(/^[a-f0-9]{32}$/);expect(`vf_${id.slice(0,24)}`).toMatch(/^vf_[a-f0-9]{24}$/);expect(previewDatabaseId('other-product-1')).not.toBe(id)});
+ it.each(['../etc','a/b','short','white space here','x'.repeat(65),''])('refuses unsafe product id %j',value=>expect(()=>safeProductId(value)).toThrow());
+ it('accepts ids the app generates',()=>{expect(safeProductId('cmv0tsipq0003aappiumgzxgn')).toBe('cmv0tsipq0003aappiumgzxgn');expect(safeProductId('532f141b-5dde-417d-8147-935a098371e5')).toBeTruthy()});
+ it('gives the preview app only what it needs, never builder or AI credentials',()=>{const env=previewEnv({PATH:'/bin',HOME:'/h',DATABASE_URL:'postgres://builder',EXTERNAL_REVIEW_APPROVAL_KEY:'secret',GOOGLE_GEMINI_API_KEY:'k',OPENAI_API_KEY:'k',VERIFICATION_DATABASE_ADMIN_URL:'postgres://admin'},{databaseUrl:'postgres://scratch',sessionSecret:'s'.repeat(64),port:4401});expect(env.DATABASE_URL).toBe('postgres://scratch');expect(env.PORT).toBe('4401');expect(env.PATH).toBe('/bin');expect(Object.keys(env).filter(k=>/KEY|SECRET|ADMIN/.test(k))).toEqual(['SESSION_SECRET']);expect(JSON.stringify(env)).not.toContain('builder');expect(JSON.stringify(env)).not.toContain('postgres://admin')});
+ it('picks the first free port in range and skips taken ones',async()=>{expect(await pickPort(async()=>true)).toBe(PREVIEW_PORT_RANGE.first);expect(await pickPort(async port=>port!==4400)).toBe(4401);expect(await pickPort(async()=>true,[4400,4401])).toBe(4402)});
+ it('fails clearly when no port is free',async()=>{await expect(pickPort(async()=>false)).rejects.toThrow('No free preview port')});
+ it('reports stopped unless a record exists and its process is alive',()=>{expect(viewOf(null,false).state).toBe('STOPPED');expect(viewOf(record,false).state).toBe('STOPPED');expect(viewOf(record,false).url).toBeNull()});
+ it('reports running with a localhost-only address and the exact commit',()=>{const view=viewOf(record,true,'Add feed');expect(view).toMatchObject({state:'RUNNING',url:'http://127.0.0.1:4401',commit:'a'.repeat(40),commitSubject:'Add feed'})});
+ it('only treats a process as ours when it is Next.js on the recorded port',()=>{expect(looksLikePreviewProcess('node /x/node_modules/next/dist/bin/next dev -H 127.0.0.1 -p 4401',4401)).toBe(true);expect(looksLikePreviewProcess('node /x/next dev -p 4402',4401)).toBe(false);expect(looksLikePreviewProcess('vim notes.txt -p 4401',4401)).toBe(false)});
+ it('keeps only the last lines of a log, bounded in size',()=>{expect(tail('a\nb\nc\nd',2)).toBe('c\nd');expect(tail('x'.repeat(5000)+'\nend').length).toBeLessThanOrEqual(1500)});
+ it('lists static page routes from Next.js page files, home first',()=>{expect(routesFromPageFiles(['src/app/signup/page.tsx','src/app/page.tsx','src/app/login/page.tsx','src/app/profile/setup/page.tsx','src/app/discovery/page.tsx'])).toEqual(['/','/discovery','/login','/profile/setup','/signup'])});
+ it('works for the app/ layout and ignores groups, api, dynamic, parallel and private routes',()=>{expect(routesFromPageFiles(['app/(auth)/login/page.tsx','app/api/health/page.tsx','app/users/[id]/page.tsx','app/@modal/x/page.tsx','app/_private/page.tsx','app/layout.tsx','app/about/route.ts','lib/page.tsx'])).toEqual(['/login'])});
+ it('bounds the number of links',()=>{expect(routesFromPageFiles(Array.from({length:30},(_,i)=>`app/p${i}/page.tsx`),5)).toHaveLength(5)});
+ it('labels routes in plain words',()=>{expect(routeLabel('/')).toBe('Home');expect(routeLabel('/profile/setup')).toBe('Profile setup');expect(routeLabel('/sign-up')).toBe('Sign up')});
+ it('carries the page list only while running',()=>{expect(viewOf(record,true,null,['/','/signup']).pages).toEqual(['/','/signup']);expect(viewOf(record,false,null,['/']).pages).toEqual([])});
+});
+
