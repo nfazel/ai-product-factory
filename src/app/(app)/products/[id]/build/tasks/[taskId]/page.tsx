@@ -42,5 +42,8 @@ async function BuildTask({ params }: { params: Promise<{ id: string; taskId: str
         }
       : null,
   );
-  return <TaskWorkspaceView productId={id} task={task} summary={summary} />;
+  const journeyVerification = verification
+    ? { status: verification.status, overallVerdict: verification.overallVerdict, approved: verification.approvals.some((item) => !item.stale) }
+    : null;
+  return <TaskWorkspaceView productId={id} task={task} summary={summary} verification={journeyVerification} />;
 }

@@ -18,6 +18,8 @@ import {
   TaskExecutionPlan,
 } from "@/components/build/coding-panel";
 import { StatusPill } from "@/components/build/status-pill";
+import { TaskJourneyCard } from "@/components/build/task-journey";
+import { taskJourney, type JourneyVerification } from "@/modules/build/task-journey";
 import { TaskWorkDetails } from "@/components/build/task-work-details";
 import { CODING_EXECUTION_LABEL, CODING_RISK_LABEL, type CodingExecutionModeName, type CodingRiskLevelName } from "@/domain/constants";
 import type { BuildTaskRow, CodingTask } from "@/modules/build/task-status";
@@ -26,12 +28,15 @@ export function TaskWorkspaceView({
   productId,
   task,
   summary,
+  verification = null,
 }: {
   productId: string;
   task: CodingTask;
   summary: BuildTaskRow;
+  verification?: JourneyVerification;
 }) {
   const workspace = task.workspace;
+  const journey = taskJourney(task, summary, verification);
   const defaultTab =
     summary.primaryAction?.kind === "open-plan"
       ? "plan"
@@ -66,7 +71,15 @@ export function TaskWorkspaceView({
           />
         </div>
 
-        <dl className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      </section>
+
+      <TaskJourneyCard journey={journey} blockers={summary.blockers}>
+        <PrimaryActionSlot productId={productId} task={task} summary={summary} />
+      </TaskJourneyCard>
+
+      <details className="rounded-2xl border bg-card p-4 sm:p-5">
+        <summary className="cursor-pointer text-sm font-semibold">More status and options</summary>
+        <dl className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <StatusFact label="Overall task" value={summary.taskStatusLabel} />
           <StatusFact label="Latest coding outcome" value={summary.latestCodingOutcome} />
           <StatusFact label="Required validation" value={summary.validationStatus} tone={<StatusPill label={summary.validationStatus} tone={summary.validationTone} />} />
@@ -105,14 +118,7 @@ export function TaskWorkspaceView({
         </div>
         ) : null}
 
-        <div className="mt-5 rounded-xl border bg-stone-50 px-4 py-3">
-          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Recommended next action</p>
-          <p className="mt-1 text-sm font-medium text-stone-900">{summary.nextAction}</p>
-          <div className="mt-3">
-            <PrimaryActionSlot productId={productId} task={task} summary={summary} />
-          </div>
-        </div>
-      </section>
+      </details>
 
       <TaskWorkDetails
         defaultTab={defaultTab}
