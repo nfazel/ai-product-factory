@@ -8,6 +8,7 @@ import { createProduct, getProduct, removeProduct, restoreProduct, updateProduct
 import { stopPreview } from "@/modules/preview/service";
 import {
   createProductSchema,
+  removeProductSchema,
   updateProductSchema,
 } from "@/modules/product/schema";
 import { z } from "zod";
@@ -80,18 +81,13 @@ export async function moveStageAction(
   }
 }
 
-const removeProductSchema = z.object({
-  productId: z.string().trim().min(1),
-  confirm: z.literal("yes", { error: "Tick the box to confirm you want to remove this product." }),
-});
-
 /** Hides the product everywhere and keeps its history. Reversible with restoreProductAction. */
 export async function removeProductAction(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
   const parsed = removeProductSchema.safeParse(formValues(formData));
-  if (!parsed.success) return invalidState(parsed.error.issues);
+  if (!parsed.success) return invalidState(parsed.error.issues, parsed.error.issues[0]?.message);
   try {
     await removeProduct(parsed.data.productId);
     // A running preview belongs to a product nobody is using now; failing to stop it must not undo the removal.

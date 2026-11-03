@@ -43,3 +43,9 @@ export const updateProductSchema = z.object({
   status: z.enum(PRODUCT_STATUSES),
   currentStage: z.enum(PRODUCT_STAGES),
 });
+
+/** An unticked checkbox sends no field at all, so a missing confirmation must fail, not pass. */
+export const removeProductSchema = z.object({
+  productId: z.string().trim().min(1),
+  confirm: z.string().default("").refine((value) => value === "yes", "Tick the box to confirm you want to remove this product."),
+});
