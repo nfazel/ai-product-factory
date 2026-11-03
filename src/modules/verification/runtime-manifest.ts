@@ -39,7 +39,34 @@ export type RuntimeManifest = {
   criteria: { id: string; description: string }[];
   contractHash: string;
   runtime: { digest: string; files: Record<string, string> };
+  /** Commands the reviewer chose to run against a managed app and throwaway database. Part of the signed digest; absent when none. */
+  reviewerRuntime?: { command: string; runtime: RuntimeDeclaration }[];
 };
+/** The standard declaration a reviewer grants: the environment names are fixed, never typed by the browser. */
+export const REVIEWER_RUNTIME: RuntimeDeclaration = { kind: 'MANAGED_HTTP_DATABASE', baseUrlEnv: 'TEST_BASE_URL', databaseUrlEnv: 'TEST_DATABASE_URL' };
+/** Repository test commands only (`npm run test…`), already allowed by verification policy. Throws on anything else. */
+export function reviewerRuntimeFor(commands: string[]): NonNullable<RuntimeManifest['reviewerRuntime']> {
+  const seen = new Set<string>();
+  return commands.map(raw => {
+    const approved = approveVerificationCommand(raw);
+    if (!approved.ok || approved.command !== raw || !/^npm run test(?::[A-Za-z0-9._-]+)?$/.test(raw) || seen.has(raw)) throw new Error('Only distinct repository test commands can be run against a managed app and database.');
+    seen.add(raw);
+    return { command: raw, runtime: { ...REVIEWER_RUNTIME } };
+  }).sort((a, b) => a.command.localeCompare(b.command));
+}
+export function withReviewerRuntime(manifest: RuntimeManifest, commands: string[]): RuntimeManifest {
+  const { reviewerRuntime: _drop, ...base } = manifest; void _drop;
+  return commands.length ? { ...base, reviewerRuntime: reviewerRuntimeFor(commands) } : base;
+}
+/** Everything that runs against a managed environment: the plan's own declarations plus the reviewer's. */
+export function manifestRuntimes(manifest: RuntimeManifest): Map<string, RuntimeDeclaration> {
+  const result = runtimeCommands(manifest.plan.validationPlan);
+  for (const entry of reviewerRuntimeFor((manifest.reviewerRuntime ?? []).map(item => item.command))) {
+    if (result.has(entry.command)) throw new Error('Duplicate approved runtime command.');
+    result.set(entry.command, parseRuntimeDeclaration(entry.runtime));
+  }
+  return result;
+}
 export const runtimeManifestDigest = (manifest: RuntimeManifest) => contentHash(canonicalJson(manifest));
 export type RuntimeAttestation = { kind: 'VERIFICATION_RUNTIME_REVIEW'; version: 1; approvalId: string; digest: string; manifest: RuntimeManifest; actor: { id: string; name: string }; approvedAt: string; reason: string };
 const DOMAIN = 'AI_PRODUCT_FACTORY_VERIFICATION_RUNTIME_REVIEW_V1\0';

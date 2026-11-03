@@ -22,6 +22,20 @@ async function setup(){
 }
 async function approve(f:Awaited<ReturnType<typeof setup>>){const manifest=await prepareRuntimeReview(f.product.id,f.workspace.id);await approveRuntimeReview({productId:f.product.id,workspaceId:f.workspace.id,digest:runtimeManifestDigest(manifest),credential:key,actor:{id:'test-human',name:'Test human'},reason:'Explicitly reviewed this synthetic implementation, runtime and behaviour.'});return requireRuntimeReview(f.product.id,f.workspace.id)}
 describe('runtime review lifecycle with real Git and framework test records',()=>{
+ it('records the reviewer\'s choice to run a test against the app and database inside the signed review',async()=>{
+  const f=await setup(),base=await prepareRuntimeReview(f.product.id,f.workspace.id);
+  await expect(approveRuntimeReview({productId:f.product.id,workspaceId:f.workspace.id,digest:runtimeManifestDigest(base),credential:key,actor:{id:'h',name:'Test human'},reason:'Explicitly reviewed this synthetic implementation.',runAgainstApp:['npm run build']})).rejects.toThrow(/repository test commands/);
+  expect(await db.approval.count({where:{productId:f.product.id,approvalType:'VERIFICATION_RUNTIME'}})).toBe(0);
+  await approveRuntimeReview({productId:f.product.id,workspaceId:f.workspace.id,digest:runtimeManifestDigest(base),credential:key,actor:{id:'h',name:'Test human'},reason:'Explicitly reviewed this synthetic implementation.',runAgainstApp:['npm run test:integration']});
+  const bound=await requireRuntimeReview(f.product.id,f.workspace.id);
+  expect(bound.manifest.reviewerRuntime).toEqual([{command:'npm run test:integration',runtime:{kind:'MANAGED_HTTP_DATABASE',baseUrlEnv:'TEST_BASE_URL',databaseUrlEnv:'TEST_DATABASE_URL'}}]);
+  expect(bound.digest).not.toBe(runtimeManifestDigest(base));
+  // Tampering with the stored declaration breaks the signature, so the review grants nothing.
+  const record=await db.codingEvidence.findUniqueOrThrow({where:{id:bound.evidenceId}}),stored=JSON.parse(record.output);
+  stored.attestation.manifest.reviewerRuntime.push({command:'npm run test:other',runtime:stored.attestation.manifest.reviewerRuntime[0].runtime});
+  await db.codingEvidence.update({where:{id:record.id},data:{output:JSON.stringify(stored)}});
+  await expect(requireRuntimeReview(f.product.id,f.workspace.id)).rejects.toThrow(/review/);
+ });
  it('uses the signed binding in the normal verification entry gate',async()=>{const f=await setup();vi.stubEnv('PRODUCT_REPOSITORY_ROOT',f.root);const before=await verificationEntryBlockers(f.product.id,f.task.id);expect(before.some(reason=>reason.includes('runtime/behaviour'))).toBe(true);await approve(f);expect(await verificationEntryBlockers(f.product.id,f.task.id)).toEqual([])});
  it('requires explicit credential/digest approval and preserves preceding records',async()=>{const f=await setup();const before=await db.approval.count({where:{productId:f.product.id}});await expect(requireRuntimeReview(f.product.id,f.workspace.id)).rejects.toThrow(/review/);await expect(approveRuntimeReview({productId:f.product.id,workspaceId:f.workspace.id,digest:'wrong',credential:key,actor:{id:'h',name:'Human'},reason:`Do not persist ${key}`})).rejects.toThrow(/Private operator/);await expect(approveRuntimeReview({productId:f.product.id,workspaceId:f.workspace.id,digest:'wrong',credential:key,actor:{id:'h',name:'Human'},reason:'Review this exact approved scope.'})).rejects.toThrow(/manifest changed/);const bound=await approve(f);expect(bound.manifest.taskId).toBe(f.task.id);expect(await db.approval.count({where:{productId:f.product.id}})).toBe(before+1);expect((await db.approval.findUniqueOrThrow({where:{id:f.code.approvalId}})).status).toBe('APPROVED')});
  it.each(['behaviour','plan','criterion','source','code-revocation','runtime-revocation'] as const)('invalidates approval after %s changes',async mutation=>{

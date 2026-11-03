@@ -49,6 +49,9 @@ export function RuntimeReviewCard({productId,taskId}:{productId:string;taskId:st
   {result.message&&<p role={result.status==='error'?'alert':'status'}>{result.message}</p>}
   {loaded&&review&&<RuntimeReviewContent review={review}/>}
   {loaded&&review?.state==='NEEDED'&&<form key={review.digest??'review'} onSubmit={approve} className="space-y-3 border-t pt-3">
+   {review.candidates.length>0&&<fieldset className="space-y-1 text-sm"><legend className="font-medium">Run these existing tests against the app and a throwaway database</legend>
+    <p>Tests that call the running app and check the database cannot work without them. Tick the tests that need this. Your choice is recorded in your signed approval and cannot be changed afterwards.</p>
+    {review.candidates.map(command=><label key={command} className="block"><input type="checkbox" name="runAgainstApp" value={command}/> <code>{command}</code></label>)}</fieldset>}
    <label className="block text-sm"><input type="checkbox" name="reviewed" value="yes" required/> I have read what will be run.</label>
    <label className="block text-sm">Why are you comfortable approving this?<textarea name="reason" required minLength={12} maxLength={2000} rows={2} className="mt-1 block w-full rounded border p-2" placeholder="For example: the checks match the approved plan and run only against a throwaway database."/></label>
    <OperatorCredentialField/>

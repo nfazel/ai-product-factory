@@ -22,3 +22,27 @@ describe('runtime and behavioural metadata authority',()=>{
  it('rejects unapproved commands, cross-task criteria and duplicate behaviours',()=>{expect(()=>validateRuntimeMetadata(plan(),[{id:'c'}],[])).toThrow(/outside/);expect(()=>validateRuntimeMetadata(plan(),[{id:'other'}],['npm test'])).toThrow(/outside/);expect(()=>validateRuntimeMetadata(plan(undefined,[behavior,behavior]),[{id:'c'}],['npm test'])).toThrow(/duplicate/)});
  it.each(['{"verificationRuntime":',plan([{command:'npm test',runtime},{command:'npm test',runtime}]),plan([{command:'npm test',runtime:{...runtime,databaseUrlEnv:'DATABASE_URL'}}]),JSON.stringify({verificationRuntime:{commands:[],unsafe:true}})])('rejects malformed or unsafe metadata',value=>{expect(()=>validateRuntimeMetadata(value,[{id:'c'}],['npm test'])).toThrow()});
 });
+
+import { reviewerRuntimeFor, withReviewerRuntime, manifestRuntimes, REVIEWER_RUNTIME } from './runtime-manifest';
+describe('reviewer-chosen runtime declarations', () => {
+  const base = { plan: { validationPlan: 'Required:\nnpm run build' } } as unknown as RuntimeManifest;
+  it('grants the fixed managed app and database declaration to repository test commands only', () => {
+    expect(reviewerRuntimeFor(['npm run test:integration'])).toEqual([{ command: 'npm run test:integration', runtime: REVIEWER_RUNTIME }]);
+    for (const bad of ['npm run build', 'npm run test:integration && rm -rf x', 'node --test tests/a.test.mjs', 'npm run test:', 'npx prisma validate']) expect(() => reviewerRuntimeFor([bad])).toThrow();
+    expect(() => reviewerRuntimeFor(['npm run test:a', 'npm run test:a'])).toThrow();
+  });
+  it('adds nothing to the manifest when none are chosen, so earlier digests are unchanged', () => {
+    expect(withReviewerRuntime(base, [])).toEqual(base);
+    expect('reviewerRuntime' in withReviewerRuntime(base, [])).toBe(false);
+  });
+  it("changes the manifest digest when a command is chosen, and refuses one the plan already declares", () => {
+    const chosen = withReviewerRuntime(base, ['npm run test:integration']);
+    expect(runtimeManifestDigest(chosen)).not.toBe(runtimeManifestDigest(base));
+    expect([...manifestRuntimes(chosen).keys()]).toEqual(['npm run test:integration']);
+    const declared = { plan: { validationPlan: JSON.stringify({ verificationRuntime: { commands: [{ command: 'npm run test:integration', runtime: REVIEWER_RUNTIME }] } }) } } as unknown as RuntimeManifest;
+    expect(() => manifestRuntimes(withReviewerRuntime(declared, ['npm run test:integration']))).toThrow(/Duplicate/);
+  });
+  it('rejects a forged declaration smuggled into a manifest', () => {
+    expect(() => manifestRuntimes({ ...base, reviewerRuntime: [{ command: 'npm run build', runtime: REVIEWER_RUNTIME }] } as RuntimeManifest)).toThrow();
+  });
+});

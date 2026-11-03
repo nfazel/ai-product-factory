@@ -2,7 +2,8 @@ import 'server-only';
 import {db} from '@/lib/db';
 import {DomainError} from '@/modules/shared/errors';
 import {AuthorityUnavailableError} from './authority-status';
-import {prepareRuntimeReview,requireRuntimeReview} from './runtime-review';
+import {prepareRuntimeReview,requireRuntimeReview,reviewableTestCommands} from './runtime-review';
+import {manifestRuntimes} from './runtime-manifest';
 import {runtimeManifestDigest} from './runtime-manifest';
 import {describeRuntimeManifest,type RuntimeReviewSummary} from './runtime-review-describe';
 
@@ -12,8 +13,10 @@ export type RuntimeReviewView={
  digest:string|null;review:RuntimeReviewSummary|null;
  approved:{by:string;at:string}|null;
  containerVerification:boolean;
+ /** Existing test commands the reviewer may choose to run against a throwaway app and database. Empty once approved. */
+ candidates:string[];
 };
-const view=(state:RuntimeReviewState,message:string,extra:Partial<RuntimeReviewView>={}):RuntimeReviewView=>({state,message,digest:null,review:null,approved:null,containerVerification:process.env.APF_CONTAINER_VERIFICATION_READY==='1',...extra});
+const view=(state:RuntimeReviewState,message:string,extra:Partial<RuntimeReviewView>={}):RuntimeReviewView=>({state,message,digest:null,review:null,approved:null,candidates:[],containerVerification:process.env.APF_CONTAINER_VERIFICATION_READY==='1',...extra});
 
 /** The workspace verification uses for a task: always its most recent one, chosen here, never by the browser. */
 export async function runtimeReviewWorkspaceId(productId:string,taskId:string){
@@ -38,10 +41,11 @@ export async function getRuntimeReviewView(productId:string,taskId:string):Promi
  try{
   const binding=await requireRuntimeReview(productId,workspaceId);
   const approval=await db.approval.findUnique({where:{id:binding.approvalId},select:{approvedBy:true,resolvedAt:true}});
-  return view('APPROVED','A person has reviewed and approved exactly what will run.',{digest,review,approved:{by:approval?.approvedBy??'a person',at:approval?.resolvedAt?.toISOString()??''}});
+  return view('APPROVED','A person has reviewed and approved exactly what will run.',{digest,review:describeRuntimeManifest(binding.manifest),approved:{by:approval?.approvedBy??'a person',at:approval?.resolvedAt?.toISOString()??''}});
  }catch(error){
   if(error instanceof AuthorityUnavailableError)return view('UNAVAILABLE','The existing review cannot currently be confirmed.',{digest,review});
-  if(error instanceof DomainError)return view('NEEDED','A person must review and approve exactly what will run before verification can start.',{digest,review});
+  if(error instanceof DomainError){let declared:string[]=[];try{declared=[...manifestRuntimes(manifest).keys()]}catch{/* shown as unavailable when approving */}
+   return view('NEEDED','A person must review and approve exactly what will run before verification can start.',{digest,review,candidates:await reviewableTestCommands(productId,workspaceId,declared)});}
   throw error;
  }
 }

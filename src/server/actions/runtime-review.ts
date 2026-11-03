@@ -31,8 +31,10 @@ export async function runtimeReviewAction(data:FormData):Promise<RuntimeReviewAc
   const credential=resolveOperatorCredential(text('credential'));requireOperator(credential);
   const {workspaceId}=await runtimeReviewWorkspaceId(productId,taskId);
   if(!workspaceId)throw new DomainError('This task has no saved coding workspace to review.');
+  const runAgainstApp=data.getAll('runAgainstApp').filter((item):item is string=>typeof item==='string');
+  if(runAgainstApp.length>5)throw new DomainError('Choose at most five commands.');
   const actor=getCurrentActor();
-  await approveRuntimeReview({productId,workspaceId,digest:text('digest'),credential,actor:{id:actor.id,name:actor.name},reason});
+  await approveRuntimeReview({productId,workspaceId,digest:text('digest'),credential,actor:{id:actor.id,name:actor.name},reason,runAgainstApp});
   return{status:'success',message:'Runtime review approved. Nothing has been run and the task has not been judged.',review:await getRuntimeReviewView(productId,taskId)};
  }catch(error){
   console.warn('[runtime-review]',{operation:['LOAD','APPROVE'].includes(operation)?operation:'UNKNOWN',code:error instanceof DomainError?error.code:'UNEXPECTED'});

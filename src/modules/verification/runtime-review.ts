@@ -9,7 +9,7 @@ import { canonicalJson, contentHash, requireReviewCredential } from '@/modules/c
 import { parsePlannedCommands } from '@/modules/coding/commands';
 import { snapshotFiles } from './containers/inputs';
 import { currentRuntimeIdentity } from './runtime-identity';
-import { runtimeManifestDigest, validateRuntimeMetadata, validRuntimeReview, signRuntimeReview, bindingFromState, type RuntimeManifest, type RuntimeAttestation, type RuntimeBinding } from './runtime-manifest';
+import { runtimeManifestDigest, withReviewerRuntime, manifestRuntimes, validateRuntimeMetadata, validRuntimeReview, signRuntimeReview, bindingFromState, type RuntimeManifest, type RuntimeAttestation, type RuntimeBinding } from './runtime-manifest';
 import { DomainError } from '@/modules/shared/errors';
 const exec = promisify(execFile);
 const KEY = 'EXTERNAL_REVIEW_APPROVAL_KEY';
@@ -41,12 +41,15 @@ export async function prepareRuntimeReview(productId: string, workspaceId: strin
   rejectCredentialDisclosure(manifest); return manifest;
 }
 /** Local operator only. Never expose through agent tools or a public server action. */
-export async function approveRuntimeReview(input: { productId: string; workspaceId: string; digest: string; credential: string; actor: { id: string; name: string }; reason: string }) {
+export async function approveRuntimeReview(input: { productId: string; workspaceId: string; digest: string; credential: string; actor: { id: string; name: string }; reason: string; runAgainstApp?: string[] }) {
   requireReviewCredential(input.credential, process.env[KEY]);
   if (!input.actor.id.trim() || !input.actor.name.trim() || /^(codex|coding agent|verification agent|testing agent)$/i.test(input.actor.name.trim()) || input.reason.trim().length < 12) throw new DomainError('Explicit human attribution and a substantive runtime review reason are required.');
   rejectCredentialDisclosure({actor:input.actor,reason:input.reason});
-  const manifest = await prepareRuntimeReview(input.productId,input.workspaceId), digest = runtimeManifestDigest(manifest);
-  if (input.digest !== digest) throw new DomainError('The reviewed runtime manifest changed. Review it again before approving.');
+  const base = await prepareRuntimeReview(input.productId,input.workspaceId);
+  if (input.digest !== runtimeManifestDigest(base)) throw new DomainError('The reviewed runtime manifest changed. Review it again before approving.');
+  let manifest:RuntimeManifest;
+  try { manifest = withReviewerRuntime(base, input.runAgainstApp ?? []); void manifestRuntimes(manifest); } catch { throw new DomainError('Only distinct repository test commands (npm run test…) can be run against a managed app and database, and not ones the plan already declares.'); }
+  const digest = runtimeManifestDigest(manifest);
   return db.$transaction(async tx => {
     const approvedAt = new Date();
     const approval = await tx.approval.create({ data: { productId: input.productId, approvalType: 'VERIFICATION_RUNTIME', status: 'APPROVED', approvedBy: input.actor.name, requestedAt: approvedAt, resolvedAt: approvedAt, comments: `Runtime/behaviour review only. Manifest ${digest}. ${input.reason}` } });
@@ -61,15 +64,18 @@ async function effectiveReview(manifest: RuntimeManifest): Promise<RuntimeBindin
   for (const record of records) { try { const value=JSON.parse(record.output); if(record.result==='INVALIDATED' && value.kind==='RUNTIME_REVIEW_INVALIDATED') invalid.add(value.approvalId); } catch {} }
   for (const record of records) {
     if (record.source !== 'HUMAN' || record.result !== 'APPROVED') continue;
-    let attestation:RuntimeAttestation;
+    let attestation:RuntimeAttestation,candidate:RuntimeManifest;
     try {
       const parsed=JSON.parse(record.output) as {attestation:RuntimeAttestation;signature:string};attestation=parsed.attestation;
-      if(!attestation||invalid.has(attestation.approvalId)||!validRuntimeReview(attestation,parsed.signature,process.env[KEY],manifest))continue;
+      if(!attestation||invalid.has(attestation.approvalId))continue;
+      // The reviewer's declarations are inside the signed manifest; rebuild exactly that shape from current facts and let the signature decide.
+      candidate=withReviewerRuntime(manifest,(attestation.manifest?.reviewerRuntime??[]).map(item=>item.command));
+      if(!validRuntimeReview(attestation,parsed.signature,process.env[KEY],candidate))continue;
     }catch{continue} // Malformed or untrusted payloads grant no authority.
     // Database observation failures must propagate as unavailable, not revoked.
     const approval=await db.approval.findUnique({where:{id:attestation.approvalId}});
     if(approval?.status!=='APPROVED'||approval.approvalType!=='VERIFICATION_RUNTIME'||approval.productId!==manifest.productId||approval.approvedBy!==attestation.actor.name||approval.resolvedAt?.toISOString()!==attestation.approvedAt||!approval.comments.startsWith(`Runtime/behaviour review only. Manifest ${attestation.digest}.`))continue;
-    return {kind:'VERIFICATION_RUNTIME_BINDING',version:1,approvalId:approval.id,evidenceId:record.id,digest:attestation.digest,manifest};
+    return {kind:'VERIFICATION_RUNTIME_BINDING',version:1,approvalId:approval.id,evidenceId:record.id,digest:attestation.digest,manifest:candidate};
   }
   return null;
 }
@@ -120,4 +126,15 @@ export async function inspectSessionRuntimeBinding(sessionId:string):Promise<Aut
   const current=await requireRuntimeReview(session.productId,session.repositoryWorkspaceId!);
   return canonicalJson(current)===canonicalJson(bound)?'CURRENT':'CHANGED';
  }catch(error){return error instanceof DomainError?'CHANGED':'UNAVAILABLE'}
+}
+
+/** Test scripts in the reviewed commit's package.json that a reviewer could choose to run against a managed app and database. Read-only. */
+export async function reviewableTestCommands(productId:string,workspaceId:string,declared:string[]=[]):Promise<string[]>{
+  const workspace=await db.repositoryWorkspace.findFirst({where:{id:workspaceId,productId},select:{workspacePath:true,headCommit:true}});
+  if(!workspace||!/^[a-f0-9]{40}$/.test(workspace.headCommit))return [];
+  try{
+    const scripts=JSON.parse(await git(workspace.workspacePath,['show',`${workspace.headCommit}:package.json`])).scripts;
+    if(!scripts||typeof scripts!=='object')return [];
+    return Object.keys(scripts).filter(name=>/^test(?::[A-Za-z0-9._-]+)?$/.test(name)).map(name=>`npm run ${name}`).filter(command=>!declared.includes(command)).sort();
+  }catch{return []}
 }
