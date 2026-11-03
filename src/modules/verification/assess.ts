@@ -1,6 +1,6 @@
 import {hashText} from '@/modules/coding/policy';
 import {assertSessionRuntimeBinding} from './runtime-review';
-import {signedCoverage} from './signed-coverage';
+import {signedCoverage,criterionStatus} from './signed-coverage';
 import { approvedBehaviors, behaviorMarkers, assessBehavior } from './behavior-evidence';
 import "server-only";
 
@@ -41,6 +41,8 @@ function loginPathOf(value: unknown) {
   return typeof record?.authentication?.loginPath === "string" ? record.authentication.loginPath : "";
 }
 
+const CONTRADICTED_NOTE = "An AI-written verification test failed; that failure is kept as a concern for a person to weigh.";
+
 export async function recomputeSession(sessionId: string) {
   const session = await db.verificationSession.findUnique({
     where: { id: sessionId },
@@ -63,6 +65,7 @@ export async function recomputeSession(sessionId: string) {
   // The approved snapshot is the commit the verification workspace was prepared from.
   const approvedSnapshot = session.workspace?.baseCommit ?? "";
   const bodyMatches = (executionId:string,body:string) => session.evidence.some(e => e.executionId===executionId && e.source==="COMMAND_RUNNER" && e.artifactReference===`sha256:${hashText(body)}`);
+  const contradictedCriteria: string[] = [];
   for (const coverage of session.coverages) {
     const cases = session.testCases.filter((item) => item.acceptanceCriterionId === coverage.acceptanceCriterionId);
     const executions = session.executions.filter((item) =>
@@ -104,22 +107,28 @@ export async function recomputeSession(sessionId: string) {
     );
     // A person's signed statement that an existing test proves this criterion counts only while that test passes on the approved snapshot.
     const signed = signedCoverage(runtimeBinding.manifest.reviewerCoverage, coverage.acceptanceCriterionId, session.executions, approvedSnapshot);
-    const signedFailed = signed.failed, verifiedSigned = signed.verified;
+    const verifiedSigned = signed.verified;
     const verifiedManual = cases.some((testCase) => !testCase.automated && testCase.status === "PASSED");
     const blocked = executions.some((item) => item.status === "BLOCKED");
-    let status: "VERIFIED" | "FAILED" | "NOT_TESTED" | "BLOCKED" | "NOT_APPLICABLE" = "NOT_TESTED";
-    if (failed || signedFailed) status = "FAILED";
-    else if (verifiedAutomatic || verifiedManual || verifiedSigned) status = "VERIFIED";
-    else if (coverage.humanConfirmed && coverage.status === "NOT_APPLICABLE") status = "NOT_APPLICABLE";
-    else if (blocked) status = "BLOCKED";
-    if (coverage.status !== status || (status === "VERIFIED" && coverage.rationale === "")) {
+    const decided = criterionStatus({
+      independentFailed: failed,
+      independentOrManualVerified: verifiedAutomatic || verifiedManual,
+      signed,
+      humanConfirmedNotApplicable: coverage.humanConfirmed && coverage.status === "NOT_APPLICABLE",
+      blocked,
+    });
+    const status = decided.status;
+    if (decided.contradicted) contradictedCriteria.push(coverage.acceptanceCriterionId);
+    if (coverage.status !== status || (status === "VERIFIED" && coverage.rationale === "") || (decided.contradicted && !coverage.rationale.includes(CONTRADICTED_NOTE))) {
       await db.verificationCoverage.update({
         where: { id: coverage.id },
         data: {
           status,
           rationale:
             status === "VERIFIED"
-              ? verifiedManual
+              ? decided.contradicted
+                ? `A person's signed review states that an existing test proves this criterion, and it passed on this version. ${CONTRADICTED_NOTE}`
+                : verifiedManual
                 ? "A person recorded a manual pass."
                 : verifiedSigned && !verifiedAutomatic
                   ? "A person's signed review states that an existing test proves this criterion, and it passed on this version."
@@ -154,6 +163,18 @@ export async function recomputeSession(sessionId: string) {
   );
   const blocking = Boolean(blockingEscalation);
   const evaluated = await evaluateObligations(fresh);
+  // A failing AI-written test that a signed passing test outranks is not hidden: it is a concern, so the verdict cannot be a plain pass.
+  for (const criterionId of contradictedCriteria) {
+    evaluated.obligations.push({
+      id: `concern:contradicted-independent-test:${criterionId}`,
+      title: "An AI-written verification test failed although a person's signed test for the same criterion passed",
+      kind: "TECHNICAL_COMPLETION",
+      source: "FUNCTIONAL_ACCEPTANCE_CRITERION",
+      mandatory: false,
+      status: "FAILED",
+      evidence: "The failing test and its output are recorded in this session's evidence. Review them before approving.",
+    });
+  }
   const decision = decideVerdict({
     coverages: fresh.coverages.map((item) => ({ status: item.status, humanConfirmed: item.humanConfirmed })),
     executions: fresh.executions.map((item) => ({ kind: item.kind, status: item.status })),

@@ -50,6 +50,8 @@ import {
   findWorkspace,
   changedPaths,
   openEscalationCount,
+  resolveObsoletePreflightBlocks,
+  PREFLIGHT_BLOCK_DESCRIPTION,
   recordEscalation,
   recordEvidence,
   saveWorkspace,
@@ -772,10 +774,12 @@ async function runImplement(
   const batchIssues = preflightRepositoryBatch(context, change.data.operations, await changedPaths(context.workspaceId));
   for (const operation of change.data.operations) if (!isTestFile(operation.path) && outsideApprovedPlan(operation.path, expected)) batchIssues.push({ path: operation.path, reason: "File is outside the approved execution plan." });
   if (batchIssues.length) {
-    await escalate(workspace, batchEscalationKind(batchIssues, change.data.operations), "Preservation preflight blocked the change batch before any files were written.", batchIssues.map(issue => `${issue.path}: ${issue.reason}`).join("\n"), "Obtain complete current source or request explicit human review of the incompatible change. Do not bypass preservation checks.");
+    await escalate(workspace, batchEscalationKind(batchIssues, change.data.operations), PREFLIGHT_BLOCK_DESCRIPTION, batchIssues.map(issue => `${issue.path}: ${issue.reason}`).join("\n"), "Obtain complete current source or request explicit human review of the incompatible change. Do not bypass preservation checks.");
     await finish(workspace, context, "ESCALATED", change.data.summary, false);
     return output(workspace.id, "ESCALATED", true, change.data.summary, change.provider, change.model, change.usage, compiled.contract);
   }
+  // This batch passed the preflight, so any earlier block by the same preflight no longer applies.
+  await resolveObsoletePreflightBlocks(workspace.id);
   let denied = false;
   for (const operation of change.data.operations) {
     if (!isTestFile(operation.path) && outsideApprovedPlan(operation.path, expected)) {

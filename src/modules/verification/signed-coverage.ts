@@ -9,3 +9,26 @@ export function signedCoverage(links: { command: string; criterionId: string }[]
   const latest = (command: string) => runs.filter(run => run.kind === 'EXISTING_REGRESSION' && run.command === command && !!approvedSnapshot && run.snapshotCommit === approvedSnapshot).sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0];
   return { tests, failed: tests.some(command => latest(command)?.status === 'FAILED'), verified: tests.length > 0 && tests.every(command => latest(command)?.status === 'PASSED') };
 }
+
+/**
+ * The status of one acceptance criterion from all its evidence. A person's signed statement that an existing test
+ * proves the criterion outranks an AI-written test: if that signed test passed, a failing AI-written test cannot fail
+ * the criterion. The failure stays on record and is reported as a concern, so the verdict becomes a pass with concerns
+ * for a person to weigh. A failure of the signed test itself always fails the criterion.
+ */
+export type CriterionStatus = "VERIFIED" | "FAILED" | "NOT_TESTED" | "BLOCKED" | "NOT_APPLICABLE";
+export function criterionStatus(input: {
+  independentFailed: boolean;
+  independentOrManualVerified: boolean;
+  signed: SignedCoverage;
+  humanConfirmedNotApplicable: boolean;
+  blocked: boolean;
+}): { status: CriterionStatus; contradicted: boolean } {
+  if (input.signed.failed) return { status: "FAILED", contradicted: false };
+  if (input.independentFailed && input.signed.verified) return { status: "VERIFIED", contradicted: true };
+  if (input.independentFailed) return { status: "FAILED", contradicted: false };
+  if (input.independentOrManualVerified || input.signed.verified) return { status: "VERIFIED", contradicted: false };
+  if (input.humanConfirmedNotApplicable) return { status: "NOT_APPLICABLE", contradicted: false };
+  if (input.blocked) return { status: "BLOCKED", contradicted: false };
+  return { status: "NOT_TESTED", contradicted: false };
+}

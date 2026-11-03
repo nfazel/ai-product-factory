@@ -244,6 +244,20 @@ export async function changedPaths(workspaceId: string) {
   return new Set(events.filter((event) => event.reason !== "unchanged" && event.path).map((event) => event.path));
 }
 
+/** The text a preservation preflight block records; the same text identifies it when a later batch passes. */
+export const PREFLIGHT_BLOCK_DESCRIPTION = "Preservation preflight blocked the change batch before any files were written.";
+
+/**
+ * A preservation preflight that blocked an earlier batch is obsolete once a later batch passes the same preflight.
+ * Leaving it open marked every finished run as escalated, with no way for a person to clear it.
+ */
+export async function resolveObsoletePreflightBlocks(workspaceId: string) {
+  return db.codingEscalation.updateMany({
+    where: { workspaceId, status: "OPEN", type: "ARCHITECTURE_CONFLICT", description: PREFLIGHT_BLOCK_DESCRIPTION },
+    data: { status: "RESOLVED", resolvedAt: new Date() },
+  });
+}
+
 export async function openEscalationCount(workspaceId: string) {
   return db.codingEscalation.count({ where: { workspaceId, status: "OPEN" } });
 }
