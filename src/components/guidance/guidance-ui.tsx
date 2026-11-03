@@ -71,7 +71,7 @@ function revealHashTarget(id: string, behavior: ScrollBehavior = "smooth") {
   return true;
 }
 
-function NextActionLink({ href, label }: { href: string; label: string }) {
+export function NextActionLink({ href, label }: { href: string; label: string }) {
   const [missing, setMissing] = useState(false);
 
   function onClick(event: React.MouseEvent<HTMLAnchorElement>) {

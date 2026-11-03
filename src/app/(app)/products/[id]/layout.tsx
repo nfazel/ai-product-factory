@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 
 import { PageSkeleton } from "@/components/feedback/states";
 import { ProgressStrip } from "@/components/guidance/guidance-ui";
+import { NextStepBar } from "@/components/guidance/next-step-bar";
 import { ProductTabs } from "@/components/products/product-tabs";
 import { ProductStatusBadge, StageBadge } from "@/components/status/badges";
 import { PRODUCT_START_LABEL, STAGE_META } from "@/domain/constants";
@@ -59,6 +60,7 @@ async function ProductFrame({
         {STAGE_META[product.currentStage].label} · {PRODUCT_START_LABEL[product.startMode]}. A stage is complete only after its gate is met.
       </p>
       <ProgressStrip stages={guidance.stages} />
+      <NextStepBar productId={product.id} action={guidance.action} blocker={guidance.blocker} />
       <ProductTabs productId={product.id} />
       {children}
     </div>
