@@ -14,7 +14,7 @@ export function RuntimeReviewContent({review,onRestore,busy=false}:{review:Runti
   <p role="status" className="font-medium">{titles[review.state]}</p>
   <p>{review.message}</p>
   {review.state==='APPROVED'&&review.approved&&<p className="text-sm">Approved by {review.approved.by}{review.approved.at?` · ${when(review.approved.at)}`:''}.</p>}
-  {review.restorable&&onRestore&&<div className="space-y-2 rounded border p-3"><p className="text-sm">This rebuilds the folder exactly at the commit a person approved, and refuses if it cannot. It changes no code and calls no AI.</p><button type="button" disabled={busy} onClick={onRestore} className="rounded border px-3 py-2">Restore working copy</button></div>}
+  {review.restorable&&onRestore&&<div className="space-y-2 rounded border p-3"><p className="text-sm">This rebuilds the folder exactly at the commit a person approved, and refuses if it cannot. It changes no code and calls no AI.</p><button type="button" disabled={busy} onClick={onRestore} className="btn btn-secondary">Restore working copy</button></div>}
   <p className="text-sm">This does not judge the task. It only allows the checks below to run, in isolated containers, on this exact version of the code.</p>
   {r&&<div className="space-y-2 rounded border p-3">
    <h4 className="font-medium">What will be run</h4>
@@ -63,7 +63,7 @@ export function RuntimeReviewCard({productId,taskId}:{productId:string;taskId:st
    <label className="block text-sm"><input type="checkbox" name="reviewed" value="yes" required/> I have read what will be run.</label>
    <label className="block text-sm">Why are you comfortable approving this?<textarea name="reason" required minLength={12} maxLength={2000} rows={2} className="mt-1 block w-full rounded border p-2" placeholder="For example: the checks match the approved plan and run only against a throwaway database."/></label>
    <OperatorCredentialField/>
-   <button type="submit" disabled={pending} className="rounded border px-3 py-2">Approve runtime review</button>
+   <button type="submit" disabled={pending} className="btn btn-primary">Approve runtime review</button>
   </form>}
  </section>;
 }

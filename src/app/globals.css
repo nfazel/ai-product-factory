@@ -128,3 +128,41 @@
     @apply font-sans;
   }
 }
+/*
+ * One button language for the whole app. Primary (deep indigo) is the single action that moves work forward,
+ * secondary is everything else, danger is for rejecting or cancelling. The <Button> component uses the same
+ * colours and sizes so plain buttons and component buttons look alike.
+ */
+@layer components {
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.375rem;
+    min-height: 2.25rem;
+    padding: 0.4rem 1rem;
+    border: 1px solid transparent;
+    border-radius: var(--radius-lg);
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+    font-weight: 500;
+    white-space: nowrap;
+    cursor: pointer;
+    user-select: none;
+    transition: background-color 0.15s, border-color 0.15s, box-shadow 0.15s, transform 0.05s;
+  }
+  .btn:focus-visible { outline: none; box-shadow: 0 0 0 3px color-mix(in oklch, var(--ring) 40%, transparent); }
+  .btn:active:not(:disabled) { transform: translateY(1px); }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-sm { min-height: 1.875rem; padding: 0.2rem 0.75rem; font-size: 0.8125rem; }
+  .btn-primary { background: var(--primary); color: var(--primary-foreground); box-shadow: 0 1px 2px oklch(0.2 0.04 264 / 0.25); }
+  .btn-primary:hover:not(:disabled) { background: color-mix(in oklch, var(--primary), black 12%); }
+  .btn-secondary { background: var(--card); color: var(--foreground); border-color: var(--border); box-shadow: 0 1px 1px oklch(0.2 0.04 264 / 0.06); }
+  .btn-secondary:hover:not(:disabled) { background: var(--muted); border-color: color-mix(in oklch, var(--border), var(--foreground) 15%); }
+  .btn-secondary[aria-pressed="true"], .btn-secondary[aria-current="true"], .btn-secondary[aria-current="page"] {
+    background: var(--accent); color: var(--accent-foreground); border-color: color-mix(in oklch, var(--primary) 35%, transparent); font-weight: 600;
+  }
+  .btn-danger { background: var(--card); color: var(--destructive); border-color: color-mix(in oklch, var(--destructive) 45%, transparent); }
+  .btn-danger:hover:not(:disabled) { background: color-mix(in oklch, var(--destructive) 10%, var(--card)); }
+  .btn-link { min-height: 0; padding: 0; border: 0; background: none; color: var(--primary); text-decoration: underline; text-underline-offset: 3px; }
+}
