@@ -4,7 +4,8 @@ import { redirect } from "next/navigation";
 
 import { invalidState, type ActionState } from "@/lib/action-state";
 import { PRODUCT_STAGES } from "@/domain/constants";
-import { createProduct, getProduct, updateProduct } from "@/modules/product/service";
+import { createProduct, getProduct, removeProduct, restoreProduct, updateProduct } from "@/modules/product/service";
+import { stopPreview } from "@/modules/preview/service";
 import {
   createProductSchema,
   updateProductSchema,
@@ -74,6 +75,44 @@ export async function moveStageAction(
     });
     refreshWorkspace(product.id);
     return { status: "success", message: "Stage updated." };
+  } catch (error) {
+    return actionFailure(error);
+  }
+}
+
+const removeProductSchema = z.object({
+  productId: z.string().trim().min(1),
+  confirm: z.literal("yes", { error: "Tick the box to confirm you want to remove this product." }),
+});
+
+/** Hides the product everywhere and keeps its history. Reversible with restoreProductAction. */
+export async function removeProductAction(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const parsed = removeProductSchema.safeParse(formValues(formData));
+  if (!parsed.success) return invalidState(parsed.error.issues);
+  try {
+    await removeProduct(parsed.data.productId);
+    // A running preview belongs to a product nobody is using now; failing to stop it must not undo the removal.
+    await stopPreview(parsed.data.productId).catch(() => undefined);
+    refreshWorkspace(parsed.data.productId);
+  } catch (error) {
+    return actionFailure(error);
+  }
+  redirect("/products");
+}
+
+export async function restoreProductAction(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const productId = formValues(formData).productId?.trim();
+  if (!productId) return { status: "error", message: "Product not found." };
+  try {
+    await restoreProduct(productId);
+    refreshWorkspace(productId);
+    return { status: "success", message: "Product restored." };
   } catch (error) {
     return actionFailure(error);
   }

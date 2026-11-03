@@ -40,8 +40,10 @@ function toProduct(row: {
 
 const productInclude = { _count: { select: { workItems: true } } } as const;
 
-export async function listProductRows(limit?: number) {
+/** Removed products are hidden from every list by default; their records are kept. */
+export async function listProductRows(limit?: number, scope: "active" | "removed" = "active") {
   const rows = await db.product.findMany({
+    where: { status: scope === "removed" ? "ARCHIVED" : { not: "ARCHIVED" } },
     include: productInclude,
     orderBy: { updatedAt: "desc" },
     take: limit,

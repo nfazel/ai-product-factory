@@ -6,7 +6,7 @@ import { ActivityFeed } from "@/components/activity/activity-feed";
 import { AgentRunEvidenceList } from "@/components/ai/run-evidence";
 import { PageSkeleton } from "@/components/feedback/states";
 import { EvidencePanel, EvidenceSummary, NextActionPanel } from "@/components/guidance/guidance-ui";
-import { EditProductForm } from "@/components/products/product-forms";
+import { EditProductForm, RemoveProductForm } from "@/components/products/product-forms";
 import { STAGE_META } from "@/domain/constants";
 import { STAGE_PROGRESS_LABEL } from "@/modules/guidance/types";
 import { getProductGuidance } from "@/modules/guidance/service";
@@ -110,6 +110,7 @@ async function Overview({ params }: { params: Promise<{ id: string }> }) {
           </Link>
         </p>
         <EditProductForm product={overview.product} />
+        <RemoveProductForm product={overview.product} />
       </EvidencePanel>
     </div>
   );

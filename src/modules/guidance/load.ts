@@ -145,7 +145,7 @@ export async function loadSnapshots(productId?: string): Promise<GuidanceSnapsho
   await recoverApprovedPlansAfterProviderFailure(productId);
   await restoreApprovedPlanAfterValidationFailure(productId);
   const products = await db.product.findMany({
-    where: productId ? { id: productId } : undefined,
+    where: productId ? { id: productId } : { status: { not: "ARCHIVED" } },
     orderBy: { updatedAt: "desc" },
   });
   if (products.length === 0) return [];

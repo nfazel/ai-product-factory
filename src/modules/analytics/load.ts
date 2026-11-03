@@ -22,7 +22,7 @@ const ACTIVITY_TYPES = [
 export async function loadAnalyticsInputs(productId?: string): Promise<AnalyticsInput[]> {
   const now = new Date().toISOString();
   const products = await db.product.findMany({
-    where: productId ? { id: productId } : undefined,
+    where: productId ? { id: productId } : { status: { not: "ARCHIVED" } },
     select: { id: true, name: true, status: true, currentStage: true, createdAt: true },
     orderBy: { updatedAt: "desc" },
   });

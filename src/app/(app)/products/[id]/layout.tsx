@@ -6,6 +6,7 @@ import { PageSkeleton } from "@/components/feedback/states";
 import { ProgressStrip } from "@/components/guidance/guidance-ui";
 import { FeedbackWaitingList } from "@/components/guidance/feedback-waiting";
 import { NextStepBar } from "@/components/guidance/next-step-bar";
+import { RestoreProductForm } from "@/components/products/product-forms";
 import { ProductTabs } from "@/components/products/product-tabs";
 import { ProductStatusBadge, StageBadge } from "@/components/status/badges";
 import { PRODUCT_START_LABEL, STAGE_META } from "@/domain/constants";
@@ -42,6 +43,12 @@ async function ProductFrame({
 
   return (
     <div className="space-y-6">
+      {product.status === "ARCHIVED" ? (
+        <div role="status" className="space-y-3 rounded-2xl border border-stone-300 bg-stone-50 p-4 text-sm text-stone-900">
+          <p>This product has been removed. It is hidden from your lists and its history is kept. Restore it to work on it again.</p>
+          <RestoreProductForm productId={product.id} />
+        </div>
+      ) : null}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <p className="text-sm text-muted-foreground">

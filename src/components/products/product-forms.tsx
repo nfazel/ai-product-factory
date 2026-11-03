@@ -17,6 +17,8 @@ import {
 import type { Product } from "@/modules/product/types";
 import {
   createProductAction,
+  removeProductAction,
+  restoreProductAction,
   updateProductAction,
 } from "@/server/actions/products";
 
@@ -158,6 +160,39 @@ export function EditProductForm({ product }: { product: Product }) {
       </div>
       <FormMessage state={state} />
       <SubmitButton pendingLabel="Saving…">Save product</SubmitButton>
+    </form>
+  );
+}
+
+export function RemoveProductForm({ product }: { product: Product }) {
+  const [state, action] = useActionState(removeProductAction, idleState);
+
+  return (
+    <form action={action} className="space-y-3 rounded-xl border border-red-200 p-4">
+      <input type="hidden" name="productId" value={product.id} />
+      <h3 className="text-sm font-semibold">Remove this product</h3>
+      <p className="text-sm leading-6 text-muted-foreground">
+        The product disappears from your lists and the dashboard. Its records are kept for audit, because approvals and
+        decisions are tamper-proof and cannot be erased. You can restore it later from the Products page.
+      </p>
+      <label className="flex items-start gap-2 text-sm">
+        <input type="checkbox" name="confirm" value="yes" className="mt-1" />
+        <span>I want to remove “{product.name}”.</span>
+      </label>
+      <FormMessage state={state} />
+      <SubmitButton pendingLabel="Removing…">Remove product</SubmitButton>
+    </form>
+  );
+}
+
+export function RestoreProductForm({ productId }: { productId: string }) {
+  const [state, action] = useActionState(restoreProductAction, idleState);
+
+  return (
+    <form action={action} className="flex flex-wrap items-center gap-3">
+      <input type="hidden" name="productId" value={productId} />
+      <SubmitButton pendingLabel="Restoring…">Restore product</SubmitButton>
+      <FormMessage state={state} />
     </form>
   );
 }

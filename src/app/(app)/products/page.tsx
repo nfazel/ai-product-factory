@@ -5,7 +5,7 @@ import { EmptyState, PageSkeleton } from "@/components/feedback/states";
 import { PageHeader } from "@/components/layout/page-header";
 import { ProductCard } from "@/components/products/product-card";
 import { Button } from "@/components/ui/button";
-import { listProducts } from "@/modules/product/service";
+import { listProducts, listRemovedProducts } from "@/modules/product/service";
 import { markDynamic } from "@/server/dynamic";
 
 export const metadata = { title: "Products" };
@@ -20,7 +20,7 @@ export default function ProductsPage() {
 
 async function ProductsContent() {
   await markDynamic();
-  const products = await listProducts();
+  const [products, removed] = await Promise.all([listProducts(), listRemovedProducts()]);
 
   return (
     <div>
@@ -51,6 +51,17 @@ async function ProductsContent() {
           ))}
         </div>
       )}
+      {removed.length > 0 ? (
+        <details className="mt-8 rounded-2xl border bg-card p-4">
+          <summary className="cursor-pointer text-sm font-medium">Removed products ({removed.length})</summary>
+          <p className="mt-2 text-sm text-muted-foreground">Open a removed product to restore it.</p>
+          <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {removed.map((product) => (
+              <ProductCard key={product.id} product={product} />
+            ))}
+          </div>
+        </details>
+      ) : null}
     </div>
   );
 }

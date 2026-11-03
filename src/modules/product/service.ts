@@ -25,6 +25,32 @@ export async function listProducts(limit?: number) {
   return listProductRows(limit);
 }
 
+export async function listRemovedProducts() {
+  return listProductRows(undefined, "removed");
+}
+
+/**
+ * Removing a product hides it everywhere and keeps its history. The governance records behind a product are
+ * append-only by design, so they are retained for audit rather than erased; a removed product can be restored.
+ */
+export async function removeProduct(id: string) {
+  const existing = await findProductRow(id);
+  if (!existing) throw new DomainError("Product not found.", "NOT_FOUND");
+  if (existing.status === "ARCHIVED") return existing;
+  const product = await saveProduct({ ...existing, status: "ARCHIVED" });
+  await recordActivity({ productId: id, type: "PRODUCT_UPDATED", description: "A person removed the product. Its history is kept and it can be restored." });
+  return product;
+}
+
+export async function restoreProduct(id: string) {
+  const existing = await findProductRow(id);
+  if (!existing) throw new DomainError("Product not found.", "NOT_FOUND");
+  if (existing.status !== "ARCHIVED") return existing;
+  const product = await saveProduct({ ...existing, status: "ACTIVE" });
+  await recordActivity({ productId: id, type: "PRODUCT_UPDATED", description: "A person restored the product." });
+  return product;
+}
+
 export async function getProduct(id: string) {
   return findProductRow(id);
 }
