@@ -728,7 +728,7 @@ describe("blockers", () => {
       tasks: [task({ status: "IN_PROGRESS", contractStale: true, workspace: "OPEN" })],
     }));
     const blocker = guidance.blocker;
-    expect(blocker?.what).toBe("The approved coding instructions are out of date");
+    expect(blocker?.what).toMatch(/^The approved coding instructions for .+ are out of date$/);
     expect(blocker?.why.length).toBeGreaterThan(0);
     expect(blocker?.required.length).toBeGreaterThan(0);
     expect(blocker?.who).toBe("Engineering decision required");

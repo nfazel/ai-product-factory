@@ -4,12 +4,14 @@ import { notFound } from "next/navigation";
 
 import { PageSkeleton } from "@/components/feedback/states";
 import { ProgressStrip } from "@/components/guidance/guidance-ui";
+import { FeedbackWaitingList } from "@/components/guidance/feedback-waiting";
 import { NextStepBar } from "@/components/guidance/next-step-bar";
 import { ProductTabs } from "@/components/products/product-tabs";
 import { ProductStatusBadge, StageBadge } from "@/components/status/badges";
 import { PRODUCT_START_LABEL, STAGE_META } from "@/domain/constants";
 import { getProductGuidance } from "@/modules/guidance/service";
 import { getProduct } from "@/modules/product/service";
+import { feedbackWaiting } from "@/modules/rework/waiting";
 import { markDynamic } from "@/server/dynamic";
 
 export default function ProductLayout({
@@ -35,7 +37,7 @@ async function ProductFrame({
 }) {
   await markDynamic();
   const { id } = await params;
-  const [product, guidance] = await Promise.all([getProduct(id), getProductGuidance(id)]);
+  const [product, guidance, waiting] = await Promise.all([getProduct(id), getProductGuidance(id), feedbackWaiting(id).catch(() => [])]);
   if (!product || !guidance) notFound();
 
   return (
@@ -61,6 +63,7 @@ async function ProductFrame({
       </p>
       <ProgressStrip stages={guidance.stages} />
       <NextStepBar productId={product.id} action={guidance.action} blocker={guidance.blocker} />
+      <FeedbackWaitingList items={waiting} />
       <ProductTabs productId={product.id} />
       {children}
     </div>

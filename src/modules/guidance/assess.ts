@@ -952,7 +952,8 @@ function taskStep(snapshot: GuidanceSnapshot): { action: NextAction | null; bloc
     return {
       action: null,
       blocker: blocker({
-        what: "The approved coding instructions are out of date",
+        taskId: task.id,
+        what: `The approved coding instructions for ${task.title} are out of date`,
         why: "The task, the design, or the rules changed after coding started.",
         required: "Review the instructions, then resume or abandon this workspace.",
         who: ENGINEERING,
@@ -990,7 +991,8 @@ function taskStep(snapshot: GuidanceSnapshot): { action: NextAction | null; bloc
         waitingSince: task.updatedAt,
       }),
       blocker: blocker({
-        what: "Code approval needs review again",
+        taskId: task.id,
+        what: `Code approval needs review again for ${task.title}`,
         why: "A later edit made the earlier approval out of date.",
         required: "A person reviews the latest change and approves it again.",
         who: ENGINEERING,
@@ -1002,7 +1004,8 @@ function taskStep(snapshot: GuidanceSnapshot): { action: NextAction | null; bloc
     return {
       action: null,
       blocker: blocker({
-        what: "Verification needs to be repeated",
+        taskId: task.id,
+        what: `Verification needs to be repeated for ${task.title}`,
         why: "The implementation changed after the independent check.",
         required: "Run the independent check again and approve the new result.",
         who: ENGINEERING,

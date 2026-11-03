@@ -22,6 +22,12 @@ describe("the next step bar", () => {
     expect(view.body).toBe("The implementation changed after the independent check. Run the independent check again and approve the new result.");
     expect(view.meta).toBe("Engineering decision required · The previous check cannot be reused.");
   });
+  it("links a blocker about one task straight to that task's page", () => {
+    const view = nextStepView(null, { ...blocker, taskId: "task-9", what: "Verification needs to be repeated for Update Pass button" }, "p");
+    expect(view).toMatchObject({ tone: "blocked", href: "/products/p/build/tasks/task-9", linkLabel: "Open the task" });
+    expect(view.title).toContain("Update Pass button");
+    expect(nextStepView(null, { ...blocker, taskId: "task-9" }).href).toBeNull();
+  });
   it("says nothing is waiting when there is neither", () => {
     expect(nextStepView(null, null)).toMatchObject({ tone: "quiet", title: "Nothing needs you right now.", href: null });
   });

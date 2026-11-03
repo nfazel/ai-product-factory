@@ -177,6 +177,8 @@ export type NextAction = {
 };
 
 export type BlockerView = {
+  /** The task the blocker is about, when it is about one, so the page can link straight to it. */
+  taskId?: string | null;
   what: string;
   why: string;
   required: string;

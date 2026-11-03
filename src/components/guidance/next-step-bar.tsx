@@ -14,7 +14,7 @@ const TONE = {
 
 /** Presentational: exported so it can be rendered and tested without a router. */
 export function NextStepBarContent({ productId, action, blocker }: { productId: string; action: NextAction | null; blocker: BlockerView | null }) {
-  const view = nextStepView(action, blocker);
+  const view = nextStepView(action, blocker, productId);
   return (
     <section aria-label="Next step" data-product={productId} className={`rounded-2xl border px-4 py-3 sm:px-5 ${TONE[view.tone]}`}>
       <p className="text-xs font-semibold tracking-[0.14em] uppercase">{view.kicker}</p>

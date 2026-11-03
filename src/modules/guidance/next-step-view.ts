@@ -11,7 +11,7 @@ export type NextStepView = {
   linkLabel: string;
 };
 
-export function nextStepView(action: NextAction | null, blocker: BlockerView | null): NextStepView {
+export function nextStepView(action: NextAction | null, blocker: BlockerView | null, productId = ""): NextStepView {
   if (action) {
     return {
       tone: "action",
@@ -30,8 +30,9 @@ export function nextStepView(action: NextAction | null, blocker: BlockerView | n
       title: blocker.what,
       body: [blocker.why, blocker.required].filter(Boolean).join(" "),
       meta: [blocker.who, blocker.next].filter(Boolean).join(" · "),
-      href: null,
-      linkLabel: "",
+      // A blocker about one task links to that task's page, which says what to do there.
+      href: blocker.taskId && productId ? `/products/${productId}/build/tasks/${blocker.taskId}` : null,
+      linkLabel: blocker.taskId ? "Open the task" : "",
     };
   }
   return { tone: "quiet", kicker: "Nothing is waiting", title: "Nothing needs you right now.", body: "", meta: "", href: null, linkLabel: "" };
