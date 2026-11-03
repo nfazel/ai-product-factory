@@ -19,7 +19,7 @@ import {
 } from "@/components/build/coding-panel";
 import { StatusPill } from "@/components/build/status-pill";
 import { TaskJourneyCard } from "@/components/build/task-journey";
-import { taskJourney, type JourneyVerification } from "@/modules/build/task-journey";
+import { taskJourney, type JourneyStepId, type JourneyVerification } from "@/modules/build/task-journey";
 import { TaskWorkDetails } from "@/components/build/task-work-details";
 import { CODING_EXECUTION_LABEL, CODING_RISK_LABEL, type CodingExecutionModeName, type CodingRiskLevelName } from "@/domain/constants";
 import type { BuildTaskRow, CodingTask } from "@/modules/build/task-status";
@@ -73,7 +73,7 @@ export function TaskWorkspaceView({
 
       </section>
 
-      <TaskJourneyCard journey={journey} blockers={summary.blockers}>
+      <TaskJourneyCard journey={journey} blockers={summary.blockers} hrefs={stepLinks(productId, task.id, journey.current?.id)}>
         <PrimaryActionSlot productId={productId} task={task} summary={summary} />
       </TaskJourneyCard>
 
@@ -291,4 +291,16 @@ function StatusFact({
 
 function EmptyDetail({ message }: { message: string }) {
   return <p className="text-sm leading-6 text-muted-foreground">{message}</p>;
+}
+
+/**
+ * Where each step that is not finished can be acted on. Building steps happen on this page: the current one in the card above,
+ * the later ones in the work details below. Verification happens on the task's Prove page.
+ */
+function stepLinks(productId: string, taskId: string, currentId: JourneyStepId | undefined): Partial<Record<JourneyStepId, string>> {
+  const verify = `/products/${productId}/testing/tasks/${taskId}`;
+  const building: JourneyStepId[] = ["approve-task", "plan", "approve-plan", "code", "review-code", "record"];
+  const links: Partial<Record<JourneyStepId, string>> = { verify, "approve-verification": verify };
+  for (const id of building) links[id] = id === currentId ? "#next-step" : "#task-work";
+  return links;
 }

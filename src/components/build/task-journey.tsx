@@ -1,6 +1,7 @@
+import Link from "next/link";
 import type { ReactNode } from "react";
 
-import type { Journey, JourneyState } from "@/modules/build/task-journey";
+import type { Journey, JourneyState, JourneyStepId } from "@/modules/build/task-journey";
 
 const BADGE: Record<JourneyState, string> = {
   done: "bg-emerald-600 text-white",
@@ -27,11 +28,11 @@ function Heading({ journey }: { journey: Journey }) {
  * One answer to "what do I do now?": the steps of this task with the current one marked, and a single card saying what to do or
  * what is happening. The button for the step is passed in, so it sits right under the sentence that explains it.
  */
-export function TaskJourneyCard({ journey, blockers = [], children }: { journey: Journey; blockers?: string[]; children?: ReactNode }) {
+export function TaskJourneyCard({ journey, blockers = [], hrefs = {}, children }: { journey: Journey; blockers?: string[]; hrefs?: Partial<Record<JourneyStepId, string>>; children?: ReactNode }) {
   const tone = journey.finished ? "border-emerald-200 bg-emerald-50" : journey.current?.state === "attention" ? "border-amber-300 bg-amber-50" : journey.current?.state === "working" ? "border-sky-200 bg-sky-50" : "border-indigo-200 bg-indigo-50";
   return (
     <section aria-label="Next step" className="space-y-4">
-      <div className={`rounded-2xl border p-4 sm:p-5 ${tone}`}>
+      <div id="next-step" className={`scroll-mt-20 rounded-2xl border p-4 sm:p-5 ${tone}`}>
         <Heading journey={journey} />
         <p className="mt-1 text-lg font-semibold tracking-tight text-stone-900">{journey.headline}</p>
         {journey.detail ? <p className="mt-1 text-sm leading-6 text-stone-700">{journey.detail}</p> : null}
@@ -48,10 +49,17 @@ export function TaskJourneyCard({ journey, blockers = [], children }: { journey:
         {journey.steps.map((step, index) => (
           <li key={step.id} className="flex items-center gap-2" aria-current={step.state === "current" || step.state === "working" || step.state === "attention" ? "step" : undefined}>
             <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${BADGE[step.state]}`}>{step.state === "done" ? "✓" : index + 1}</span>
-            <span className={`text-sm ${step.state === "upcoming" ? "text-stone-500" : "font-medium text-stone-900"}`}>
-              {step.label}
-              <span className="sr-only"> ({STATE_WORD[step.state]})</span>
-            </span>
+            {step.state !== "done" && hrefs[step.id] ? (
+              <Link href={hrefs[step.id] as string} className={`rounded text-sm underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-indigo-600 ${step.state === "upcoming" ? "text-stone-600" : "font-medium text-indigo-800"}`}>
+                {step.label}
+                <span className="sr-only"> ({STATE_WORD[step.state]})</span>
+              </Link>
+            ) : (
+              <span className={`text-sm ${step.state === "upcoming" ? "text-stone-500" : "font-medium text-stone-900"}`}>
+                {step.label}
+                <span className="sr-only"> ({STATE_WORD[step.state]})</span>
+              </span>
+            )}
             {index < journey.steps.length - 1 ? <span aria-hidden className="text-stone-300">›</span> : null}
           </li>
         ))}

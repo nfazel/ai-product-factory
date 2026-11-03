@@ -45,3 +45,17 @@ describe("the next step card", () => {
     expect(html.match(/✓/g)).toHaveLength(8);
   });
 });
+
+describe("step links", () => {
+  it("links every step that is not done and leaves finished steps as plain text", () => {
+    const journey = { steps: [
+      { id: "approve-task", label: "Approve the task", state: "done" },
+      { id: "plan", label: "Create the plan", state: "current" },
+      { id: "code", label: "Write the code", state: "upcoming" },
+    ], current: { id: "plan", label: "Create the plan", state: "current" }, headline: "h", detail: "", yourTurn: true, finished: false } as unknown as Journey;
+    const html = renderToStaticMarkup(createElement(TaskJourneyCard, { journey, hrefs: { "approve-task": "#a", plan: "#next-step", code: "#task-work" } }));
+    expect(html).toContain('href="#next-step"');
+    expect(html).toContain('href="#task-work"');
+    expect(html).not.toContain('href="#a"');
+  });
+});

@@ -28,7 +28,7 @@ export function TaskWorkDetails({
   const content = { plan, coding, validation, history }[tab];
 
   return (
-    <section className="rounded-2xl border bg-card">
+    <section id="task-work" className="scroll-mt-20 rounded-2xl border bg-card">
       <div className="border-b px-4 pt-4 sm:px-5">
         <h2 className="text-base font-semibold">Work details</h2>
         <p className="mt-1 text-sm text-muted-foreground">
