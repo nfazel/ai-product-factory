@@ -162,7 +162,11 @@ afterEach(async () => {
   }
 });
 
-describe("HTTP verification, orchestrated against an isolated fixture product", () => {
+// Obsolete by design: this drives the former native path (a managed Node server on the host after a host-side npm install).
+// Verification now runs only in isolated containers and refuses any native fallback, so this chain no longer exists.
+// The container flow is covered by environment-integration, context-integration and lifecycle tests, and by a real
+// Docker run (BetMyFriend Task 4). A container-based replacement needs real Docker and downloaded dependencies.
+describe.skip("HTTP verification, orchestrated against an isolated fixture product (former native path)", () => {
   it(
     "runs the approved snapshot through planning, startup, real HTTP requests, evidence, verdict and cleanup",
     async () => {

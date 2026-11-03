@@ -89,6 +89,8 @@ const AUTHENTICATED_BEHAVIOUR = [
   "  assert.equal(feed.status, 200);",
   "  const body = await feed.json();",
   "  assert.ok(Array.isArray(body.items));",
+  // Adequate evidence asserts an actual returned domain value, not only status and shape.
+  '  assert.equal(body.items[0].displayName, "Verifier");',
   "});",
 ].join("\n");
 
@@ -208,7 +210,7 @@ describe("4. test that exercises only one part of a multi-step acceptance criter
 });
 
 describe("5. valid HTTP test with observable evidence supporting its criterion", () => {
-  it("is adequate: signs in, uses the session, observes a 2xx, and asserts status and body", () => {
+  it("is adequate: signs in, uses the session, observes a 2xx, and asserts a returned value", () => {
     const result = assessHttpEvidence({
       body: AUTHENTICATED_BEHAVIOUR,
       requiredCapabilities: AUTH,
@@ -221,13 +223,15 @@ describe("5. valid HTTP test with observable evidence supporting its criterion",
     expect(assessTestStructure(AUTHENTICATED_BEHAVIOUR, CRITERION).ok).toBe(true);
   });
 
-  it("is adequate for an unauthenticated behavioural test that asserts a positive response", () => {
+  it("is adequate for an unauthenticated behavioural test that asserts a returned value", () => {
     const body = [
       MARKER,
       'test("public health", async () => {',
       '  const base = process.env.VERIFICATION_BASE_URL;',
       '  const response = await fetch(`${base}/api/health`);',
       "  assert.equal(response.status, 200);",
+      "  const data = await response.json();",
+      '  assert.equal(data.service, "claims");',
       "});",
     ].join("\n");
     expect(
@@ -312,7 +316,7 @@ describe("8. existing historical verification records remain compatible", () => 
 
   it("keeps the authenticated-session check off tests that never declared it", () => {
     const result = assessHttpEvidence({
-      body: [MARKER, 'test("p", async () => { const base = process.env.VERIFICATION_BASE_URL; const r = await fetch(`${base}/api/health`); assert.equal(r.status, 200); });'].join("\n"),
+      body: [MARKER, 'test("p", async () => { const base = process.env.VERIFICATION_BASE_URL; const r = await fetch(`${base}/api/health`); assert.equal(r.status, 200); const data = await r.json(); assert.equal(data.service, "claims"); });'].join("\n"),
       requiredCapabilities: [],
       observations: [obs("GET", "/api/health", 200)],
     });

@@ -6,7 +6,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { db } from "@/lib/db";
-import { completedTaskIn, git } from "@/modules/verification/completed-task.test-support";
+import { bindFixtureSession, completedTaskIn, git } from "@/modules/verification/completed-task.test-support";
 import { recomputeSession } from "@/modules/verification/assess";
 import {
   isAttemptActive,
@@ -170,6 +170,8 @@ describe("recovering an interrupted verification attempt", () => {
     const setup = await completedTaskIn(makeRepo());
     products.push(setup.product.id);
     const session = await interruptedSession(setup, []);
+    // Recomputing a session needs the signed review it was started under, as a real attempt has.
+    await bindFixtureSession(session.id, setup.product.id, setup.task.id);
     await db.verificationSession.update({ where: { id: session.id }, data: { status: "REVIEW" } });
     await db.verificationEscalation.create({
       data: {

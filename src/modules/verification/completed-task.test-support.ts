@@ -195,3 +195,32 @@ export async function completedTaskIn(repo: string, options?: {
   }
   return { repo, sha, product, slice, task, criterion };
 }
+
+/**
+ * Synthetic human review for a fixture task, so tests written before the signed-review rule can reach the code they
+ * exercise. Never used by application code. Leaves a synthetic operator key in the environment; callers restore it.
+ */
+export async function signFixtureRuntimeReview(productId: string, taskId: string) {
+  const key = process.env.EXTERNAL_REVIEW_APPROVAL_KEY && Buffer.byteLength(process.env.EXTERNAL_REVIEW_APPROVAL_KEY) >= 32
+    ? process.env.EXTERNAL_REVIEW_APPROVAL_KEY
+    : "synthetic-fixture-runtime-review-key-32-bytes";
+  process.env.EXTERNAL_REVIEW_APPROVAL_KEY = key;
+  const { prepareRuntimeReview, approveRuntimeReview, requireRuntimeReview } = await import("./runtime-review");
+  const { runtimeManifestDigest } = await import("./runtime-manifest");
+  const workspace = await db.repositoryWorkspace.findFirstOrThrow({ where: { productId, implementationTaskId: taskId }, orderBy: { createdAt: "desc" } });
+  // The runtime review reads who approved the code and when; a bare fixture approval has neither.
+  for (const code of await db.codeChangeApproval.findMany({ where: { workspaceId: workspace.id } })) {
+    await db.approval.update({ where: { id: code.approvalId }, data: { resolvedAt: new Date(), approvedBy: "Fixture human" } });
+  }
+  const manifest = await prepareRuntimeReview(productId, workspace.id);
+  await approveRuntimeReview({ productId, workspaceId: workspace.id, digest: runtimeManifestDigest(manifest), credential: key, actor: { id: "fixture-human", name: "Fixture human" }, reason: "Synthetic fixture: explicitly reviewed the exact source, runtime and behavioural scope." });
+  return { workspace, binding: await requireRuntimeReview(productId, workspace.id) };
+}
+
+/** Ties an existing fixture session to the fixture's signed review, the way a started verification attempt is. */
+export async function bindFixtureSession(sessionId: string, productId: string, taskId: string, extraState: Record<string, unknown> = {}) {
+  const { workspace, binding } = await signFixtureRuntimeReview(productId, taskId);
+  const session = await db.verificationSession.findUniqueOrThrow({ where: { id: sessionId } });
+  await db.verificationWorkspace.create({ data: { sessionId, repositoryId: workspace.repositoryId, baseCommit: session.commitSha, branchName: `fixture-${sessionId.slice(-8)}`, status: "ACTIVE" } });
+  return db.verificationSession.update({ where: { id: sessionId }, data: { repositoryWorkspaceId: workspace.id, runState: { ...((session.runState as object) ?? {}), ...extraState, runtimeBinding: binding } as never } });
+}

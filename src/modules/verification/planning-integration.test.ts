@@ -41,7 +41,10 @@ const original = {
   key: process.env.OPENAI_API_KEY,
   root: process.env.PRODUCT_REPOSITORY_ROOT,
   worktrees: process.env.PRODUCT_REPOSITORY_WORKTREE_ROOT,
+  reviewKey: process.env.EXTERNAL_REVIEW_APPROVAL_KEY,
+  containers: process.env.APF_CONTAINER_VERIFICATION_READY,
 };
+
 
 // Point the process at the isolated database before any module that loads the Prisma client is imported. Those
 // modules are imported dynamically in beforeAll, after this assignment.
@@ -56,6 +59,7 @@ type Db = typeof import("@/lib/db").db;
 let db: Db;
 let startVerification: typeof import("@/modules/verification/service").startVerification;
 let completedTaskIn: typeof import("@/modules/verification/completed-task.test-support").completedTaskIn;
+let signFixtureRuntimeReview: typeof import("@/modules/verification/completed-task.test-support").signFixtureRuntimeReview;
 let setAIProviderForTests: typeof import("@/modules/ai/provider").setAIProviderForTests;
 type AIProvider = import("@/modules/ai/provider").AIProvider;
 
@@ -175,7 +179,9 @@ const COVERAGE = (criterionId: string) => ({
 
 /** Creates the completed task the planning phase needs, in a temporary repository. */
 async function completedTask() {
-  return completedTaskIn(makeRepository(), { pass: true, build: false });
+  const setup = await completedTaskIn(makeRepository(), { pass: true, build: false });
+  await signFixtureRuntimeReview(setup.product.id, setup.task.id);
+  return setup;
 }
 
 /**
@@ -230,6 +236,20 @@ function requireSession<T extends { id: string } | null>(session: T): NonNullabl
   return session as NonNullable<T>;
 }
 
+/**
+ * Runs the production start path and returns the session it created. These scenarios are about planning, which is saved
+ * before any container runs; the execution stage needs real Docker and downloaded dependencies, which a test must not
+ * need. A failure of only that stage is therefore tolerated, and the session is read back from the database.
+ */
+async function plannedSession(task: { product: { id: string }; task: { id: string } }) {
+  try {
+    return requireSession(await startVerification(task.product.id, task.task.id));
+  } catch (error) {
+    if (!(error instanceof Error) || !/container verification|committed dependency lockfile|isolated verification/i.test(error.message)) throw error;
+    return requireSession(await db.verificationSession.findFirst({ where: { productId: task.product.id, implementationTaskId: task.task.id }, orderBy: { createdAt: "desc" } }));
+  }
+}
+
 async function reviewedVerdict(sessionId: string) {
   const row = await db.verificationSession.findUnique({ where: { id: sessionId }, select: { overallVerdict: true } });
   return row?.overallVerdict ?? "";
@@ -257,7 +277,7 @@ beforeAll(async () => {
   });
   db = (await import("@/lib/db")).db;
   ({ startVerification } = await import("@/modules/verification/service"));
-  ({ completedTaskIn } = await import("@/modules/verification/completed-task.test-support"));
+  ({ completedTaskIn, signFixtureRuntimeReview } = await import("@/modules/verification/completed-task.test-support"));
   ({ setAIProviderForTests } = await import("@/modules/ai/provider"));
 }, 300_000);
 
@@ -278,6 +298,8 @@ afterAll(async () => {
     restore("OPENAI_API_KEY", original.key);
     restore("PRODUCT_REPOSITORY_ROOT", original.root);
     restore("PRODUCT_REPOSITORY_WORKTREE_ROOT", original.worktrees);
+    restore("EXTERNAL_REVIEW_APPROVAL_KEY", original.reviewKey);
+    restore("APF_CONTAINER_VERIFICATION_READY", original.containers);
   }
 }, 120_000);
 
@@ -317,7 +339,7 @@ describe.skipIf(!RUN)("planning integration (isolated database, production runPl
     });
     useProvider(provider);
 
-    const session = requireSession(await startVerification(task.product.id, task.task.id));
+    const session = await plannedSession(task);
     console.log("AI calls:", provider.requests.map((item) => item.schemaName).join(" -> "));
     const cases = await persistedCases(session.id);
     expect(cases).toHaveLength(1);
@@ -350,7 +372,7 @@ describe.skipIf(!RUN)("planning integration (isolated database, production runPl
       verification_summary: [{ proposedVerdict: "INCONCLUSIVE", rationale: "Planning integration test." }],
     });
     useProvider(provider);
-    const session = requireSession(await startVerification(task.product.id, task.task.id));
+    const session = await plannedSession(task);
 
     const cases = await persistedCases(session.id);
     expect(cases).toHaveLength(1);
@@ -417,14 +439,15 @@ describe.skipIf(!RUN)("planning integration (isolated database, production runPl
       verification_summary: [{ proposedVerdict: "INCONCLUSIVE", rationale: "Planning integration test." }],
     });
     useProvider(provider);
-    // Remove the verification database configuration for this call only, so http-blackbox is UNAVAILABLE.
-    const saved = process.env.VERIFICATION_DATABASE_ADMIN_URL;
-    delete process.env.VERIFICATION_DATABASE_ADMIN_URL;
+    // Switch container verification off for this call only, so http-blackbox is UNAVAILABLE.
+    const saved = process.env.APF_CONTAINER_VERIFICATION_READY;
+    process.env.APF_CONTAINER_VERIFICATION_READY = "0";
     let session;
     try {
-      session = requireSession(await startVerification(task.product.id, task.task.id));
+      session = await plannedSession(task);
     } finally {
-      process.env.VERIFICATION_DATABASE_ADMIN_URL = saved;
+      if (saved === undefined) delete process.env.APF_CONTAINER_VERIFICATION_READY;
+      else process.env.APF_CONTAINER_VERIFICATION_READY = saved;
     }
 
     const cases = await persistedCases(session.id);
@@ -449,7 +472,7 @@ describe.skipIf(!RUN)("planning integration (isolated database, production runPl
       verification_summary: [{ proposedVerdict: "INCONCLUSIVE", rationale: "Planning integration test." }],
     });
     useProvider(provider);
-    const session = requireSession(await startVerification(task.product.id, task.task.id));
+    const session = await plannedSession(task);
     const cases = await persistedCases(session.id);
     expect(cases).toHaveLength(1);
     expect(cases[0]).toMatchObject({
@@ -492,7 +515,7 @@ describe.skipIf(!RUN)("planning integration (isolated database, production runPl
     });
     useProvider(provider);
 
-    const session = requireSession(await startVerification(task.product.id, task.task.id));
+    const session = await plannedSession(task);
     const cases = await persistedCases(session.id);
     expect(cases).toHaveLength(1);
     expect(cases[0]).toMatchObject({
@@ -550,7 +573,7 @@ describe.skipIf(!RUN)("planning integration (isolated database, production runPl
     }));
     let session;
     try {
-      session = requireSession(await startVerification(task.product.id, task.task.id));
+      session = await plannedSession(task);
     } finally {
       setHttpAcceptanceOverridesForTests(null);
     }

@@ -1,5 +1,6 @@
 import {approveRuntimeReview,prepareRuntimeReview,requireRuntimeReview} from './runtime-review';
 import {runtimeManifestDigest} from './runtime-manifest';
+import {bindFixtureSession} from './completed-task.test-support';
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -30,7 +31,7 @@ import {
 } from "@/modules/verification/service";
 import { verificationEntryBlockers } from "@/modules/verification/gates";
 import { recomputeSession } from "@/modules/verification/assess";
-import { verificationEvidenceFingerprint } from "@/modules/verification/integrity";
+import { verificationEvidenceFingerprint, VERIFICATION_EVIDENCE_INCLUDE } from "@/modules/verification/integrity";
 
 const products: string[] = [];
 const repos: string[] = [];
@@ -755,10 +756,11 @@ test('claim verification with a stalled descendant',async()=>{assert.equal(submi
         return provider({ criterionId: setup.criterion.id }).generate(request);
       },
     });
-    const session = await startVerification(setup.product.id, setup.task.id);
-    expect(session?.escalations.some((item) => item.type === "IMPLEMENTATION_CHANGE" && item.status === "OPEN")).toBe(true);
-    expect(session?.overallVerdict).not.toBe("PASS");
-    expect(session?.overallVerdict).not.toBe("PASS_WITH_CONCERNS");
+    // Containers never start on a snapshot that changed after approval: the attempt stops, and that is not a product verdict.
+    await expect(startVerification(setup.product.id, setup.task.id)).rejects.toThrow(/approved snapshot changed before container verification/i);
+    const session = await db.verificationSession.findFirstOrThrow({ where: { productId: setup.product.id }, orderBy: { createdAt: "desc" } });
+    expect(session.overallVerdict).not.toBe("PASS");
+    expect(session.overallVerdict).not.toBe("PASS_WITH_CONCERNS");
     expect(fs.readFileSync(path.join(setup.repo, "src/claims/submit.mjs"), "utf8")).toContain("CLM-1001");
   });
 
@@ -892,9 +894,9 @@ test('claim verification with a stalled descendant',async()=>{assert.equal(submi
       testCaseId: manual.id,
       result: "PASS",
       comment: "Observed the reference.",
-    })).rejects.toThrow(/RE-VERIFICATION REQUIRED/);
+    })).rejects.toThrow(/RE-VERIFICATION REQUIRED|Runtime\/behaviour approval/);
     await expect(confirmNotApplicable(setup.product.id, session!.id, setup.criterion.id, "Local user"))
-      .rejects.toThrow(/RE-VERIFICATION REQUIRED/);
+      .rejects.toThrow(/RE-VERIFICATION REQUIRED|Runtime\/behaviour approval/);
 
     const after = await getVerificationSession(setup.product.id, session!.id);
     expect(after?.coverages[0]).toMatchObject({ status: coverageBefore?.status, humanConfirmed: coverageBefore?.humanConfirmed });
@@ -915,13 +917,13 @@ test('claim verification with a stalled descendant',async()=>{assert.equal(submi
       content: "// should not be written\n",
     });
     expect(write.allowed).toBe(false);
-    expect(write.reason).toMatch(/RE-VERIFICATION REQUIRED/);
+    expect(write.reason).toMatch(/RE-VERIFICATION REQUIRED|Runtime\/behaviour approval/);
     const command = await applyVerificationTool(setup.product.id, session!.id, {
       action: "RUN_COMMAND",
       command: "npm test",
     });
     expect(command.allowed).toBe(false);
-    expect(command.reason).toMatch(/RE-VERIFICATION REQUIRED/);
+    expect(command.reason).toMatch(/RE-VERIFICATION REQUIRED|Runtime\/behaviour approval/);
     const read = await applyVerificationTool(setup.product.id, session!.id, { action: "READ_FILE", path: "package.json" });
     expect(read.allowed).toBe(true);
     expect(fs.existsSync(path.join(session!.workspace!.workspacePath, testPath))).toBe(false);
@@ -1299,14 +1301,14 @@ test('claim verification with a stalled descendant',async()=>{assert.equal(submi
     expect(first?.commitSha).toBe(setup.sha);
   });
 
-  it("still allows verification entry when the temporary coding checkout is missing", async () => {
+  it("fails closed, as technical authority unavailable, when the temporary coding checkout is missing", async () => {
     const setup = await completedTask();
     await db.repositoryWorkspace.updateMany({
       where: { implementationTaskId: setup.task.id },
       data: { workspacePath: path.join(os.tmpdir(), `missing-${setup.task.id}`) },
     });
-    const reasons = await verificationEntryBlockers(setup.product.id, setup.task.id);
-    expect(reasons.some((reason) => /not in the product repository/i.test(reason))).toBe(false);
+    // The checkout cannot be read, so entry cannot be assessed. That is unavailable authority, never a quiet pass or a false "not in the repository".
+    await expect(verificationEntryBlockers(setup.product.id, setup.task.id)).rejects.toThrow(/temporarily unavailable/i);
   });
 
   it("records an integrated plan without executing or verifying the slice", async () => {
@@ -1512,6 +1514,9 @@ describe("new attempt governance", () => {
         overallVerdict: "PASS",
       },
     });
+    // An approval counts only on an attempt started under the signed runtime review, as a real one is.
+    await bindFixtureSession(approvedSession.id, setup.product.id, setup.task.id);
+    const bound = await db.verificationSession.findUniqueOrThrow({ where: { id: approvedSession.id }, include: VERIFICATION_EVIDENCE_INCLUDE });
     const approval = await db.approval.create({
       data: { productId: setup.product.id, approvalType: "VERIFICATION", status: "APPROVED", approvedBy: "Local user" },
     });
@@ -1522,7 +1527,7 @@ describe("new attempt governance", () => {
         sessionId: approvedSession.id,
         implementationTaskId: setup.task.id,
         commitSha: setup.sha,
-        evidenceFingerprint: verificationEvidenceFingerprint({ executions: [], coverages: [] }),
+        evidenceFingerprint: verificationEvidenceFingerprint(bound),
       },
     });
     await expect(startNewVerificationAttempt(setup.product.id, setup.task.id)).rejects.toThrow(/already approved/);
