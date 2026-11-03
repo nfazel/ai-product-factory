@@ -28,7 +28,7 @@ export function SourceControlPanel({ productId, view }: { productId: string; vie
         <p className="text-xs font-medium tracking-wide text-indigo-700">TASK BRANCH PUBLISHING</p>
         <h2 className="mt-1 text-lg font-semibold">Publish one approved task branch</h2>
         <p className="mt-3 text-sm leading-6 text-muted-foreground">
-          Publish Branch pushes the approved branch. It does not create a pull request, merge, or deploy. The sequence is Publish Branch, then Create Pull Request, then human review, then merge in GitHub.
+          Steps: Publish Branch, then Create Pull Request, then a person reviews and merges in GitHub. Publishing never merges or deploys.
         </p>
         <p className="mt-3 text-sm text-muted-foreground">
           GitHub connection {view.connection.status}. {view.connection.message}{" "}
@@ -71,6 +71,35 @@ export function SourceControlPanel({ productId, view }: { productId: string; vie
               DEMO DATA. This publication was seeded for the sample product. It was not retrieved from GitHub.
             </p>
           ) : null}
+          <p className="mt-3 text-sm leading-6 text-muted-foreground">{taskSummary(task)}</p>
+          <div className="mt-4 flex flex-wrap gap-3">
+            {task.publication.offerForm ? (
+              <PublishBranchButton
+                productId={productId}
+                taskId={task.id}
+                destination={destination}
+                branch={task.branchName}
+                commitSha={task.commitSha}
+              />
+            ) : null}
+            {task.publication.remoteCommitSha && !task.publication.demo && !task.pullRequest && (!view.bootstrap || view.bootstrap.status === "ready" || view.bootstrap.status === "hidden") ? (
+              <CreatePullRequestForm productId={productId} taskId={task.id} />
+            ) : null}
+            {task.pullRequest && !task.pullRequest.demo ? (
+              <>
+                <RefreshPullRequestButton productId={productId} pullRequestId={task.pullRequest.id} />
+                <AnalyseFeedbackButton productId={productId} pullRequestId={task.pullRequest.id} />
+                <UpdateBranchButton productId={productId} taskId={task.id} />
+                {task.pullRequest.url ? (
+                  <a className="inline-flex h-9 items-center text-sm font-medium text-indigo-800" href={task.pullRequest.url}>
+                    Open Pull Request in GitHub
+                  </a>
+                ) : null}
+              </>
+            ) : null}
+          </div>
+          <details className="mt-4 rounded-xl border p-4">
+            <summary className="cursor-pointer text-sm font-medium">Evidence and details</summary>
           <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
             <div>
               <dt className="text-xs text-muted-foreground">Implementation</dt>
@@ -252,32 +281,7 @@ export function SourceControlPanel({ productId, view }: { productId: string; vie
               ))}
             </ul>
           </div>
-          <div className="mt-4 flex flex-wrap gap-3">
-            {task.publication.offerForm ? (
-              <PublishBranchButton
-                productId={productId}
-                taskId={task.id}
-                destination={destination}
-                branch={task.branchName}
-                commitSha={task.commitSha}
-              />
-            ) : null}
-            {task.publication.remoteCommitSha && !task.publication.demo && !task.pullRequest && (!view.bootstrap || view.bootstrap.status === "ready" || view.bootstrap.status === "hidden") ? (
-              <CreatePullRequestForm productId={productId} taskId={task.id} />
-            ) : null}
-            {task.pullRequest && !task.pullRequest.demo ? (
-              <>
-                <RefreshPullRequestButton productId={productId} pullRequestId={task.pullRequest.id} />
-                <AnalyseFeedbackButton productId={productId} pullRequestId={task.pullRequest.id} />
-                <UpdateBranchButton productId={productId} taskId={task.id} />
-                {task.pullRequest.url ? (
-                  <a className="inline-flex h-9 items-center text-sm font-medium text-indigo-800" href={task.pullRequest.url}>
-                    Open Pull Request in GitHub
-                  </a>
-                ) : null}
-              </>
-            ) : null}
-          </div>
+          </details>
         </article>
       ))}
       <div id="release-readiness" className="rounded-2xl border bg-card p-5">
@@ -338,4 +342,14 @@ function mergeInstant(value: Date | string | null | undefined) {
   const formatted = instant(value);
   if (!formatted || Number.isNaN(Date.parse(formatted))) return "Not recorded";
   return formatted;
+}
+
+/** One plain sentence on where a task branch stands, so the details can stay folded. */
+function taskSummary(task: View["tasks"][number]) {
+  if (task.pullRequest?.state === "MERGED") return `Pull request #${task.pullRequest.number} was merged in GitHub. Nothing more to do here.`;
+  if (task.pullRequest) return `Pull request #${task.pullRequest.number} is ${task.pullRequest.state.toLowerCase()}. A person reviews and merges it in GitHub.`;
+  if (task.publication.inProgress) return "Publishing is in progress.";
+  if (task.publication.remoteCommitSha) return "The branch is published. The next step is creating a pull request.";
+  if (task.blockers.length === 0) return "This task can be published now.";
+  return `Not ready to publish: ${task.blockers[0]}`;
 }

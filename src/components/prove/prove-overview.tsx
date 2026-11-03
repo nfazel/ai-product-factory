@@ -1,5 +1,7 @@
 import Link from "next/link";
 
+import { buttonVariants } from "@/components/ui/button";
+
 import { StatusPill } from "@/components/build/status-pill";
 import { IntegratedButton } from "@/components/prove/prove-controls";
 import {
@@ -57,29 +59,24 @@ export function ProveOverview({
         </section>
       ) : null}
       <div className="rounded-2xl border bg-card p-4 sm:p-5">
-        <p className="text-xs font-medium tracking-[0.14em] text-muted-foreground uppercase">Prove · Verification</p>
-        <h2 className="mt-1 text-lg font-semibold">Independent verification by task</h2>
-        <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
-          Each implementation task is verified against its approved source snapshot. Counts come from recorded verification
-          and task state. A task is not verified because its coding finished.
-        </p>
-        <p className="mt-3 text-xs text-muted-foreground">Product slice · {readinessLabel}</p>
-
-        <dl className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        <h2 className="text-lg font-semibold">Check each task</h2>
+        <p className="mt-1 text-sm leading-6 text-muted-foreground">{headline(summary)}</p>
+        <ul className="mt-3 flex flex-wrap gap-2" aria-label="Task counts">
           {CARD_ORDER.map((bucket) => {
             const value = countFor(summary, bucket);
-            const emphasis = value > 0 && (bucket === "blocked" || bucket === "ready" || bucket === "awaiting-review");
+            if (value === 0) return null;
+            const attention = bucket === "blocked" || bucket === "ready" || bucket === "awaiting-review";
             return (
-              <div
+              <li
                 key={bucket}
-                className={`rounded-xl border px-4 py-3 ${emphasis ? "border-amber-300 bg-amber-50" : "bg-stone-50"}`}
+                className={`rounded-full border px-3 py-1 text-sm ${attention ? "border-amber-300 bg-amber-50 text-amber-950" : "bg-muted text-foreground"}`}
               >
-                <dt className="text-xs text-muted-foreground">{BUCKET_LABEL[bucket]}</dt>
-                <dd className="mt-1 text-2xl font-semibold">{value}</dd>
-              </div>
+                <span className="font-semibold">{value}</span> {BUCKET_LABEL[bucket].toLowerCase()}
+              </li>
             );
           })}
-        </dl>
+        </ul>
+        <p className="mt-3 text-xs text-muted-foreground">Whole product: {readinessLabel.toLowerCase()}</p>
       </div>
 
       <nav aria-label="Filter verification tasks" className="flex flex-wrap gap-2">
@@ -111,25 +108,11 @@ export function ProveOverview({
             No tasks match this filter. Blocked tasks also appear under All and Needs attention.
           </p>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-left text-sm">
-              <thead className="border-b bg-stone-50 text-xs uppercase tracking-wide text-muted-foreground">
-                <tr>
-                  <th className="px-4 py-3 font-medium">Task</th>
-                  <th className="px-4 py-3 font-medium">Implementation</th>
-                  <th className="px-4 py-3 font-medium">Verification</th>
-                  <th className="px-4 py-3 font-medium">Blocker</th>
-                  <th className="px-4 py-3 font-medium">Next action</th>
-                  <th className="px-4 py-3 font-medium"><span className="sr-only">Open</span></th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row) => (
-                  <ProveRow key={row.id} productId={productId} row={row} />
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <ul className="divide-y">
+            {rows.map((row) => (
+              <ProveRow key={row.id} productId={productId} row={row} />
+            ))}
+          </ul>
         )}
       </div>
     </div>
@@ -173,47 +156,48 @@ export function IntegratedPlanDetails({ prove, productId }: { prove: ProveView; 
 
 function ProveRow({ productId, row }: { productId: string; row: ProveTaskRow }) {
   const href = proveTaskHref(productId, row.id);
+  const toBuild = row.nextAction.kind === "return-to-build";
   return (
-    <tr className="border-b last:border-0">
-      <td className="px-4 py-3 align-top">
-        <Link href={href} className="font-medium text-stone-900 hover:underline">
-          {row.title}
-        </Link>
+    <li className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+      <div className="min-w-0 space-y-1.5">
+        <div className="flex flex-wrap items-center gap-2">
+          <Link href={href} className="font-medium hover:underline">
+            {row.title}
+          </Link>
+          <StatusPill label={row.verificationLabel} tone={row.verificationTone} />
+        </div>
+        {row.primaryBlocker ? <p className="text-sm leading-6 text-muted-foreground">{row.primaryBlocker}</p> : null}
         {row.commitSha ? (
-          <p className="mt-1 font-mono text-xs text-muted-foreground" title={row.commitSha}>
+          <p className="font-mono text-xs text-muted-foreground" title={row.commitSha}>
             Snapshot {row.shortCommit}
           </p>
         ) : null}
-      </td>
-      <td className="px-4 py-3 align-top">
-        <StatusPill label={row.implementationLabel} tone={row.implementationStatus === "COMPLETED" ? "success" : "neutral"} />
-      </td>
-      <td className="px-4 py-3 align-top">
-        <StatusPill label={row.verificationLabel} tone={row.verificationTone} />
-      </td>
-      <td className="px-4 py-3 align-top text-sm text-muted-foreground">
-        {row.primaryBlocker || "None"}
-      </td>
-      <td className="px-4 py-3 align-top text-sm">
-        <span className="font-medium text-stone-900">{row.nextAction.label}</span>
-        {row.nextAction.kind === "return-to-build" ? (
-          <p className="mt-1">
-            <Link href={buildTaskHref(productId, row.id)} className="text-xs text-indigo-800 hover:underline">
-              Open task in Build
+      </div>
+      <div className="flex shrink-0 flex-wrap gap-2">
+        {toBuild ? (
+          <>
+            <Link href={buildTaskHref(productId, row.id)} className={buttonVariants({ size: "lg" })}>
+              {row.nextAction.label}
             </Link>
-          </p>
-        ) : null}
-      </td>
-      <td className="px-4 py-3 align-top text-right">
-        <Link
-          href={href}
-          className="inline-flex rounded-lg border bg-white px-3 py-1.5 text-sm font-medium text-stone-900 hover:bg-stone-50 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-        >
-          Open Verification
-        </Link>
-      </td>
-    </tr>
+            <Link href={href} className={buttonVariants({ size: "lg", variant: "outline" })}>
+              Open verification
+            </Link>
+          </>
+        ) : (
+          <Link href={href} className={buttonVariants({ size: "lg" })}>
+            {row.nextAction.kind === "none" ? "Open verification" : row.nextAction.label}
+          </Link>
+        )}
+      </div>
+    </li>
   );
+}
+
+function headline(summary: ProveOverviewSummary) {
+  if (summary.total === 0) return "No tasks are ready to check yet.";
+  const parts = [`${summary.total} ${summary.total === 1 ? "task" : "tasks"}`, `${summary.verified} verified`];
+  if (summary.attention > 0) parts.push(`${summary.attention} need${summary.attention === 1 ? "s" : ""} you`);
+  return `${parts.join(" · ")}. A task counts as verified only after an independent check, not because its coding finished.`;
 }
 
 function countFor(summary: ProveOverviewSummary, bucket: ProveBucket) {

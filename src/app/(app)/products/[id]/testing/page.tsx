@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import { notFound } from "next/navigation";
 
 import { PageSkeleton } from "@/components/feedback/states";
+import { CollapsedGroup } from "@/components/build/collapsed-group";
 import { NextActionPanel } from "@/components/guidance/guidance-ui";
 import { IntegratedPlanDetails, ProveOverview } from "@/components/prove/prove-overview";
 import { SourceControlPanel } from "@/components/source-control/source-control-panel";
@@ -65,13 +66,13 @@ async function Prove({
           },
         }
       : loadedGuidance;
+  const publishOpen = /publish|pull-request|create-pr|remote-main/i.test(guidance.action?.key ?? "");
   return (
     <div className="space-y-6">
-      <header className="space-y-2">
-        <p className="text-xs font-medium tracking-[0.14em] text-muted-foreground uppercase">Prove · Overview</p>
-        <h2 className="text-xl font-semibold">Verify tasks, then publish</h2>
+      <header className="space-y-1">
+        <h2 className="text-xl font-semibold">Prove</h2>
         <p className="max-w-3xl text-sm leading-6 text-muted-foreground">
-          Open a task to see its verification workspace. AI Product Builder does not merge the pull request. A person merges it in GitHub.
+          Check each task independently, then publish it to GitHub. A person merges the pull request in GitHub; nothing is deployed from here.
         </p>
       </header>
       {guidance.action?.stage === "PROVE" || guidance.stage === "PROVE" ? <NextActionPanel guidance={guidance} /> : null}
@@ -84,13 +85,18 @@ async function Prove({
         />
         <IntegratedPlanDetails prove={prove} productId={id} />
       </section>
-      <section id="publish" tabIndex={-1} className="scroll-mt-20 space-y-3 rounded-2xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
-        <h2 className="text-lg font-semibold">Publish</h2>
+      <CollapsedGroup id="publish" title="Publish to GitHub" summary={publishSummary(sourceControl.tasks)} open={publishOpen}>
         <p className="text-sm text-muted-foreground">
-          Publish Branch pushes the approved task branch. Create Pull Request is the next step. A person reviews and merges in GitHub. Nothing is deployed from here.
+          Publish Branch pushes the approved task branch. Create Pull Request is the next step. A person reviews and merges in GitHub.
         </p>
         <SourceControlPanel productId={id} view={sourceControl} />
-      </section>
+      </CollapsedGroup>
     </div>
   );
+}
+
+function publishSummary(tasks: { publication: { remoteCommitSha?: string | null }; pullRequest: { state: string } | null }[]) {
+  const published = tasks.filter((task) => task.publication.remoteCommitSha).length;
+  const merged = tasks.filter((task) => task.pullRequest?.state === "MERGED").length;
+  return `${published} published · ${merged} merged`;
 }
