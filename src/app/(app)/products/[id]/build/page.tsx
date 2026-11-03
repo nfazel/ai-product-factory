@@ -1,4 +1,6 @@
 import {RequirementsContextStatus} from "@/components/build/requirements-context";
+import { CollapsedGroup, nextStepHash } from "@/components/build/collapsed-group";
+import { nextActionDestination } from "@/modules/guidance/next-action-registry";
 import {LivePreviewSection} from "@/components/build/live-preview-section";
 import {inspectBuildVerification} from '@/modules/build/verification-view';
 import {FeatureReviews} from '@/components/build/feature-reviews';
@@ -134,10 +136,18 @@ async function Build({
       overallVerdict: session.overallVerdict,
     })) ?? [];
   const overview = buildOverviewSummary(codingTasks, verificationSnapshots);
+  const focus = nextStepHash(guidance.action?.href);
+  // The bar at the top of every page already says what to do and links to it. The full panel stays only where it runs something.
+  const destinationKind = guidance.action ? nextActionDestination(guidance.action.key).kind : undefined;
+  const showActionPanel = Boolean(guidance.action && (guidance.action.execution === "command" || destinationKind === "move" || destinationKind === "generate"));
 
   return (
     <div className="space-y-6">
+      {showActionPanel ? <NextActionPanel guidance={guidance} /> : null}
+      <CollapsedGroup id="requirements-context" title="Requirements context" summary="Which approved requirements this build rests on">
       <RequirementsContextStatus {...workspace.requirementsPresentation}/>
+      </CollapsedGroup>
+      <CollapsedGroup id="build-status" title="Build status and controls" summary="Readiness, holds and the design tools" open={["design", "plan", "review", "context", "repository"].includes(focus)}>
       <header className="rounded-2xl border bg-card p-4 sm:p-5">
         <p className="text-xs font-medium tracking-[0.14em] text-muted-foreground uppercase">
           Build overview
@@ -195,13 +205,9 @@ async function Build({
           <BuildControls productId={id} />
         </div>
       </header>
-      {guidance.stage === "BUILD" || guidance.action?.stage === "BUILD" ? <NextActionPanel guidance={guidance} /> : null}
-
       <BuildReadiness coding={workspace.coding} />
+      </CollapsedGroup>
 
-      {verificationObservation.unavailable&&<p role="alert" className="rounded border p-3">Technical verification status is temporarily unavailable. Feedback remains available; acceptance still requires current independent technical approval.</p>}
-      <Suspense fallback={<p>Loading preview…</p>}><LivePreviewSection productId={id}/></Suspense>
-      <Suspense fallback={<p>Loading feature reviews…</p>}><FeatureReviews productId={id}/></Suspense>
       <BuildOverview
         productId={id}
         summary={overview}
@@ -209,6 +215,13 @@ async function Build({
         repositoryReady={Boolean(workspace.codingExecution?.repositoryConfigured)}
       />
 
+
+
+      {verificationObservation.unavailable&&<p role="alert" className="rounded border p-3">Technical verification status is temporarily unavailable. Feedback remains available; acceptance still requires current independent technical approval.</p>}
+      <Suspense fallback={<p>Loading preview…</p>}><LivePreviewSection productId={id}/></Suspense>
+      <Suspense fallback={<p>Loading feature reviews…</p>}><FeatureReviews productId={id}/></Suspense>
+
+      <CollapsedGroup id="technical-readiness" title="Technical readiness" summary="Checks behind the coding gate">
       <section className="rounded-2xl border bg-card p-4 sm:p-5">
         <h2 className="text-base font-semibold">Technical readiness</h2>
         <ul className="mt-4 grid gap-3 sm:grid-cols-2">
@@ -228,6 +241,7 @@ async function Build({
         </ul>
       </section>
 
+      </CollapsedGroup>
       <DevelopmentContextPanel productId={id} developmentContext={workspace.developmentContext}>
         {context ? (
           <p className="text-sm leading-6 text-muted-foreground">
@@ -254,6 +268,7 @@ async function Build({
         />
       </DevelopmentContextPanel>
 
+      <CollapsedGroup id="design-and-architecture" title="Design and architecture" summary="The approved design, its choices and open questions" open={["design"].includes(focus)}>
       <section
         id="design"
         tabIndex={-1}
@@ -705,6 +720,8 @@ async function Build({
       </section>
       </section>
 
+      </CollapsedGroup>
+      <CollapsedGroup id="delivery-plan" title="Delivery plan" summary="Vertical slices and the committed plan" open={["plan"].includes(focus)}>
       <section
         id="plan"
         tabIndex={-1}
@@ -828,12 +845,16 @@ async function Build({
       </section>
       </section>
 
+      </CollapsedGroup>
+      <CollapsedGroup id="engineering-review" title="Engineering review and coding rules" summary="Findings, risks and the rules the Coding Agent follows" open={["review"].includes(focus)}>
       <GovernancePanel productId={id} governance={workspace.governance} clarification={clarification} />
+      </CollapsedGroup>
       <section id="repository" tabIndex={-1} className="scroll-mt-20 space-y-3 rounded-2xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
         {repository ? (
           <RepositoryPanel productId={id} repository={repository} installationRepositories={installationRepositories} />
         ) : null}
       </section>
+      <CollapsedGroup id="independent-verification" title="Independent verification" summary="Where verification stands for this build">
       <section className="rounded-2xl border bg-card p-5">
         <p className="text-xs font-medium tracking-wide text-indigo-700">VERIFICATION</p>
         <h2 className="text-lg font-semibold">Independent verification</h2>
@@ -845,6 +866,7 @@ async function Build({
           Open Prove
         </Link>
       </section>
+      </CollapsedGroup>
     </div>
   );
 }

@@ -89,7 +89,8 @@ export function summariseBuildTask(
   const validation = validationStatus(task);
   const approval = approvalStatus(task);
   const verify = verificationStatus(task, verification);
-  const blockers = [...task.blockers];
+  // A finished task is not waiting to be approved for coding; that gate reason only makes sense before coding.
+  const blockers = task.status === "COMPLETED" ? task.blockers.filter((reason) => !/Approve the task before coding/.test(reason)) : [...task.blockers];
   if (workspace?.stale) blockers.push(workspace.staleReason || "Approved coding instructions are out of date.");
   if (workspace?.planIncomplete) blockers.push("Execution plan must be revised before coding can continue.");
 

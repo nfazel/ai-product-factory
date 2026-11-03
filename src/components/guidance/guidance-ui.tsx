@@ -65,6 +65,8 @@ function hashId(hash: string) {
 function revealHashTarget(id: string, behavior: ScrollBehavior = "smooth") {
   const target = document.getElementById(id);
   if (!target) return false;
+  // A target folded inside a collapsed group is opened first, so the person lands on it and not on a closed heading.
+  for (let group = target.closest("details"); group; group = group.parentElement?.closest("details") ?? null) group.open = true;
   if (!target.hasAttribute("tabindex")) target.setAttribute("tabindex", "-1");
   target.scrollIntoView({ behavior, block: "start" });
   target.focus({ preventScroll: true });

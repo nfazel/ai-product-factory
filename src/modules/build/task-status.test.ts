@@ -157,4 +157,16 @@ describe("build task status", () => {
     expect(row.verificationStatus).toBe("Ready for Prove");
     expect(row.primaryAction?.kind).toBe("open-prove");
   });
+
+  it("does not tell a finished task to be approved for coding, because that gate reason only applies before coding", () => {
+    const done = task({ id: "d", title: "Done task", status: "COMPLETED", blockers: ["The implementation task is COMPLETED. Approve the task before coding."] });
+    const row = summariseBuildTask(done, { implementationTaskId: "d", status: "PASSED", overallVerdict: "PASS" });
+    expect(row.blockers).toEqual([]);
+    expect(row.nextAction).not.toMatch(/Approve the task before coding/);
+    expect(row.attention).toBe(false);
+  });
+  it("keeps other blockers on a finished task", () => {
+    const row = summariseBuildTask(task({ id: "d", title: "Done task", status: "COMPLETED", blockers: ["A real blocker."] }), null);
+    expect(row.blockers).toEqual(["A real blocker."]);
+  });
 });
