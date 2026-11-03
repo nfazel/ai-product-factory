@@ -147,12 +147,21 @@ async function assertAttemptAllowed(productId: string, taskId: string, kind: Att
   const state = attemptStateFor(sessions.map(withCurrentVerificationApprovals), { interrupted: false });
   const decision = attemptPolicy({
     kind,
+    failedBeforeReview: state.progress === "FAILED" && await reviewedSinceFailure(productId, taskId, (sessions.find((session) => !session.demo) ?? sessions[0])?.runState),
     progress: state.progress,
     humanApproved: state.humanApproved,
     openAttempt: false,
     entryBlockers: await blockersOrUnavailable(() => verificationEntryBlockers(productId, taskId)),
   });
   if (!decision.allowed) throw new DomainError(decision.reason);
+}
+
+/** A current signed runtime review exists for the task's latest workspace, and the latest attempt was made without one. */
+async function reviewedSinceFailure(productId: string, taskId: string, latestRunState: unknown) {
+  if (bindingFromState(latestRunState)) return false;
+  const workspace = await db.repositoryWorkspace.findFirst({ where: { productId, implementationTaskId: taskId }, orderBy: { createdAt: "desc" }, select: { id: true } });
+  if (!workspace) return false;
+  try { await requireRuntimeReview(productId, workspace.id); return true; } catch { return false; }
 }
 
 async function createAttempt(productId: string, taskId: string, kind: AttemptKind) {
@@ -719,6 +728,7 @@ export async function getProveView(productId: string) {
       trace: traceFor(task),
       featureConcern: featureConcernFor(task),
       commitSha: task.workspaces[0]?.headCommit ?? "",
+      reviewedSinceFailure: await reviewedSinceFailure(productId, task.id, sessions.find((session) => session.implementationTaskId === task.id && !session.demo)?.runState),
     })),
   );
   return { product, slice, readiness, awaiting, sessions, integrated };

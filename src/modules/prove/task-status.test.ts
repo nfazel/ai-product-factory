@@ -334,6 +334,16 @@ describe("execution failures, failed checks and insufficient evidence stay disti
     expect(explainProveState(row).headline).toBe("Verification found failing behaviour");
   });
 
+  it("offers a new attempt after a failure only once a signed runtime review exists that the failed attempt lacked", () => {
+    const failed = { status: "FAILED", overallVerdict: "FAIL", failureClass: "PRODUCT_VERIFICATION_FAILED" } as unknown as Partial<ProveSession>;
+    const without = summariseProveTask(task(), [session(failed)]);
+    expect(without.newAttempt.allowed).toBe(false);
+    expect(without.nextAction.kind).not.toBe("start-new-verification");
+    const reviewed = summariseProveTask({ ...task(), reviewedSinceFailure: true } as ProveAwaitingTask, [session(failed)]);
+    expect(reviewed.newAttempt).toEqual({ allowed: true, reason: "" });
+    expect(reviewed.nextAction).toEqual({ kind: "start-new-verification", label: "Start New Verification Attempt" });
+  });
+
   it("labels Task 4's inconclusive attempt as evidence insufficient awaiting a human decision, not blocked by an execution error", () => {
     const testCases = [
       { id: "c1", title: "Submit a card for the feed", status: "READY", automated: false, provenance: "VERIFICATION_AGENT", acceptanceCriterionId: "ac-1" },

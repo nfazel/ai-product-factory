@@ -1,4 +1,4 @@
-import {approveRuntimeReview,prepareRuntimeReview} from './runtime-review';
+import {approveRuntimeReview,prepareRuntimeReview,requireRuntimeReview} from './runtime-review';
 import {runtimeManifestDigest} from './runtime-manifest';
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
@@ -1532,8 +1532,10 @@ describe("new attempt governance", () => {
     expect(await db.verificationSession.count({ where: { productId: setup.product.id } })).toBe(1);
   });
 
-  it("refuses a new attempt after a failed verdict, which needs a change rather than a new run", async () => {
+  it("refuses a new attempt after a failed verdict that was reached under the signed review, which needs a change rather than a new run", async () => {
     const setup = await completedTask();
+    const workspace = await db.repositoryWorkspace.findFirstOrThrow({ where: { implementationTaskId: setup.task.id }, orderBy: { createdAt: "desc" } });
+    const runtimeBinding = await requireRuntimeReview(setup.product.id, workspace.id);
     await db.verificationSession.create({
       data: {
         productId: setup.product.id,
@@ -1541,10 +1543,11 @@ describe("new attempt governance", () => {
         commitSha: setup.sha,
         status: "REVIEW",
         overallVerdict: "FAIL",
+        runState: { runtimeBinding } as never,
       },
     });
     await expect(startNewVerificationAttempt(setup.product.id, setup.task.id)).rejects.toThrow(
-      /inconclusive result or a result awaiting human review/,
+      /failure that happened before a signed runtime review existed/,
     );
     expect(await db.verificationSession.count({ where: { productId: setup.product.id } })).toBe(1);
   });

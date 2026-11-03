@@ -43,6 +43,23 @@ describe("retry for technical failures", () => {
   });
 });
 
+describe("new attempt after a failure that predates a signed runtime review", () => {
+  it("allows a new attempt after a FAIL only when a signed review now exists that the attempt lacked", () => {
+    expect(policy({ progress: "FAILED", failedBeforeReview: true })).toEqual({ allowed: true });
+    expect(policy({ progress: "FAILED" }).allowed).toBe(false);
+    expect(policy({ progress: "FAILED", failedBeforeReview: false }).allowed).toBe(false);
+  });
+  it("still refuses when a person approved, an attempt is open, or the entry gate blocks", () => {
+    expect(policy({ progress: "FAILED", failedBeforeReview: true, humanApproved: true }).allowed).toBe(false);
+    expect(policy({ progress: "FAILED", failedBeforeReview: true, openAttempt: true }).allowed).toBe(false);
+    expect(policy({ progress: "FAILED", failedBeforeReview: true, entryBlockers: ["Code approval is stale."] }).allowed).toBe(false);
+  });
+  it("does not widen first or retry", () => {
+    expect(policy({ kind: "first", progress: "FAILED", failedBeforeReview: true }).allowed).toBe(false);
+    expect(policy({ kind: "retry", progress: "FAILED", failedBeforeReview: true }).allowed).toBe(false);
+  });
+});
+
 describe("new attempt after an inconclusive or unapproved result", () => {
   it("allows a new attempt after an INCONCLUSIVE result awaiting review", () => {
     expect(policy({ kind: "new", progress: "REVIEW" })).toEqual({ allowed: true });

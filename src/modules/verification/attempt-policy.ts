@@ -30,6 +30,11 @@ export type AttemptPolicyInput = {
   openAttempt: boolean;
   /** Reasons from the entry gate. Empty when the implementation and its approved snapshot are eligible. */
   entryBlockers: string[];
+  /**
+   * True when the latest attempt failed without being tied to a signed runtime review and a current signed review now exists.
+   * That failure may only reflect missing runtime, so a fresh attempt under the review is allowed. Computed by the server.
+   */
+  failedBeforeReview?: boolean;
 };
 
 export type AttemptPolicy = { allowed: true } | { allowed: false; refusal: AttemptRefusal; reason: string };
@@ -74,10 +79,11 @@ export function attemptPolicy(input: AttemptPolicyInput): AttemptPolicy {
       }
       return { allowed: true };
     case "new":
+      if (input.progress === "FAILED" && input.failedBeforeReview) return { allowed: true };
       if (!NEW_ATTEMPT_AFTER.includes(input.progress)) {
         return refuse(
           "NOT_NEW_ELIGIBLE",
-          "A new attempt is offered after an inconclusive result or a result awaiting human review. Nothing else starts a new attempt.",
+          "A new attempt is offered after an inconclusive result, a result awaiting human review, or a failure that happened before a signed runtime review existed. Nothing else starts a new attempt.",
         );
       }
       return { allowed: true };

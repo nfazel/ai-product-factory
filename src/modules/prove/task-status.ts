@@ -156,9 +156,9 @@ export function summariseProveTask(task: ProveAwaitingTask, sessions: ProveSessi
   const bucket = proveBucket(progress, blockers, task.status);
   const commitSha = task.commitSha || current?.commitSha || "";
   const outcome = proveOutcome(progress, current);
-  const newAttempt = newAttemptStateFor(progress, state.humanApproved, blockers);
+  const newAttempt = newAttemptStateFor(progress, state.humanApproved, blockers, progress === "FAILED" && Boolean(task.reviewedSinceFailure));
   // An inconclusive result has one explicit way forward: a new attempt, when the policy permits it.
-  const offerNewAttempt = newAttempt.allowed && progress === "REVIEW" && current?.overallVerdict === "INCONCLUSIVE";
+  const offerNewAttempt = newAttempt.allowed && ((progress === "REVIEW" && current?.overallVerdict === "INCONCLUSIVE") || (progress === "FAILED" && Boolean(task.reviewedSinceFailure)));
   return {
     id: task.id,
     title: task.title,
@@ -182,13 +182,14 @@ export function summariseProveTask(task: ProveAwaitingTask, sessions: ProveSessi
   };
 }
 
-function newAttemptStateFor(progress: VerificationProgress, humanApproved: boolean, blockers: string[]): NewAttemptState {
+function newAttemptStateFor(progress: VerificationProgress, humanApproved: boolean, blockers: string[], failedBeforeReview = false): NewAttemptState {
   const decision = attemptPolicy({
     kind: "new",
     progress,
     humanApproved,
     openAttempt: progress === "RUNNING" || progress === "INTERRUPTED",
     entryBlockers: blockers,
+    failedBeforeReview,
   });
   return decision.allowed ? { allowed: true, reason: "" } : { allowed: false, reason: decision.reason };
 }
