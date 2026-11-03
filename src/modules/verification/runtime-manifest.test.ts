@@ -46,3 +46,22 @@ describe('reviewer-chosen runtime declarations', () => {
     expect(() => manifestRuntimes({ ...base, reviewerRuntime: [{ command: 'npm run build', runtime: REVIEWER_RUNTIME }] } as RuntimeManifest)).toThrow();
   });
 });
+
+import { reviewerCoverageFor } from './runtime-manifest';
+describe('reviewer-signed links between tests and criteria', () => {
+  const manifest = { plan: { validationPlan: 'Required:\nnpm run build' }, criteria: [{ id: 'c1', description: 'View and choose' }], reviewerRuntime: reviewerRuntimeFor(['npm run test:integration']) } as unknown as RuntimeManifest;
+  it('accepts a link between a test that runs against the app and a criterion of this task', () => {
+    expect(reviewerCoverageFor(manifest, [{ command: 'npm run test:integration', criterionId: 'c1' }])).toEqual([{ command: 'npm run test:integration', criterionId: 'c1' }]);
+  });
+  it.each([
+    ['a test that does not run against the app', { command: 'npm run build', criterionId: 'c1' }],
+    ['a criterion from another task', { command: 'npm run test:integration', criterionId: 'other' }],
+  ])('rejects %s', (_label, link) => { expect(() => reviewerCoverageFor(manifest, [link])).toThrow(); });
+  it('rejects duplicates, and changes the digest only when a link is chosen', () => {
+    const link = { command: 'npm run test:integration', criterionId: 'c1' };
+    expect(() => reviewerCoverageFor(manifest, [link, link])).toThrow();
+    const base = withReviewerRuntime(manifest, ['npm run test:integration']), linked = withReviewerRuntime(manifest, ['npm run test:integration'], [link]);
+    expect(runtimeManifestDigest(linked)).not.toBe(runtimeManifestDigest(base));
+    expect('reviewerCoverage' in base).toBe(false);
+  });
+});

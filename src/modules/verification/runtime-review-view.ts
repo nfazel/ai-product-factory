@@ -15,8 +15,10 @@ export type RuntimeReviewView={
  containerVerification:boolean;
  /** Existing test commands the reviewer may choose to run against a throwaway app and database. Empty once approved. */
  candidates:string[];
+ /** The task's acceptance criteria, so a reviewer can say which a test proves. Empty once approved. */
+ criteriaChoices:{id:string;description:string}[];
 };
-const view=(state:RuntimeReviewState,message:string,extra:Partial<RuntimeReviewView>={}):RuntimeReviewView=>({state,message,digest:null,review:null,approved:null,candidates:[],containerVerification:process.env.APF_CONTAINER_VERIFICATION_READY==='1',...extra});
+const view=(state:RuntimeReviewState,message:string,extra:Partial<RuntimeReviewView>={}):RuntimeReviewView=>({state,message,digest:null,review:null,approved:null,candidates:[],criteriaChoices:[],containerVerification:process.env.APF_CONTAINER_VERIFICATION_READY==='1',...extra});
 
 /** The workspace verification uses for a task: always its most recent one, chosen here, never by the browser. */
 export async function runtimeReviewWorkspaceId(productId:string,taskId:string){
@@ -45,7 +47,7 @@ export async function getRuntimeReviewView(productId:string,taskId:string):Promi
  }catch(error){
   if(error instanceof AuthorityUnavailableError)return view('UNAVAILABLE','The existing review cannot currently be confirmed.',{digest,review});
   if(error instanceof DomainError){let declared:string[]=[];try{declared=[...manifestRuntimes(manifest).keys()]}catch{/* shown as unavailable when approving */}
-   return view('NEEDED','A person must review and approve exactly what will run before verification can start.',{digest,review,candidates:await reviewableTestCommands(productId,workspaceId,declared)});}
+   return view('NEEDED','A person must review and approve exactly what will run before verification can start.',{digest,review,candidates:await reviewableTestCommands(productId,workspaceId,declared),criteriaChoices:manifest.criteria.map(c=>({id:c.id,description:c.description}))});}
   throw error;
  }
 }

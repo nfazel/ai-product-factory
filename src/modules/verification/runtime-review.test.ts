@@ -22,6 +22,20 @@ async function setup(){
 }
 async function approve(f:Awaited<ReturnType<typeof setup>>){const manifest=await prepareRuntimeReview(f.product.id,f.workspace.id);await approveRuntimeReview({productId:f.product.id,workspaceId:f.workspace.id,digest:runtimeManifestDigest(manifest),credential:key,actor:{id:'test-human',name:'Test human'},reason:'Explicitly reviewed this synthetic implementation, runtime and behaviour.'});return requireRuntimeReview(f.product.id,f.workspace.id)}
 describe('runtime review lifecycle with real Git and framework test records',()=>{
+ it('records the reviewer\'s signed statement that a test proves a criterion, and refuses anything else',async()=>{
+  const f=await setup(),base=await prepareRuntimeReview(f.product.id,f.workspace.id),input={productId:f.product.id,workspaceId:f.workspace.id,digest:runtimeManifestDigest(base),credential:key,actor:{id:'h',name:'Test human'},reason:'Explicitly reviewed this synthetic implementation.',runAgainstApp:['npm run test:integration']};
+  await expect(approveRuntimeReview({...input,coverage:[{command:'npm run test:integration',criterionId:'not-a-criterion'}]})).rejects.toThrow(/criterion link/);
+  await expect(approveRuntimeReview({...input,runAgainstApp:[],coverage:[{command:'npm run test:integration',criterionId:f.criterion.id}]})).rejects.toThrow(/criterion link/);
+  expect(await db.approval.count({where:{productId:f.product.id,approvalType:'VERIFICATION_RUNTIME'}})).toBe(0);
+  await approveRuntimeReview({...input,coverage:[{command:'npm run test:integration',criterionId:f.criterion.id}]});
+  const bound=await requireRuntimeReview(f.product.id,f.workspace.id);
+  expect(bound.manifest.reviewerCoverage).toEqual([{command:'npm run test:integration',criterionId:f.criterion.id}]);
+  // Changing the stored link breaks the signature, so the review grants nothing.
+  const record=await db.codingEvidence.findUniqueOrThrow({where:{id:bound.evidenceId}}),stored=JSON.parse(record.output);
+  stored.attestation.manifest.reviewerCoverage=[];
+  await db.codingEvidence.update({where:{id:record.id},data:{output:JSON.stringify(stored)}});
+  await expect(requireRuntimeReview(f.product.id,f.workspace.id)).rejects.toThrow(/review/);
+ });
  it('records the reviewer\'s choice to run a test against the app and database inside the signed review',async()=>{
   const f=await setup(),base=await prepareRuntimeReview(f.product.id,f.workspace.id);
   await expect(approveRuntimeReview({productId:f.product.id,workspaceId:f.workspace.id,digest:runtimeManifestDigest(base),credential:key,actor:{id:'h',name:'Test human'},reason:'Explicitly reviewed this synthetic implementation.',runAgainstApp:['npm run build']})).rejects.toThrow(/repository test commands/);

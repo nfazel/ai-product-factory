@@ -1,5 +1,6 @@
 import {hashText} from '@/modules/coding/policy';
 import {assertSessionRuntimeBinding} from './runtime-review';
+import {signedCoverage} from './signed-coverage';
 import { approvedBehaviors, behaviorMarkers, assessBehavior } from './behavior-evidence';
 import "server-only";
 
@@ -101,11 +102,14 @@ export async function recomputeSession(sessionId: string) {
             evidenceSufficient(testCase, item, loginPathOf(session.fixturePlan)),
         ),
     );
+    // A person's signed statement that an existing test proves this criterion counts only while that test passes on the approved snapshot.
+    const signed = signedCoverage(runtimeBinding.manifest.reviewerCoverage, coverage.acceptanceCriterionId, session.executions, approvedSnapshot);
+    const signedFailed = signed.failed, verifiedSigned = signed.verified;
     const verifiedManual = cases.some((testCase) => !testCase.automated && testCase.status === "PASSED");
     const blocked = executions.some((item) => item.status === "BLOCKED");
     let status: "VERIFIED" | "FAILED" | "NOT_TESTED" | "BLOCKED" | "NOT_APPLICABLE" = "NOT_TESTED";
-    if (failed) status = "FAILED";
-    else if (verifiedAutomatic || verifiedManual) status = "VERIFIED";
+    if (failed || signedFailed) status = "FAILED";
+    else if (verifiedAutomatic || verifiedManual || verifiedSigned) status = "VERIFIED";
     else if (coverage.humanConfirmed && coverage.status === "NOT_APPLICABLE") status = "NOT_APPLICABLE";
     else if (blocked) status = "BLOCKED";
     if (coverage.status !== status || (status === "VERIFIED" && coverage.rationale === "")) {
@@ -117,7 +121,9 @@ export async function recomputeSession(sessionId: string) {
             status === "VERIFIED"
               ? verifiedManual
                 ? "A person recorded a manual pass."
-                : "An independent verification test demonstrated this criterion."
+                : verifiedSigned && !verifiedAutomatic
+                  ? "A person's signed review states that an existing test proves this criterion, and it passed on this version."
+                  : "An independent verification test demonstrated this criterion."
               : status === "FAILED"
                 ? "A linked verification test failed."
                 : status === "BLOCKED"

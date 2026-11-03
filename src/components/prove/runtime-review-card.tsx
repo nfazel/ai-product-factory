@@ -19,6 +19,7 @@ export function RuntimeReviewContent({review}:{review:RuntimeReviewView}){
    <h4 className="font-medium">What will be run</h4>
    <p className="text-sm">Version <code>{r.commit.slice(0,7)}</code> · {r.files} files · code approved by {r.codeApprovedBy}{r.codeApprovedAt?` on ${when(r.codeApprovedAt)}`:''}.</p>
    {r.planSummary&&<p className="text-sm"><strong>Approved plan (v{r.planVersion}):</strong> {r.planSummary}</p>}
+   {r.proves.length>0&&<div className="text-sm"><strong>Signed by a person:</strong> these tests prove these requirements, counted only while they pass.<ul className="list-disc pl-5">{r.proves.map((p,i)=><li key={i}><code>{p.command}</code> proves: {p.criterion}</li>)}</ul></div>}
    {r.checks.length>0?<ul className="list-disc pl-5 text-sm">{r.checks.map(c=><li key={c.command}><code>{c.command}</code> — {c.howItRuns}</li>)}</ul>:<p className="text-sm">No runtime checks are declared in the approved plan.</p>}
    {r.criteria.length>0&&<details><summary className="text-sm">Requirements being verified ({r.criteria.length})</summary><ul className="list-disc pl-5 text-sm">{r.criteria.map((c,i)=><li key={i}>{c}</li>)}</ul></details>}
   </div>}
@@ -51,7 +52,8 @@ export function RuntimeReviewCard({productId,taskId}:{productId:string;taskId:st
   {loaded&&review?.state==='NEEDED'&&<form key={review.digest??'review'} onSubmit={approve} className="space-y-3 border-t pt-3">
    {review.candidates.length>0&&<fieldset className="space-y-1 text-sm"><legend className="font-medium">Run these existing tests against the app and a throwaway database</legend>
     <p>Tests that call the running app and check the database cannot work without them. Tick the tests that need this. Your choice is recorded in your signed approval and cannot be changed afterwards.</p>
-    {review.candidates.map(command=><label key={command} className="block"><input type="checkbox" name="runAgainstApp" value={command}/> <code>{command}</code></label>)}</fieldset>}
+    {review.candidates.map(command=><div key={command} className="space-y-1"><label className="block"><input type="checkbox" name="runAgainstApp" value={command}/> <code>{command}</code></label>
+      {review.criteriaChoices.length>0&&<div className="ml-6"><p>If you tick it, you may also state which requirement it proves. This is your signed statement; it counts only while the test passes on this exact version.</p>{review.criteriaChoices.map(choice=><label key={choice.id} className="block"><input type="checkbox" name="proves" value={`${command}|${choice.id}`}/> Proves: {choice.description}</label>)}</div>}</div>)}</fieldset>}
    <label className="block text-sm"><input type="checkbox" name="reviewed" value="yes" required/> I have read what will be run.</label>
    <label className="block text-sm">Why are you comfortable approving this?<textarea name="reason" required minLength={12} maxLength={2000} rows={2} className="mt-1 block w-full rounded border p-2" placeholder="For example: the checks match the approved plan and run only against a throwaway database."/></label>
    <OperatorCredentialField/>

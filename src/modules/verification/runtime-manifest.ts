@@ -41,6 +41,8 @@ export type RuntimeManifest = {
   runtime: { digest: string; files: Record<string, string> };
   /** Commands the reviewer chose to run against a managed app and throwaway database. Part of the signed digest; absent when none. */
   reviewerRuntime?: { command: string; runtime: RuntimeDeclaration }[];
+  /** Criteria the reviewer states an existing test proves. Part of the signed digest; absent when none. Counted only while that test passes. */
+  reviewerCoverage?: { command: string; criterionId: string }[];
 };
 /** The standard declaration a reviewer grants: the environment names are fixed, never typed by the browser. */
 export const REVIEWER_RUNTIME: RuntimeDeclaration = { kind: 'MANAGED_HTTP_DATABASE', baseUrlEnv: 'TEST_BASE_URL', databaseUrlEnv: 'TEST_DATABASE_URL' };
@@ -54,9 +56,22 @@ export function reviewerRuntimeFor(commands: string[]): NonNullable<RuntimeManif
     return { command: raw, runtime: { ...REVIEWER_RUNTIME } };
   }).sort((a, b) => a.command.localeCompare(b.command));
 }
-export function withReviewerRuntime(manifest: RuntimeManifest, commands: string[]): RuntimeManifest {
-  const { reviewerRuntime: _drop, ...base } = manifest; void _drop;
-  return commands.length ? { ...base, reviewerRuntime: reviewerRuntimeFor(commands) } : base;
+/** A reviewer-stated link between a test that runs against the managed app and one acceptance criterion of this task. */
+export function reviewerCoverageFor(manifest: RuntimeManifest, links: { command: string; criterionId: string }[]): NonNullable<RuntimeManifest['reviewerCoverage']> {
+  if (links.length > 20) throw new Error('Too many criterion links.');
+  const runnable = new Set([...runtimeCommands(manifest.plan.validationPlan).keys(), ...(manifest.reviewerRuntime ?? []).map(item => item.command)]);
+  const criteria = new Set(manifest.criteria.map(criterion => criterion.id)), seen = new Set<string>();
+  return links.map(link => {
+    const key = `${link.command}\0${link.criterionId}`;
+    if (typeof link.command !== 'string' || typeof link.criterionId !== 'string' || !runnable.has(link.command) || !criteria.has(link.criterionId) || seen.has(key)) throw new Error('A criterion link must name a distinct test that runs against the managed app and a criterion of this task.');
+    seen.add(key);
+    return { command: link.command, criterionId: link.criterionId };
+  }).sort((a, b) => a.command.localeCompare(b.command) || a.criterionId.localeCompare(b.criterionId));
+}
+export function withReviewerRuntime(manifest: RuntimeManifest, commands: string[], links: { command: string; criterionId: string }[] = []): RuntimeManifest {
+  const { reviewerRuntime: _drop, reviewerCoverage: _drop2, ...base } = manifest; void _drop; void _drop2;
+  const withRuntime: RuntimeManifest = commands.length ? { ...base, reviewerRuntime: reviewerRuntimeFor(commands) } : base;
+  return links.length ? { ...withRuntime, reviewerCoverage: reviewerCoverageFor(withRuntime, links) } : withRuntime;
 }
 /** Everything that runs against a managed environment: the plan's own declarations plus the reviewer's. */
 export function manifestRuntimes(manifest: RuntimeManifest): Map<string, RuntimeDeclaration> {

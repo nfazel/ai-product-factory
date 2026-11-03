@@ -41,14 +41,14 @@ export async function prepareRuntimeReview(productId: string, workspaceId: strin
   rejectCredentialDisclosure(manifest); return manifest;
 }
 /** Local operator only. Never expose through agent tools or a public server action. */
-export async function approveRuntimeReview(input: { productId: string; workspaceId: string; digest: string; credential: string; actor: { id: string; name: string }; reason: string; runAgainstApp?: string[] }) {
+export async function approveRuntimeReview(input: { productId: string; workspaceId: string; digest: string; credential: string; actor: { id: string; name: string }; reason: string; runAgainstApp?: string[]; coverage?: { command: string; criterionId: string }[] }) {
   requireReviewCredential(input.credential, process.env[KEY]);
   if (!input.actor.id.trim() || !input.actor.name.trim() || /^(codex|coding agent|verification agent|testing agent)$/i.test(input.actor.name.trim()) || input.reason.trim().length < 12) throw new DomainError('Explicit human attribution and a substantive runtime review reason are required.');
   rejectCredentialDisclosure({actor:input.actor,reason:input.reason});
   const base = await prepareRuntimeReview(input.productId,input.workspaceId);
   if (input.digest !== runtimeManifestDigest(base)) throw new DomainError('The reviewed runtime manifest changed. Review it again before approving.');
   let manifest:RuntimeManifest;
-  try { manifest = withReviewerRuntime(base, input.runAgainstApp ?? []); void manifestRuntimes(manifest); } catch { throw new DomainError('Only distinct repository test commands (npm run test…) can be run against a managed app and database, and not ones the plan already declares.'); }
+  try { manifest = withReviewerRuntime(base, input.runAgainstApp ?? [], input.coverage ?? []); void manifestRuntimes(manifest); } catch { throw new DomainError('Only distinct repository test commands (npm run test…) can be run against a managed app and database, and not ones the plan already declares. A criterion link must name one of those tests and a criterion of this task.'); }
   const digest = runtimeManifestDigest(manifest);
   return db.$transaction(async tx => {
     const approvedAt = new Date();
@@ -69,7 +69,7 @@ async function effectiveReview(manifest: RuntimeManifest): Promise<RuntimeBindin
       const parsed=JSON.parse(record.output) as {attestation:RuntimeAttestation;signature:string};attestation=parsed.attestation;
       if(!attestation||invalid.has(attestation.approvalId))continue;
       // The reviewer's declarations are inside the signed manifest; rebuild exactly that shape from current facts and let the signature decide.
-      candidate=withReviewerRuntime(manifest,(attestation.manifest?.reviewerRuntime??[]).map(item=>item.command));
+      candidate=withReviewerRuntime(manifest,(attestation.manifest?.reviewerRuntime??[]).map(item=>item.command),attestation.manifest?.reviewerCoverage??[]);
       if(!validRuntimeReview(attestation,parsed.signature,process.env[KEY],candidate))continue;
     }catch{continue} // Malformed or untrusted payloads grant no authority.
     // Database observation failures must propagate as unavailable, not revoked.

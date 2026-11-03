@@ -33,8 +33,11 @@ export async function runtimeReviewAction(data:FormData):Promise<RuntimeReviewAc
   if(!workspaceId)throw new DomainError('This task has no saved coding workspace to review.');
   const runAgainstApp=data.getAll('runAgainstApp').filter((item):item is string=>typeof item==='string');
   if(runAgainstApp.length>5)throw new DomainError('Choose at most five commands.');
+  // Each value is `<command>|<criterion id>`; the server validates both against the signed manifest, never the browser's say-so.
+  const coverage=data.getAll('proves').flatMap(item=>{if(typeof item!=='string')return [];const at=item.lastIndexOf('|');return at>0?[{command:item.slice(0,at),criterionId:item.slice(at+1)}]:[]});
+  if(coverage.length>20)throw new DomainError('Too many links between tests and criteria.');
   const actor=getCurrentActor();
-  await approveRuntimeReview({productId,workspaceId,digest:text('digest'),credential,actor:{id:actor.id,name:actor.name},reason,runAgainstApp});
+  await approveRuntimeReview({productId,workspaceId,digest:text('digest'),credential,actor:{id:actor.id,name:actor.name},reason,runAgainstApp,coverage});
   return{status:'success',message:'Runtime review approved. Nothing has been run and the task has not been judged.',review:await getRuntimeReviewView(productId,taskId)};
  }catch(error){
   console.warn('[runtime-review]',{operation:['LOAD','APPROVE'].includes(operation)?operation:'UNKNOWN',code:error instanceof DomainError?error.code:'UNEXPECTED'});
