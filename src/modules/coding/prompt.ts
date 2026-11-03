@@ -44,6 +44,8 @@ Preserve existing public interfaces, authentication and authorization mechanisms
 
 Only an explicitly established empty repository is a new application. An unreadable, truncated, or inaccessible existing repository is insufficient context: STOP and ESCALATE. Never recreate an application because source was omitted. Complete file contents and their current hashes are required before replacing existing files.
 
+When the task needs tests, put the test files inside a folder the execution contract allows (for example under src/), never in a folder it does not allow. Add a new package.json script for new tests, and never change or remove an existing script. Always keep the checks the task needs, such as npm run build and npm run typecheck, in the validation plan.
+
 Create a missing parent directory only by writing an approved file inside it. Run only commands the execution contract lists as authorised. Do not invent a setup or validation command.
 
 Repository tools enforce the contract. A path or command outside the contract will be denied.

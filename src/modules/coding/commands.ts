@@ -243,6 +243,15 @@ export function executionCommandsForPlan(derived: PlannedCommand[]) {
   };
 }
 
+/**
+ * A revised plan keeps the checks an earlier version of the same plan required. A model that rewrites the plan and forgets
+ * to mention them must not silently drop them; removing a check is a human decision made in the change request.
+ */
+export function mergeValidationPlans(next: string, previous: string | null | undefined) {
+  const earlier = (previous ?? "").trim();
+  return !earlier || earlier === next.trim() ? next : `${next}\n${earlier}`;
+}
+
 export function validationPlanText(commands: PlannedCommand[], current: string) {
   const required = commands.filter((item) => item.applicability === "REQUIRED").map((item) => item.command);
   const skipped = commands.filter((item) => item.applicability === "NOT_APPLICABLE");

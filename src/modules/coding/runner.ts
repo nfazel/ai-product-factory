@@ -40,6 +40,7 @@ import {
   preflightExecutionPlan,
   stepsWithCommands,
   validationPlanText,
+  mergeValidationPlans,
   type CompiledExecutionContract,
   type PlannedCommand,
 } from "@/modules/coding/commands";
@@ -68,6 +69,7 @@ import {
 import { asStrings, clip } from "@/modules/coding/strings";
 import { unapprovedPreservationIssues } from "@/modules/coding/external-review";
 import { executeRepositoryTool, preflightRepositoryBatch, type ToolContext, type ToolResult } from "@/modules/coding/tools";
+import { adoptOwnEarlierOutput } from "@/modules/coding/own-output";
 import { db } from "@/lib/db";
 import { assessCodingReadiness } from "@/modules/governance/coding-readiness";
 import { DomainError } from "@/modules/shared/errors";
@@ -457,7 +459,7 @@ async function runPlan(workspace: NonNullable<Awaited<ReturnType<typeof findWork
       },
     };
   }
-  const prepared = await preparePlanContract(workspace, plan.data.filesExpectedToChange, plan.data.steps, plan.data.validationPlan, design);
+  const prepared = await preparePlanContract(workspace, plan.data.filesExpectedToChange, plan.data.steps, mergeValidationPlans(plan.data.validationPlan, workspace.plan?.validationPlan), design);
   const enriched = {
     ...plan.data,
     filesExpectedToChange: prepared.files,
@@ -771,6 +773,8 @@ async function runImplement(
     return output(workspace.id, "ESCALATED", true, change.data.summary, change.provider, change.model, change.usage, compiled.contract);
   }
 
+  // A rerun may replace this workspace's own earlier output; any other existing file stays protected.
+  change.data.operations = await adoptOwnEarlierOutput({ id: workspace.id, workspacePath: context.workspacePath, baseCommit: workspace.baseCommit }, change.data.operations, (context.completeReads ??= {}), (context.ownOutput ??= new Set()));
   const batchIssues = preflightRepositoryBatch(context, change.data.operations, await changedPaths(context.workspaceId));
   for (const operation of change.data.operations) if (!isTestFile(operation.path) && outsideApprovedPlan(operation.path, expected)) batchIssues.push({ path: operation.path, reason: "File is outside the approved execution plan." });
   if (batchIssues.length) {

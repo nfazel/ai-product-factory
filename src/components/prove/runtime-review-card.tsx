@@ -8,12 +8,13 @@ const titles:Record<string,string>={APPROVED:'Runtime review approved',NEEDED:'R
 const when=(iso:string)=>iso?new Date(iso).toISOString().replace('T',' ').slice(0,16)+' UTC':'';
 
 /** Presentational: exactly what will run, and where this step sits in re-verifying a task. */
-export function RuntimeReviewContent({review}:{review:RuntimeReviewView}){
+export function RuntimeReviewContent({review,onRestore,busy=false}:{review:RuntimeReviewView;onRestore?:()=>void;busy?:boolean}){
  const r=review.review;
  return <div className="space-y-3">
   <p role="status" className="font-medium">{titles[review.state]}</p>
   <p>{review.message}</p>
   {review.state==='APPROVED'&&review.approved&&<p className="text-sm">Approved by {review.approved.by}{review.approved.at?` · ${when(review.approved.at)}`:''}.</p>}
+  {review.restorable&&onRestore&&<div className="space-y-2 rounded border p-3"><p className="text-sm">This rebuilds the folder exactly at the commit a person approved, and refuses if it cannot. It changes no code and calls no AI.</p><button type="button" disabled={busy} onClick={onRestore} className="rounded border px-3 py-2">Restore working copy</button></div>}
   <p className="text-sm">This does not judge the task. It only allows the checks below to run, in isolated containers, on this exact version of the code.</p>
   {r&&<div className="space-y-2 rounded border p-3">
    <h4 className="font-medium">What will be run</h4>
@@ -44,12 +45,16 @@ export function RuntimeReviewCard({productId,taskId}:{productId:string;taskId:st
   const input=element.elements.namedItem('credential') as HTMLInputElement|null;if(input)input.value='';
   start(async()=>{try{const next=await runtimeReviewAction(value);setResult(next);if(next.review)setReview(next.review)}catch{setResult({status:'error',message:'Connection lost. Reload before retrying.'})}finally{value.delete('credential')}});
  }
+ function restore(){
+  const value=new FormData();value.set('productId',productId);value.set('taskId',taskId);value.set('operation','RESTORE');
+  start(async()=>{try{const next=await runtimeReviewAction(value);setResult(next);if(next.review)setReview(next.review)}catch{setResult({status:'error',message:'Connection lost. Reload before retrying.'})}});
+ }
  if(loaded&&review?.state==='NOT_APPLICABLE')return null;
  return <section aria-label="Runtime review" className="space-y-3 rounded-xl border p-4">
   {!loaded&&<p role="status">Loading the runtime review…</p>}
   {pending&&<p role="status" aria-live="polite">Working…</p>}
   {result.message&&<p role={result.status==='error'?'alert':'status'}>{result.message}</p>}
-  {loaded&&review&&<RuntimeReviewContent review={review}/>}
+  {loaded&&review&&<RuntimeReviewContent review={review} onRestore={restore} busy={pending}/>}
   {loaded&&review?.state==='NEEDED'&&<form key={review.digest??'review'} onSubmit={approve} className="space-y-3 border-t pt-3">
    {review.candidates.length>0&&<fieldset className="space-y-1 text-sm"><legend className="font-medium">Run these existing tests against the app and a throwaway database</legend>
     <p>Tests that call the running app and check the database cannot work without them. Tick the tests that need this. Your choice is recorded in your signed approval and cannot be changed afterwards.</p>

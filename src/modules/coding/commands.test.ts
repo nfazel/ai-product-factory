@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   deriveExecutionCommands,
   executionCommandsForPlan,
+  mergeValidationPlans,
   preflightExecutionPlan,
   stepsWithCommands,
 } from "@/modules/coding/commands";
@@ -117,5 +118,22 @@ describe("execution contract commands", () => {
     expect(steps[0]).toBe("Create prisma/schema.prisma");
     expect(steps.some((step) => step.includes("npm install"))).toBe(true);
     expect(steps.some((step) => step.includes("npx prisma validate"))).toBe(true);
+  });
+});
+
+describe("a revised plan keeps the checks an earlier version required", () => {
+  const pkg = JSON.stringify({ scripts: { build: "next build", typecheck: "tsc --noEmit", "test:chat": "node --test src/tests/integration/chat.test.mjs" } });
+  const required = (validationPlan: string) =>
+    deriveExecutionCommands({ greenfield: false, filesExpected: ["src/a.ts"], packageJson: pkg, nodeModulesPresent: true, requiredChecks: [], validationPlan })
+      .filter((item) => item.kind === "VALIDATION" && item.applicability === "REQUIRED").map((item) => item.command);
+  const earlier = "Required:\nnpm run build\nnpm run typecheck";
+  it("loses the checks when a rewritten plan forgets to name them, which is what merging prevents", () => {
+    expect(required("Run the chat test.")).toEqual([]);
+    expect(required(mergeValidationPlans("Run the chat test.", earlier))).toEqual(["npm run build", "npm run typecheck"]);
+  });
+  it("changes nothing when there is no earlier plan or it is identical", () => {
+    expect(mergeValidationPlans("Required:\nnpm run build", undefined)).toBe("Required:\nnpm run build");
+    expect(mergeValidationPlans("Required:\nnpm run build", "")).toBe("Required:\nnpm run build");
+    expect(mergeValidationPlans(earlier, earlier)).toBe(earlier);
   });
 });

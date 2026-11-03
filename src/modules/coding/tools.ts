@@ -44,6 +44,8 @@ export type ToolContext = {
   stale: boolean;
   /** Only files supplied to the model in full qualify for a generated batch. */
   completeReads?: Record<string, string>;
+  /** New files this workspace created in an earlier run; a rerun may replace them. */
+  ownOutput?: Set<string>;
   /** Immutable task Git baseline; also used to inspect final script-induced changes. */
   baseCommit?: string;
 };
@@ -173,7 +175,7 @@ async function apply(context: ToolContext, request: ToolRequest): Promise<ToolRe
       const recorded = await lastReadHash(context.workspaceId, located.relative);
       if (recorded) reads[located.relative] = recorded;
     }
-    const issues = preflightPreservation(context.workspacePath, [request as { path: string; action: string; content?: string }], reads);
+    const issues = preflightPreservation(context.workspacePath, [request as { path: string; action: string; content?: string }], reads, context.ownOutput);
     if (issues.length) return { allowed: false, reason: issues.map(issue => issue.reason).join(" "), kind: "restricted", metadata: { preservationBlocked: true } };
   }
 
@@ -246,7 +248,7 @@ function label(action: ToolRequest["action"]) {
 /** Validate the full generated batch before the first mutation. */
 export function preflightRepositoryBatch(context: ToolContext, requests: ToolRequest[], previouslyTouched: Iterable<string> = []) {
   const writes = requests.filter((request): request is Extract<ToolRequest, { path: string }> => WRITE_ACTIONS.has(request.action) && "path" in request);
-  const issues = preflightPreservation(context.workspacePath, writes, context.completeReads ?? {});
+  const issues = preflightPreservation(context.workspacePath, writes, context.completeReads ?? {}, context.ownOutput);
   if (context.stale && writes.length) issues.push({ path: ".", reason: "EXECUTION CONTRACT STALE. Further code changes are paused." });
   if (new Set([...previouslyTouched, ...writes.map(item => item.path)]).size > context.maxFiles) issues.push({ path: ".", reason: "The change batch exceeds the task file limit." });
   for (const request of writes) {

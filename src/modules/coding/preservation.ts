@@ -196,7 +196,8 @@ export function preservationViolations(file: string, before: string | null, afte
   return [...new Set(issues)];
 }
 
-export function preflightPreservation(root: string, operations: ProposedFile[], reads: Record<string, string>): PreservationIssue[] {
+/** `ownOutput` names new files this same workspace created in an earlier run: there is no baseline to preserve in them. */
+export function preflightPreservation(root: string, operations: ProposedFile[], reads: Record<string, string>, ownOutput: ReadonlySet<string> = new Set()): PreservationIssue[] {
   const issues: PreservationIssue[] = [], seen = new Set<string>();
   for (const operation of operations) {
     const located = resolveInside(root, operation.path, { allowMissingParents: true });
@@ -205,7 +206,8 @@ export function preflightPreservation(root: string, operations: ProposedFile[], 
     seen.add(located.relative);
     const exists = fs.existsSync(located.absolute);
     if (exists && !fs.statSync(located.absolute).isFile()) { issues.push({ path: located.relative, reason: "The write target is not a regular file." }); continue; }
-    const before = exists ? fs.readFileSync(located.absolute, "utf8") : null;
+    const own = ownOutput.has(located.relative);
+    const before = exists && !own ? fs.readFileSync(located.absolute, "utf8") : null;
     if (operation.action === "CREATE_FILE" && exists) issues.push({ path: located.relative, reason: "CREATE_FILE cannot overwrite an existing file." });
     if (before !== null && reads[located.relative] !== hashText(before)) issues.push({ path: located.relative, reason: "Complete current file content was not supplied, or it changed since it was read. Read the whole file before modifying it." });
     const after = operation.action === "DELETE_FILE" ? null : operation.content ?? "";

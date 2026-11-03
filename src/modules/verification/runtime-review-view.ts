@@ -4,6 +4,7 @@ import {DomainError} from '@/modules/shared/errors';
 import {AuthorityUnavailableError} from './authority-status';
 import {prepareRuntimeReview,requireRuntimeReview,reviewableTestCommands} from './runtime-review';
 import {manifestRuntimes} from './runtime-manifest';
+import {workingCopyMissing} from '@/modules/coding/restore-workspace';
 import {runtimeManifestDigest} from './runtime-manifest';
 import {describeRuntimeManifest,type RuntimeReviewSummary} from './runtime-review-describe';
 
@@ -15,10 +16,12 @@ export type RuntimeReviewView={
  containerVerification:boolean;
  /** Existing test commands the reviewer may choose to run against a throwaway app and database. Empty once approved. */
  candidates:string[];
+ /** The task's working copy is gone but can be rebuilt exactly from the approved commit. */
+ restorable:boolean;
  /** The task's acceptance criteria, so a reviewer can say which a test proves. Empty once approved. */
  criteriaChoices:{id:string;description:string}[];
 };
-const view=(state:RuntimeReviewState,message:string,extra:Partial<RuntimeReviewView>={}):RuntimeReviewView=>({state,message,digest:null,review:null,approved:null,candidates:[],criteriaChoices:[],containerVerification:process.env.APF_CONTAINER_VERIFICATION_READY==='1',...extra});
+const view=(state:RuntimeReviewState,message:string,extra:Partial<RuntimeReviewView>={}):RuntimeReviewView=>({state,message,digest:null,review:null,approved:null,candidates:[],criteriaChoices:[],restorable:false,containerVerification:process.env.APF_CONTAINER_VERIFICATION_READY==='1',...extra});
 
 /** The workspace verification uses for a task: always its most recent one, chosen here, never by the browser. */
 export async function runtimeReviewWorkspaceId(productId:string,taskId:string){
@@ -36,6 +39,8 @@ export async function getRuntimeReviewView(productId:string,taskId:string):Promi
  let manifest;
  try{manifest=await prepareRuntimeReview(productId,workspaceId)}
  catch(error){
+  const missing=await db.repositoryWorkspace.findFirst({where:{id:workspaceId,productId,status:'COMPLETED'},select:{workspacePath:true}});
+  if(missing&&workingCopyMissing(missing))return view('UNAVAILABLE','The temporary working copy of this task is gone, so its code cannot be read. It can be rebuilt exactly from the commit a person approved.',{restorable:true});
   if(error instanceof AuthorityUnavailableError)return view('UNAVAILABLE','The saved workspace cannot currently be read, so there is nothing to review yet.');
   return view('UNAVAILABLE',error instanceof DomainError?error.message:'The runtime details could not be prepared for review.');
  }
