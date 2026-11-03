@@ -15,6 +15,16 @@ function environment() {
 }
 afterEach(() => { vi.restoreAllMocks(); vi.clearAllMocks(); });
 describe('managed adapter integration', () => {
+  it('lets a static check write to its own disposable copy of the dependencies, such as prisma generate', async () => {
+    const env = environment();
+    env.database = { network: 'db-net', buildUrl: 'postgresql://build' } as never;
+    vi.spyOn(env.job, 'remove').mockResolvedValue();
+    await env.staticCheck(['npx', 'prisma', 'generate']);
+    expect(transferArtifacts).toHaveBeenCalledWith(env.job, 'approved-app', 'worker', ['node_modules']);
+    const checked = vi.mocked(env.job.checked), write = checked.mock.calls.findIndex(call => call.flat().includes('u+w'));
+    expect(checked.mock.calls[write]).toEqual([['exec', '--user', '1000:1000', 'worker', 'chmod', '-R', 'u+w', '/work/node_modules']]);
+    expect(checked.mock.invocationCallOrder[write]).toBeLessThan(vi.mocked(env.job.run).mock.invocationCallOrder[0]);
+  });
   it('runs module tests with approved source and dependencies, no network or runtime credentials', async () => {
     const env = environment(), argv = ['node', '--test', 'verification/claim.test.mjs'];
     const test = { path: argv[2], bytes: Buffer.from('// independent test') };
