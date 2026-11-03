@@ -61,10 +61,17 @@ export async function prepareExternalReview(productId: string, workspaceId: stri
   }
   if (!paths.length || paths.length > (scope.contract.maxFiles ?? 8)) throw new DomainError("External change set is empty or exceeds the approved file limit.");
   const files = [], hard: string[] = [];
-  for (const file of paths.sort()) {
+  paths.sort();
+  // Each file's before/after contents come from separate Git calls with no dependence on each other, so read them together.
+  const contents = await Promise.all(paths.map(async file => {
+    try { return { before: await entry(root, scope.baseCommit, file), after: await entry(root, sourceCommit, file) }; } catch (error) { return { error }; }
+  }));
+  for (const [index, file] of paths.entries()) {
     const permission = classifyWrite(file, scope.contract.allowedPaths as string[], scope.contract.restrictedPaths as string[]);
     if (!permission.ok || isSecretPath(file) || file.startsWith("/") || file.split("/").some(part => !part || part === "." || part === "..") || /[\x00-\x1f\\]/.test(file) || !(scope.plan.filesExpectedToChange as string[]).includes(file)) throw new DomainError("External commit contains an unsafe, restricted or out-of-scope path.");
-    const before = await entry(root, scope.baseCommit, file), after = await entry(root, sourceCommit, file);
+    const read = contents[index];
+    if ("error" in read) throw read.error;
+    const { before, after } = read;
     const inspected = inspectExternalFile({ path: file, before: before.content, after: after.content, beforeMode: before.mode, afterMode: after.mode }, scope);
     files.push(inspected.file); hard.push(...inspected.hard.map(reason => `${file}: ${reason}`));
   }

@@ -1,7 +1,7 @@
 import {beforeEach,describe,expect,it,vi} from 'vitest';
 const mock=vi.hoisted(()=>{const tables=new Map<string,{findMany:ReturnType<typeof vi.fn>;findUnique:ReturnType<typeof vi.fn>}>();const db=new Proxy({}, {get(_target,key:string){if(!tables.has(key))tables.set(key,{findMany:vi.fn(async()=>[]),findUnique:vi.fn(async()=>null)});return tables.get(key)}});return{db,tables,acceptance:vi.fn()}});
 vi.mock('@/lib/db',()=>({db:mock.db}));
-vi.mock('@/modules/feature-review/release',()=>({releaseFeatureAcceptance:mock.acceptance}));
+vi.mock('@/modules/feature-review/release',()=>({guidanceFeatureAcceptance:mock.acceptance}));
 vi.mock('@/modules/coding/restore-approval',()=>({recoverApprovedPlansAfterProviderFailure:vi.fn(),restoreApprovedPlanAfterValidationFailure:vi.fn()}));
 vi.mock('@/modules/verification/runtime-review',()=>({runtimeReviewIsCurrent:vi.fn(async()=>true)}));
 vi.mock('@/modules/verification/integrity',()=>({VERIFICATION_EVIDENCE_INCLUDE:{},verificationApprovalIsCurrent:()=>true}));

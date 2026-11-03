@@ -229,15 +229,15 @@ export async function baselinePreservationIssues(root: string, baseCommit: strin
   const untracked = await runGit(root, ["ls-files", "--others", "--exclude-standard", "-z"]);
   if(strictAvailability&&(changed.code!==0||untracked.code!==0))throw new AuthorityUnavailableError();
   if (changed.code !== 0 || untracked.code !== 0) return [{ path: ".", reason: "Cannot inspect the task diff for preservation." }];
-  const issues: PreservationIssue[] = [];
-  for (const file of new Set([...changed.stdout.split("\0"), ...untracked.stdout.split("\0")].filter(Boolean))) {
-    if (isSecretPath(file) || isGeneratedReviewPath(file)) continue;
+  // Each file is checked independently, so their Git reads run together; issues are still reported in file order.
+  const perFile = await Promise.all([...new Set([...changed.stdout.split("\0"), ...untracked.stdout.split("\0")].filter(Boolean))].map(async (file): Promise<PreservationIssue[]> => {
+    if (isSecretPath(file) || isGeneratedReviewPath(file)) return [];
     const located = resolveInside(root, file, { allowMissingParents: true });
-    if (!located.ok) { issues.push({ path: file, reason: located.reason }); continue; }
+    if (!located.ok) return [{ path: file, reason: located.reason }];
     const old = await runGit(root, ["show", `${baseCommit}:${file}`]);
     const exists = fs.existsSync(located.absolute);
     const after = exists && fs.statSync(located.absolute).isFile() ? fs.readFileSync(located.absolute, "utf8") : null;
-    for (const reason of preservationViolations(file, old.code === 0 ? old.stdout : null, after)) issues.push({ path: file, reason });
-  }
-  return issues;
+    return preservationViolations(file, old.code === 0 ? old.stdout : null, after).map(reason => ({ path: file, reason }));
+  }));
+  return perFile.flat();
 }

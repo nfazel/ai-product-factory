@@ -15,6 +15,18 @@ export async function snapshotFiles(root:string,commit:string):Promise<InputFile
  }
  return files;
 }
+/**
+ * Path, content hash and mode of every file in a commit. A commit id fixes its contents, so the answer is remembered
+ * (a few at a time): reading every file from Git on each page view is what made pages slow. Failures are never remembered.
+ */
+const fingerprints=new Map<string,Promise<{path:string;hash:string;mode:number}[]>>();
+export function snapshotFingerprints(root:string,commit:string){
+ const key=`${root}\0${commit}`,known=fingerprints.get(key);if(known)return known;
+ const pending=snapshotFiles(root,commit).then(files=>files.map(file=>({path:file.path,hash:createHash('sha256').update(file.bytes).digest('hex'),mode:file.mode??0o644})));
+ fingerprints.set(key,pending);pending.catch(()=>{if(fingerprints.get(key)===pending)fingerprints.delete(key)});
+ while(fingerprints.size>16)fingerprints.delete(fingerprints.keys().next().value!);
+ return pending;
+}
 /** USTAR, regular files only. No generated archive is extracted onto the host. */
 export function* inputTar(files:InputFile[]){
  for(const file of files){if(!safeInputPath(file.path))throw new Error('Unsafe archive input.');const header=Buffer.alloc(512),parts=file.path.split('/');const name=parts.pop()!,prefix=parts.join('/');if(Buffer.byteLength(name)>100||Buffer.byteLength(prefix)>155)throw new Error('Unsupported archive path.');

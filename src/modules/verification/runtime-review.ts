@@ -7,7 +7,7 @@ import { db } from '@/lib/db';
 import { childEnv } from '@/modules/coding/git';
 import { canonicalJson, contentHash, requireReviewCredential } from '@/modules/coding/external-manifest';
 import { parsePlannedCommands } from '@/modules/coding/commands';
-import { snapshotFiles } from './containers/inputs';
+import { snapshotFingerprints } from './containers/inputs';
 import { currentRuntimeIdentity } from './runtime-identity';
 import { runtimeManifestDigest, withReviewerRuntime, manifestRuntimes, validateRuntimeMetadata, validRuntimeReview, signRuntimeReview, bindingFromState, type RuntimeManifest, type RuntimeAttestation, type RuntimeBinding } from './runtime-manifest';
 import { DomainError } from '@/modules/shared/errors';
@@ -32,7 +32,7 @@ export async function prepareRuntimeReview(productId: string, workspaceId: strin
   if ((await unapprovedPreservationIssues(workspace.id,workspace.workspacePath,workspace.baseCommit,true)).length) throw new DomainError('Existing preservation/security approval is not current.');
   const criteria = (workspace.task.workItem?.acceptanceCriteria ?? []).map(({id,description}) => ({id,description})).sort((a,b) => a.id.localeCompare(b.id));
   validateRuntimeMetadata(p.validationPlan, criteria, parsePlannedCommands(p.validationCommands).filter(command => command.applicability !== 'NOT_APPLICABLE').map(command => command.command));
-  const files = (await snapshotFiles(workspace.workspacePath, workspace.headCommit)).map(file => ({ path: file.path, hash: contentHash(file.bytes), mode: file.mode ?? 0o644 }));
+  const files = (await snapshotFingerprints(workspace.workspacePath, workspace.headCommit)).map(file => ({ ...file }));
   const { createdAt: _createdAt, updatedAt: _updatedAt, ...contract } = c;
   void _createdAt; void _updatedAt;
   const manifest:RuntimeManifest = { kind: 'VERIFICATION_RUNTIME_MANIFEST', version: 1, productId, taskId: workspace.implementationTaskId, workspaceId, commitSha: workspace.headCommit, tree: await git(workspace.workspacePath,['rev-parse',`${workspace.headCommit}^{tree}`]), files,

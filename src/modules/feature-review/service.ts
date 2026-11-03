@@ -6,6 +6,7 @@ import {canonicalJson,contentHash} from '@/modules/coding/external-manifest';
 import {DomainError} from '@/modules/shared/errors';
 import {confirmLocalOperator,operatorConfirmationAvailable,currentOperatorPrincipal,rejectOperatorSecret,signFeatureDecision,validFeatureDecision} from './authorization';
 import {loadFeatureManifest,type ReviewReader} from './loader';
+import {forgetGuidanceFeatureAcceptance} from './acceptance-cache';
 import {featureManifestDigest,knownFeatureChange,reviewEligibility,type FeatureReviewManifest} from './manifest';
 
 type Reader=ReviewReader;
@@ -58,12 +59,14 @@ export async function recordFeatureReview(input:ReviewDecisionInput){
   const event=await tx.featureReviewEvent.create({data:{...payload,manifest:json(manifest),signature:signFeatureDecision(signedPayload(payload))}});
   return {eventId:event.id,replayed:false};
  });
+ forgetGuidanceFeatureAcceptance(input.productId);
  if('error'in outcome)throw new DomainError(outcome.error!);
  return {...outcome,review:await getFeatureReview(input.productId,input.featureId)};
 }
 /** Archival preserves immutable events and their parent identities. */
 export async function archiveReviewedFeature(productId:string,featureId:string,credential:string){
  const actor=confirmLocalOperator(credential);
+ forgetGuidanceFeatureAcceptance(productId);
  return locked(productId,featureId,async tx=>{
   const manifest=await loadFeatureManifest(productId,featureId,tx);
   const previous=await tx.featureReviewEvent.findFirst({where:{productId,featureId,type:'ARCHIVED'}});

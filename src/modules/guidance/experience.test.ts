@@ -28,6 +28,7 @@ describe("navigation", () => {
       "Overview",
       "Explore",
       "Define",
+      "UI/UX",
       "Build",
       "Prove",
       "Ship",

@@ -728,7 +728,11 @@ export async function getProveView(productId: string) {
       trace: traceFor(task),
       featureConcern: featureConcernFor(task),
       commitSha: task.workspaces[0]?.headCommit ?? "",
-      reviewedSinceFailure: await reviewedSinceFailure(productId, task.id, sessions.find((session) => session.implementationTaskId === task.id && !session.demo)?.runState),
+      // Only a task whose latest attempt failed can need this, and working it out reads the repository, so skip it otherwise.
+      reviewedSinceFailure: await (async () => {
+        const latest = sessions.find((session) => session.implementationTaskId === task.id && !session.demo);
+        return latest && latest.overallVerdict === "FAIL" && !latest.stale ? reviewedSinceFailure(productId, task.id, latest.runState) : false;
+      })(),
     })),
   );
   return { product, slice, readiness, awaiting, sessions, integrated };
