@@ -12,6 +12,8 @@
     "db:migrate": "prisma migrate dev",
     "db:seed": "prisma db seed",
     "db:validate": "prisma validate && prisma migrate status",
+    "db:test:setup": "tsx scripts/test-database.ts setup",
+    "db:test:reset": "tsx scripts/test-database.ts reset",
     "postinstall": "prisma generate"
   },
   "dependencies": {
