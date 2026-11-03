@@ -18,6 +18,7 @@ export function RuntimeReviewContent({review}:{review:RuntimeReviewView}){
   {r&&<div className="space-y-2 rounded border p-3">
    <h4 className="font-medium">What will be run</h4>
    <p className="text-sm">Version <code>{r.commit.slice(0,7)}</code> · {r.files} files · code approved by {r.codeApprovedBy}{r.codeApprovedAt?` on ${when(r.codeApprovedAt)}`:''}.</p>
+   {r.developmentMode&&<p className="rounded border p-2 text-sm"><strong>Development mode.</strong> This review is bound to the code version, the plan, the code approval and your signature, but not to the version of the framework&apos;s own code. Do not rely on it for a release.</p>}
    {r.planSummary&&<p className="text-sm"><strong>Approved plan (v{r.planVersion}):</strong> {r.planSummary}</p>}
    {r.proves.length>0&&<div className="text-sm"><strong>Signed by a person:</strong> these tests prove these requirements, counted only while they pass.<ul className="list-disc pl-5">{r.proves.map((p,i)=><li key={i}><code>{p.command}</code> proves: {p.criterion}</li>)}</ul></div>}
    {r.checks.length>0?<ul className="list-disc pl-5 text-sm">{r.checks.map(c=><li key={c.command}><code>{c.command}</code> — {c.howItRuns}</li>)}</ul>:<p className="text-sm">No runtime checks are declared in the approved plan.</p>}

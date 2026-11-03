@@ -82,6 +82,8 @@ export function manifestRuntimes(manifest: RuntimeManifest): Map<string, Runtime
   }
   return result;
 }
+/** What a review records in place of the framework fingerprint while development mode is on (APF_RUNTIME_IDENTITY=off). */
+export const DEVELOPMENT_RUNTIME_DIGEST = 'development-mode:framework-version-not-enforced';
 export const runtimeManifestDigest = (manifest: RuntimeManifest) => contentHash(canonicalJson(manifest));
 export type RuntimeAttestation = { kind: 'VERIFICATION_RUNTIME_REVIEW'; version: 1; approvalId: string; digest: string; manifest: RuntimeManifest; actor: { id: string; name: string }; approvedAt: string; reason: string };
 const DOMAIN = 'AI_PRODUCT_FACTORY_VERIFICATION_RUNTIME_REVIEW_V1\0';
