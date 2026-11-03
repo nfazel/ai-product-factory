@@ -152,10 +152,62 @@ export async function inspectReworkTaskCodingApproval(productId:string,taskId:st
  return{taskId,eventId:row.id,approvalId:row.approvalId,reviewedDigest:target.reviewedDigest,state:'CODING_APPROVED_EXECUTION_BLOCKED' as const,executionAuthorised:false as const};
 })}
 
+// Phase 2b: execution authority is a separate signed human step after the coding decision. Only a task that has it can enter the ordinary coding flow.
+async function verifyExecutionAuthority(tx:Reader,row:NonNullable<Awaited<ReturnType<Reader['reworkEvent']['findFirst']>>>,a:Awaited<ReturnType<typeof load>>,decision:NonNullable<Awaited<ReturnType<Reader['reworkEvent']['findFirst']>>>){
+ const m=await verifyEvent(tx,row,a),approval=m.approval as Record<string,unknown>,coded=decision.manifest as Record<string,unknown>;
+ if(row.type!=='TASK_EXECUTION_AUTHORISED'||!row.taskId||row.taskId!==decision.taskId||m.kind!=='REWORK_EVENT'||m.version!==3||m.taskId!==row.taskId||m.codingDecisionEventId!==decision.id||m.executionAuthorised!==true||m.grantsCodingAuthority!==true||m.reviewedDigest!==coded.reviewedDigest||hash(m.review)!==m.reviewedDigest||approval.approvalType!=='IMPLEMENTATION_TASK'||approval.status!=='APPROVED')throw new DomainError('Protected task execution authority is stale, mismatched or invalid.');
+ return m;
+}
+/**
+ * The ordinary coding flow needs a risk record for every task. A person has just reviewed this one, so record the conservative
+ * default (supervised, with human review of every change). Safe to repeat; an existing record, including a human override, is kept.
+ */
+async function ensureReworkRisk(tx:Reader,productId:string,planId:string,taskId:string){
+ const review=await tx.engineeringGovernanceReview.findFirst({where:{productId,implementationPlanId:planId},orderBy:{createdAt:'desc'},select:{id:true}});
+ if(review)await tx.codingRiskAssessment.upsert({where:{reviewId_implementationTaskId:{reviewId:review.id,implementationTaskId:taskId}},create:{reviewId:review.id,implementationTaskId:taskId,riskLevel:'MEDIUM',recommendedExecutionMode:'SUPERVISED',requiredHumanReview:true,reason:'Recorded when a person authorised this rework task for coding. Every change is reviewed by a person before it is accepted.'},update:{}});
+}
+/** A human authorises the Coding Agent to build one managed rework task. It needs the recorded coding decision, and changes nothing else. */
+export async function authoriseReworkTaskExecution(value:z.input<typeof codingApprovalSchema>){
+ const input=codingApprovalSchema.parse(value);key(input.idempotencyKey);const actor=confirmLocalOperator(input.credential),requestDigest=hash({...input,credential:undefined,step:'EXECUTION'});
+ return locked(input.productId,async tx=>{
+  const target=await codingTarget(tx,input.productId,input.taskId),{a}=target;
+  if(input.amendmentId!==a.row.id||input.scopeRevisionId!==a.m.scopeRevisionId||input.reviewedDigest!==target.reviewedDigest)throw new DomainError('Reviewed task, scope, amendment or context changed.');
+  const decision=await tx.reworkEvent.findFirst({where:{amendmentId:a.row.id,type:'TASK_CODING_APPROVED',taskId:input.taskId}});
+  if(!decision)throw new DomainError('A recorded coding decision is required before execution is authorised.');
+  await verifyCodingDecision(tx,decision,target);
+  const prior=await tx.reworkEvent.findFirst({where:{amendmentId:a.row.id,type:'TASK_EXECUTION_AUTHORISED',taskId:input.taskId}});
+  if(prior){await verifyExecutionAuthority(tx,prior,a,decision);await ensureReworkRisk(tx,input.productId,a.m.planId,input.taskId);return tx.implementationTask.findUniqueOrThrow({where:{id:input.taskId}});}
+  const now=new Date(),id=randomUUID(),approval=await tx.approval.create({data:{productId:input.productId,workItemId:target.review.task.workItemId,approvalType:'IMPLEMENTATION_TASK',status:'APPROVED',requestedAt:now,resolvedAt:now,approvedBy:actor.name,comments:`Protected rework task execution authority ${input.taskId}; reviewed digest ${target.reviewedDigest}. The task is built through the ordinary coding flow.`}});
+  const manifest={kind:'REWORK_EVENT',version:3,id,type:'TASK_EXECUTION_AUTHORISED',taskId:input.taskId,amendmentId:a.row.id,amendmentDigest:a.row.digest,scopeRevisionId:a.m.scopeRevisionId,idempotencyKey:input.idempotencyKey,requestDigest,actor,approval:JSON.parse(JSON.stringify(approval)),at:now.toISOString(),codingDecisionEventId:decision.id,review:target.review,reviewedDigest:target.reviewedDigest,grantsCodingAuthority:true,executionAuthorised:true};rejectOperatorSecret(manifest);
+  const event=await tx.reworkEvent.create({data:{id,amendmentId:a.row.id,scopeRevisionId:a.m.scopeRevisionId,taskId:input.taskId,type:'TASK_EXECUTION_AUTHORISED',manifest:json(manifest),digest:hash(manifest),signature:sign(manifest,input.credential),approvalId:approval.id,idempotencyKey:input.idempotencyKey,requestDigest,createdAt:now}});
+  await verifyExecutionAuthority(tx,event,a,decision);
+  await ensureReworkRisk(tx,input.productId,a.m.planId,input.taskId);
+  await tx.activity.create({data:{productId:input.productId,workItemId:target.review.task.workItemId,type:'CODING_TASK_APPROVED',actor:actor.name,description:`Protected human execution authority ${approval.id} for rework task ${input.taskId}. It can now be coded through the ordinary flow.`}});
+  return tx.implementationTask.findUniqueOrThrow({where:{id:input.taskId}});
+ });
+}
+/**
+ * Whether a managed rework task has a complete, signed chain of human decisions (amendment approval, activation, coding decision,
+ * execution authority). Read-only and fail-closed: any gap, bad signature or unavailable key means no. Unlike the earlier steps it does
+ * not compare the surrounding feature state, which legitimately changes once the task is being built.
+ */
+export async function reworkExecutionAuthorised(productId:string,taskId:string){
+ try{
+  const tx=db as unknown as Reader,binding=await tx.reworkTaskBinding.findUnique({where:{taskId}});if(!binding)return false;
+  const a=await load(tx,productId,binding.amendmentId),events=await tx.reworkEvent.findMany({where:{amendmentId:a.row.id}});
+  const approved=events.find(e=>e.type==='APPROVED'),activated=events.find(e=>e.type==='ACTIVATED'),decision=events.find(e=>e.type==='TASK_CODING_APPROVED'&&e.taskId===taskId),authority=events.find(e=>e.type==='TASK_EXECUTION_AUTHORISED'&&e.taskId===taskId);
+  if(!approved||!activated||!decision||!authority)return false;
+  for(const e of [approved,activated])await verifyEvent(tx,e,a);
+  const m=await verifyEvent(tx,decision,a);if(m.codingDecision!=='APPROVED')return false;
+  await verifyExecutionAuthority(tx,authority,a,decision);
+  return true;
+ }catch{return false}
+}
+
 export type ReworkState='DRAFTED'|'APPROVED'|'REJECTED'|'ACTIVATED'|'UNAVAILABLE';
 export type ReworkView={
  eligibility:{ok:boolean;reasons:string[];planId:string|null;scopeRevisionId:string};
- amendment:null|{id:string;digest:string;state:ReworkState;message:string;tasks:{title:string;description:string;objective:string;guidance:string;validation:string;filesLikely:string;risks:string}[];created:{ref:string;title:string;status:string}[]};
+ amendment:null|{id:string;digest:string;state:ReworkState;message:string;tasks:{title:string;description:string;objective:string;guidance:string;validation:string;filesLikely:string;risks:string}[];created:{id:string;ref:string;title:string;status:string;coding:'NOT_AUTHORISED'|'AUTHORISED'|'UNAVAILABLE';reviewedDigest:string|null}[]};
 };
 /** Read-only: where a scope stands on the way to development tasks. Never drafts, approves or creates anything. */
 export async function readReworkForScope(input:{productId:string;featureId:string;scopeId:string}):Promise<ReworkView>{
@@ -172,7 +224,19 @@ export async function readReworkForScope(input:{productId:string;featureId:strin
    const tasks=a.m.tasks.map(t=>({title:t.title,description:t.description,objective:t.objective,guidance:t.guidance,validation:t.validation,filesLikely:t.filesLikely,risks:t.risks}));
    for(const e of events)await verifyEvent(tx,e,a);
    const activated=events.find(e=>e.type==='ACTIVATED'),rejected=events.find(e=>e.type==='REJECTED'),approved=events.find(e=>e.type==='APPROVED');
-   if(activated){await validateActivation(tx,a,activated);const made=await tx.implementationTask.findMany({where:{id:{in:a.m.tasks.map(t=>t.id)}},orderBy:{sequence:'asc'},select:{referenceCode:true,title:true,status:true}});return{eligibility,amendment:{...base,tasks,state:'ACTIVATED' as const,message:'',created:made.map(t=>({ref:t.referenceCode,title:t.title,status:t.status}))}}}
+   if(activated){
+    // Before any task is authorised the whole activation must still match exactly; afterwards the feature legitimately changes as tasks are built.
+    const authorisedIds=new Set(events.filter(e=>e.type==='TASK_EXECUTION_AUTHORISED').map(e=>e.taskId));
+    if(!authorisedIds.size)await validateActivation(tx,a,activated);
+    const made=await tx.implementationTask.findMany({where:{id:{in:a.m.tasks.map(t=>t.id)}},orderBy:{sequence:'asc'},select:{id:true,referenceCode:true,title:true,status:true}});
+    const created=[] as NonNullable<ReworkView['amendment']>['created'];
+    for(const t of made){
+     let coding:'NOT_AUTHORISED'|'AUTHORISED'|'UNAVAILABLE'=authorisedIds.has(t.id)?'AUTHORISED':'UNAVAILABLE',reviewedDigest:string|null=null;
+     if(coding==='UNAVAILABLE'&&t.status==='PROPOSED')try{reviewedDigest=(await codingTarget(tx,input.productId,t.id)).reviewedDigest;coding='NOT_AUTHORISED'}catch{/* shown as unavailable */}
+     created.push({id:t.id,ref:t.referenceCode,title:t.title,status:t.status,coding,reviewedDigest});
+    }
+    return{eligibility,amendment:{...base,tasks,state:'ACTIVATED' as const,message:'',created}}
+   }
    if(rejected)return{eligibility,amendment:{...base,tasks,state:'REJECTED' as const,message:''}};
    await authority(tx,a.m);
    return{eligibility,amendment:{...base,tasks,state:approved?'APPROVED' as const:'DRAFTED' as const,message:''}};

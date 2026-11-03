@@ -11,7 +11,11 @@ export async function isManagedReworkTask(productId:string,taskId:string){
  await assertReworkSchema();const task=await db.implementationTask.findFirst({where:{id:taskId,plan:{productId}},select:{id:true}});
  if(!task)throw new DomainError('Task not found in this product.','NOT_FOUND');
  const reserved=await db.$queryRaw<{id:string}[]>`SELECT id FROM "ReworkAmendment" WHERE manifest->'tasks' @> ${JSON.stringify([{id:taskId}])}::jsonb LIMIT 1`;
- return reserved.length>0||await db.reworkTaskBinding.count({where:{taskId}})>0;
+ const managed=reserved.length>0||await db.reworkTaskBinding.count({where:{taskId}})>0;
+ if(!managed)return false;
+ // A task a human has authorised for execution, with every signed decision in place, is built through the ordinary flow.
+ const {reworkExecutionAuthorised}=await import('./service');
+ return !(await reworkExecutionAuthorised(productId,taskId));
 }
 export async function assertLegacyCodingTask(productId:string,taskId:string){if(await isManagedReworkTask(productId,taskId))throw new DomainError(REWORK_BLOCKED)}
 export async function assertLegacyCodingWorkspace(productId:string,workspaceId:string){const w=await db.repositoryWorkspace.findFirst({where:{id:workspaceId,productId},select:{implementationTaskId:true}});if(!w)throw new DomainError('Workspace not found.','NOT_FOUND');await assertLegacyCodingTask(productId,w.implementationTaskId)}

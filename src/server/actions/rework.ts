@@ -1,6 +1,8 @@
 'use server';
 import {headers} from 'next/headers';
-import {draftReworkAmendment,decideReworkAmendment,activateReworkAmendment,readReworkForScope,type ReworkView} from '@/modules/rework/service';
+import {draftReworkAmendment,decideReworkAmendment,activateReworkAmendment,readReworkForScope,authoriseReworkTaskExecution,type ReworkView} from '@/modules/rework/service';
+import {approveImplementationTask} from '@/modules/coding/service';
+import {db} from '@/lib/db';
 import {findDevelopmentScopeId} from '@/modules/development-scope';
 import {confirmLocalOperator,operatorConfirmationAvailable,resolveOperatorCredential} from '@/modules/feature-review/authorization';
 import {AIFailure} from '@/modules/ai/failures';
@@ -26,7 +28,7 @@ export async function reworkAction(data:FormData):Promise<ReworkActionResult>{
   const scopeId=await findDevelopmentScopeId({productId,featureId,feedbackId});
   const load=async()=>scopeId?readReworkForScope({productId,featureId,scopeId}):null;
   if(operation==='LOAD')return{status:'success',rework:await load()};
-  if(!['DRAFT','APPROVE','REJECT','ACTIVATE'].includes(operation))throw new DomainError('Choose a task action.');
+  if(!['DRAFT','APPROVE','REJECT','ACTIVATE','AUTHORISE_TASK'].includes(operation))throw new DomainError('Choose a task action.');
   if(!scopeId)throw new DomainError('Approve a development scope first.');
   const nonce=text('idempotencyKey');
   if(!/^[A-Za-z0-9:_-]{8,90}$/.test(nonce))throw new DomainError('A unique request key is required.');
@@ -40,6 +42,19 @@ export async function reworkAction(data:FormData):Promise<ReworkActionResult>{
   }
   const amendment=current.amendment;
   if(!amendment)throw new DomainError('Draft development tasks first.');
+  if(operation==='AUTHORISE_TASK'){
+   // Two separate signed steps, one click: the coding decision, then the authority to execute. The browser names only the task and what it reviewed.
+   if(text('authoriseAck')!=='yes')throw new DomainError('Confirm that you reviewed this task and authorise it to be built.');
+   const taskId=text('taskId'),shown=amendment.created.find(item=>item.id===taskId);
+   if(!shown||shown.coding!=='NOT_AUTHORISED'||!shown.reviewedDigest)throw new DomainError('This task cannot be authorised right now. Reload and check its state.');
+   if(text('reviewedDigest')!==shown.reviewedDigest)throw new DomainError('This task changed; review the latest version.');
+   const row=await db.reworkAmendment.findFirst({where:{id:amendment.id,productId},select:{id:true,scopeRevisionId:true}});
+   if(!row)throw new DomainError('The task amendment was not found.');
+   const approval={amendmentId:row.id,scopeRevisionId:row.scopeRevisionId,reviewedDigest:shown.reviewedDigest,credential};
+   await approveImplementationTask(productId,taskId,{reworkApproval:{...approval,idempotencyKey:`${nonce}:coding`}});
+   await authoriseReworkTaskExecution({...approval,productId,taskId,idempotencyKey:`${nonce}:execution`});
+   return{status:'success',message:'Authorised. This task can now be built in Build, with its own plan, code review and verification.',rework:await load()};
+  }
   const reviewedDigest=text('digest');
   if(reviewedDigest!==amendment.digest)throw new DomainError('These tasks changed; review the latest version.');
   if(operation==='ACTIVATE'){
@@ -52,7 +67,7 @@ export async function reworkAction(data:FormData):Promise<ReworkActionResult>{
   return{status:'success',message:operation==='APPROVE'?'Tasks approved. Nothing has been created or started yet.':'Tasks rejected. Their history is retained; you can draft new ones.',rework:await load()};
  }catch(error){
   // Fixed codes only: never FormData, credentials or raw exceptions.
-  console.warn('[rework]',{operation:['LOAD','DRAFT','APPROVE','REJECT','ACTIVATE'].includes(operation)?operation:'UNKNOWN',code:error instanceof DomainError?error.code:'UNEXPECTED',...(error instanceof AIFailure?{category:error.category}:{})});
+  console.warn('[rework]',{operation:['LOAD','DRAFT','APPROVE','REJECT','ACTIVATE','AUTHORISE_TASK'].includes(operation)?operation:'UNKNOWN',code:error instanceof DomainError?error.code:'UNEXPECTED',...(error instanceof AIFailure?{category:error.category}:{})});
   return{status:'error',message:error instanceof DomainError?error.message:'The task request could not finish. Reload and try again; nothing was approved or created.'};
  }
 }

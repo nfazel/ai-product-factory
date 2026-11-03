@@ -139,3 +139,67 @@ describe('Phase 2a protected task coding decision without execution authority',(
  it('rejects forged signed-proof content even when structural database references look valid',async()=>{const{a,ids}=await activated([...tasks(),{...tasks()[0],title:'Second protected target'}]);await codingDecision(await codingRequest(a,ids[0]));const real=await db.reworkEvent.findFirstOrThrow({where:{amendmentId:a.id,type:'TASK_CODING_APPROVED',taskId:ids[0]}}),target=await(await rework()).getReworkTaskCodingReview(current.productId,ids[1]),approval=await db.approval.create({data:{productId:current.productId,workItemId:current.featureId,approvalType:'IMPLEMENTATION_TASK',status:'APPROVED',approvedBy:'Local operator'}}),id=randomUUID(),at=new Date(),idempotencyKey=randomUUID();const manifest={...real.manifest as Record<string,unknown>,id,taskId:ids[1],review:target.review,reviewedDigest:target.reviewedDigest,approval:JSON.parse(JSON.stringify(approval)),at:at.toISOString(),idempotencyKey};const{canonicalJson,contentHash}=await import('@/modules/coding/external-manifest');await db.reworkEvent.create({data:{...real,id,taskId:ids[1],approvalId:approval.id,idempotencyKey,manifest:JSON.parse(JSON.stringify(manifest)),digest:contentHash(canonicalJson(manifest)),signature:'0'.repeat(64),createdAt:at}});await expect((await rework()).inspectReworkTaskCodingApproval(current.productId,ids[1])).rejects.toThrow(/proof/);await expect(codingDecision(await codingRequest(a,ids[1]))).rejects.toThrow(/proof/);await expect((await import('@/modules/coding/gates')).assertCodingEntry(current.productId,ids[1])).rejects.toThrow(/Managed rework/)});
  it('does not mutate V1 decision bytes or manufacture coding authority for legacy tasks',async()=>{const{a}=await activated(),events=await db.reworkEvent.findMany({where:{amendmentId:a.id}});const{createHmac}=await import('node:crypto'),{canonicalJson}=await import('@/modules/coding/external-manifest');for(const event of events){expect((event.manifest as {version:number}).version).toBe(1);expect(event.taskId).toBeNull();expect(event.signature).toBe(createHmac('sha256',key).update('APF_CONTROLLED_REWORK_V1\0').update(canonicalJson(event.manifest)).digest('hex'))}await expect((await rework()).getReworkTaskCodingReview(current.productId,originalId)).rejects.toThrow(/managed rework/)});
 });
+
+async function authority(input:Awaited<ReturnType<typeof codingRequest>>,idempotencyKey=randomUUID()){return(await rework()).authoriseReworkTaskExecution({...input,idempotencyKey})}
+const workspaceData=async(taskId:string)=>{const repo=await db.repository.create({data:{productId:current.productId,name:'Synthetic authorised repository',localPath:'/tmp/rework-authorised'}});return{repositoryId:repo.id,productId:current.productId,implementationTaskId:taskId,workspacePath:'/tmp/rework-authorised/ws',branchName:'rework-authorised',baseCommit:'a'.repeat(40)}};
+describe('Phase 2b protected execution authority',()=>{
+ it('refuses execution authority before a recorded coding decision, at the service and at the database',async()=>{
+  const{a,ids}=await activated(),input=await codingRequest(a,ids[0]);
+  await expect(authority(input)).rejects.toThrow(/coding decision/);
+  const forged={kind:'REWORK_EVENT',version:3,id:randomUUID(),type:'TASK_EXECUTION_AUTHORISED',taskId:ids[0],amendmentId:a.id,scopeRevisionId:a.scopeRevisionId,grantsCodingAuthority:true,executionAuthorised:true,codingDecisionEventId:randomUUID(),reviewedDigest:input.reviewedDigest};
+  const approval=await db.approval.create({data:{productId:current.productId,workItemId:tasks()[0].workItemId,approvalType:'IMPLEMENTATION_TASK',status:'APPROVED',approvedBy:'Local operator'}});
+  await expect(db.reworkEvent.create({data:{id:forged.id,amendmentId:a.id,scopeRevisionId:a.scopeRevisionId,taskId:ids[0],type:'TASK_EXECUTION_AUTHORISED',manifest:forged,digest:'0'.repeat(64),signature:'0'.repeat(64),approvalId:approval.id,idempotencyKey:randomUUID(),requestDigest:'0'.repeat(64)}})).rejects.toThrow();
+  expect(await db.reworkEvent.count({where:{amendmentId:a.id,type:'TASK_EXECUTION_AUTHORISED'}})).toBe(0);
+  expect(await(await rework()).reworkExecutionAuthorised(current.productId,ids[0])).toBe(false);
+ });
+ it('records a signed authority after the coding decision, then lets the ordinary flow take the task while its identity stays frozen',async()=>{
+  const{a,ids}=await activated(),input=await codingRequest(a,ids[0]);await codingDecision(input);
+  const before=await db.implementationTask.findUniqueOrThrow({where:{id:ids[0]}});
+  const result=await authority(input);expect(result).toEqual(before);
+  const row=await db.reworkEvent.findFirstOrThrow({where:{amendmentId:a.id,type:'TASK_EXECUTION_AUTHORISED'}}),manifest=row.manifest as {version:number;executionAuthorised:boolean;grantsCodingAuthority:boolean;actor:{id:string}};
+  expect(manifest).toMatchObject({version:3,executionAuthorised:true,grantsCodingAuthority:true});expect(manifest.actor.id).toMatch(/^local-operator:[a-f0-9]{24}$/);expect(JSON.stringify(row)).not.toContain(key);
+  expect(await(await rework()).reworkExecutionAuthorised(current.productId,ids[0])).toBe(true);
+  const service=await import('@/modules/coding/service');
+  expect((await service.approveImplementationTask(current.productId,ids[0],{actorName:'Local operator'})).status).toBe('APPROVED');
+  await expect(db.implementationTask.update({where:{id:ids[0]},data:{title:'Changed after authority'}})).rejects.toThrow(/immutable/);
+  await expect(db.implementationTask.update({where:{id:ids[0]},data:{objective:'Changed after authority'}})).rejects.toThrow(/immutable/);
+  await expect(db.implementationTask.delete({where:{id:ids[0]}})).rejects.toThrow();
+  const workspace=await db.repositoryWorkspace.create({data:await workspaceData(ids[0])});expect(workspace.implementationTaskId).toBe(ids[0]);
+ });
+ it('records a conservative, supervised risk assessment so the ordinary coding flow can start the task',async()=>{
+  const{a,ids}=await activated(),arch=await db.solutionArchitecture.findFirstOrThrow({where:{productId:current.productId}}),review=await db.engineeringGovernanceReview.create({data:{productId:current.productId,solutionArchitectureId:arch.id,implementationPlanId:planId,version:1,overallAssessment:'PASS'}}),input=await codingRequest(a,ids[0]);
+  await codingDecision(input);await authority(input);
+  expect(await db.codingRiskAssessment.findMany({where:{implementationTaskId:ids[0]}})).toMatchObject([{reviewId:review.id,riskLevel:'MEDIUM',recommendedExecutionMode:'SUPERVISED',requiredHumanReview:true}]);
+  await authority(input);expect(await db.codingRiskAssessment.count({where:{implementationTaskId:ids[0]}})).toBe(1);
+ });
+ it('retries once with the same key and refuses a different request under it',async()=>{
+  const{a,ids}=await activated(),input=await codingRequest(a,ids[0]);await codingDecision(input);const key1=randomUUID();
+  await authority(input,key1);await authority(input,key1);await authority(input,randomUUID());
+  expect(await db.reworkEvent.count({where:{amendmentId:a.id,type:'TASK_EXECUTION_AUTHORISED'}})).toBe(1);
+ });
+ it('keeps every other task of the amendment blocked, and refuses a wrong reviewed digest',async()=>{
+  const{a,ids}=await activated([...tasks(),{...tasks()[0],title:'Second exact rework task'}]),one=await codingRequest(a,ids[0]);await codingDecision(one);
+  await expect(authority({...one,reviewedDigest:'0'.repeat(64)})).rejects.toThrow(/changed/);
+  await authority(one);
+  const service=await import('@/modules/coding/service');
+  await expect(service.approveImplementationTask(current.productId,ids[1],{actorName:'Local operator'})).rejects.toThrow(/Managed rework/);
+  await expect(db.implementationTask.update({where:{id:ids[1]},data:{status:'APPROVED'}})).rejects.toThrow(/immutable/);
+  await expect(db.repositoryWorkspace.create({data:await workspaceData(ids[1])})).rejects.toThrow(/blocked/);
+  expect(await(await rework()).reworkExecutionAuthorised(current.productId,ids[1])).toBe(false);
+ });
+ it('stays valid when the surrounding feature changes as the task is built, and fails closed without the proof key',async()=>{
+  const{a,ids}=await activated(),input=await codingRequest(a,ids[0]);await codingDecision(input);await authority(input);
+  current.requirements[0].description+=' Changed while building.';
+  expect(await(await rework()).reworkExecutionAuthorised(current.productId,ids[0])).toBe(true);
+  vi.stubEnv('EXTERNAL_REVIEW_APPROVAL_KEY','');
+  expect(await(await rework()).reworkExecutionAuthorised(current.productId,ids[0])).toBe(false);
+  await expect((await import('@/modules/coding/service')).approveImplementationTask(current.productId,ids[0],{actorName:'Local operator'})).rejects.toThrow(/Managed rework|Protected|unavailable/);
+ });
+ it('shows each created task\'s coding state for the screen, and offers a digest only to tasks that can still be authorised',async()=>{
+  const{a,ids}=await activated(),input=await codingRequest(a,ids[0]);
+  const state=async()=>(await(await rework()).readReworkForScope({productId:current.productId,featureId:current.featureId,scopeId:(await scopeApi.getDevelopmentScope({productId:current.productId,featureId:current.featureId,scopeId:(a.manifest as {scopeId:string}).scopeId})).scopeId})).amendment!.created[0]!;
+  expect(await state()).toMatchObject({id:ids[0],coding:'NOT_AUTHORISED',reviewedDigest:input.reviewedDigest});
+  await codingDecision(input);await authority(input);
+  expect(await state()).toMatchObject({id:ids[0],coding:'AUTHORISED',reviewedDigest:null});
+ });
+});
