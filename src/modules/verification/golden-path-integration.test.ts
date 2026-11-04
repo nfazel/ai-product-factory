@@ -37,6 +37,7 @@ const original = {
   model: process.env.AI_MODEL,
   key: process.env.OPENAI_API_KEY,
   worktrees: process.env.PRODUCT_REPOSITORY_WORKTREE_ROOT,
+  repositoryRoot: process.env.PRODUCT_REPOSITORY_ROOT,
   reviewKey: process.env.EXTERNAL_REVIEW_APPROVAL_KEY,
   containers: process.env.APF_CONTAINER_VERIFICATION_READY,
 };
@@ -51,6 +52,8 @@ let db: Db;
 let startVerification: typeof import("@/modules/verification/service").startVerification;
 let completedTaskIn: typeof import("@/modules/verification/completed-task.test-support").completedTaskIn;
 let signFixtureRuntimeReview: typeof import("@/modules/verification/completed-task.test-support").signFixtureRuntimeReview;
+let readyCodingProduct: typeof import("@/modules/coding/ready-product.test-support").readyCodingProduct;
+let coding: typeof import("@/modules/coding/service");
 let setAIProviderForTests: typeof import("@/modules/ai/provider").setAIProviderForTests;
 type AIProvider = import("@/modules/ai/provider").AIProvider;
 
@@ -117,6 +120,8 @@ beforeAll(async () => {
   db = (await import("@/lib/db")).db;
   ({ startVerification } = await import("@/modules/verification/service"));
   ({ completedTaskIn, signFixtureRuntimeReview } = await import("@/modules/verification/completed-task.test-support"));
+  ({ readyCodingProduct } = await import("@/modules/coding/ready-product.test-support"));
+  coding = await import("@/modules/coding/service");
   ({ setAIProviderForTests } = await import("@/modules/ai/provider"));
 }, 300_000);
 
@@ -136,6 +141,7 @@ afterAll(async () => {
     restore("AI_MODEL", original.model);
     restore("OPENAI_API_KEY", original.key);
     restore("PRODUCT_REPOSITORY_WORKTREE_ROOT", original.worktrees);
+    restore("PRODUCT_REPOSITORY_ROOT", original.repositoryRoot);
     restore("EXTERNAL_REVIEW_APPROVAL_KEY", original.reviewKey);
     restore("APF_CONTAINER_VERIFICATION_READY", original.containers);
   }
@@ -187,4 +193,72 @@ describe.skipIf(!RUN)("golden path: a real product, verified in the real sandbox
     expect(row.failureClass, summary).toBe("");
     expect(["PASS", "PASS_WITH_CONCERNS"], summary).toContain(row.overallVerdict);
   }, 900_000);
+
+  it("goes from an approved task through coding, review and commit to a verified result", async () => {
+    const repo = snapshotOfProduct();
+    process.env.PRODUCT_REPOSITORY_ROOT = repo;
+    process.env.PRODUCT_REPOSITORY_WORKTREE_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), "apf-golden-worktrees-"));
+    tempDirectories.push(process.env.PRODUCT_REPOSITORY_WORKTREE_ROOT);
+    process.env.APF_CONTAINER_VERIFICATION_READY = "1";
+    process.env.AI_PROVIDER = "openai";
+    process.env.AI_MODEL = "gpt-4.1-mini";
+    process.env.OPENAI_API_KEY = "test-key";
+
+    // Every approved record that must exist before the Coding Agent may start, with one task waiting for approval.
+    const setup = await readyCodingProduct({ taskStatus: "PROPOSED", mode: "SUPERVISED", risk: "MEDIUM", allowed: ["src/app/**", "package.json"], restricted: ["prisma/**"] });
+    await db.acceptanceCriterion.deleteMany({ where: { workItemId: setup.task.workItemId ?? "" } });
+
+    const original = fs.readFileSync(path.join(repo, "src/app/page.tsx"), "utf8");
+    const changed = `${original.trimEnd()}\n// Golden path: a small, safe change made by the stubbed Coding Agent.\n`;
+    const answers: Record<string, unknown> = {
+      coding_repository_analysis: { summary: "The home page is the relevant file.", relevantFiles: ["src/app/page.tsx"], notes: "Bounded to the app folder." },
+      coding_execution_plan: { summary: "Add a comment to the home page.", filesExpectedToChange: ["src/app/page.tsx", "package.json"], steps: ["Install the dependencies with npm install", "Generate the database client with npx prisma generate", "Edit the home page"], risks: "", validationPlan: "Run npx prisma validate, then npm run build." },
+      coding_change_request: { summary: "Add the comment.", operations: [{ action: "WRITE_FILE", path: "src/app/page.tsx", content: changed }], commands: [], escalation: null, completionProposal: "COMPLETED" },
+      coding_self_review: { summary: "The change is one comment.", potentialDefects: [], missingAcceptance: [], unnecessaryChanges: [], architectureDeviations: [], securityConcerns: [], missingTests: [] },
+      coding_completion: { proposal: "COMPLETED", rationale: "The deterministic checks decide." },
+      ...ANSWERS,
+    };
+    const requests: string[] = [];
+    setAIProviderForTests({
+      async generate(request: { schemaName: string }) {
+        requests.push(request.schemaName);
+        const data = answers[request.schemaName];
+        if (data === undefined) throw new Error(`The golden-path stub has no answer for ${request.schemaName}.`);
+        return { data: data as never, usage: { inputTokens: 1, outputTokens: 1 }, model: "stub" };
+      },
+    } as unknown as AIProvider);
+
+    const human = { actorName: "Local user" };
+    await coding.approveImplementationTask(setup.product.id, setup.task.id, human);
+    const workspace = await coding.startCodingTask(setup.product.id, setup.task.id);
+    if (!workspace) throw new Error("Coding did not create a workspace.");
+    await coding.approveExecutionPlan(setup.product.id, workspace.id, human);
+    await coding.resumeCodingTask(setup.product.id, workspace.id);
+    const afterCoding = await db.repositoryWorkspace.findUniqueOrThrow({ where: { id: workspace.id } });
+    const evidence = await db.codingEvidence.findMany({ where: { workspaceId: workspace.id }, orderBy: { createdAt: "asc" } });
+    const detail = evidence.map((item) => `${item.command || item.type}: ${item.result} ${String(item.description).slice(0, 240).replace(/\s+/g, " ")} ${String(item.output).slice(-300).replace(/\s+/g, " ")}`).join("\n");
+    expect(afterCoding.status, `coding ended as ${afterCoding.status}\n${detail}\nAI calls: ${requests.join(" -> ")}\n${JSON.stringify(afterCoding).slice(0, 600)}`).toBe("READY_FOR_REVIEW");
+    await coding.approveCodeChanges(setup.product.id, workspace.id, human);
+    await coding.createCodingCommit(setup.product.id, workspace.id);
+    const committed = await db.repositoryWorkspace.findUniqueOrThrow({ where: { id: workspace.id } });
+    expect(committed.status).toBe("COMPLETED");
+    expect(committed.headCommit).not.toBe(committed.baseCommit);
+
+    try {
+      await signFixtureRuntimeReview(setup.product.id, setup.task.id);
+    } catch (error) {
+      const task = await db.implementationTask.findUniqueOrThrow({ where: { id: setup.task.id } });
+      const approvals = await db.codeChangeApproval.findMany({ where: { workspaceId: workspace.id }, include: { approval: true } });
+      const status = execFileSync("git", ["status", "--porcelain", "--untracked-files=all"], { cwd: committed.workspacePath, encoding: "utf8" });
+      throw new Error(`Runtime review could not be prepared: ${error instanceof Error ? error.message : error}\ntask ${task.status}; workspace ${committed.status}; stale ${committed.executionContractStale}\napprovals ${JSON.stringify(approvals.map((item) => ({ stale: item.stale, base: item.baseCommit.slice(0, 7), head: item.headCommit.slice(0, 7), by: item.approval.approvedBy, resolved: Boolean(item.approval.resolvedAt) })))}\nworkspace head ${committed.headCommit.slice(0, 7)}\ngit status: ${status.slice(0, 300)}`);
+    }
+    const session = await startVerification(setup.product.id, setup.task.id);
+    if (!session) throw new Error("startVerification returned no session.");
+    const row = await db.verificationSession.findUniqueOrThrow({ where: { id: session.id } });
+    const executions = await db.verificationExecution.findMany({ where: { sessionId: session.id }, orderBy: { createdAt: "asc" } });
+    const summary = `status ${row.status}, verdict ${row.overallVerdict ?? "none"}, reason: ${row.verdictReason}\n${executions.map((item) => `${item.command}: ${item.status}`).join("\n")}\nAI calls: ${requests.join(" -> ")}`;
+    expect(row.failureClass, summary).toBe("");
+    expect(["PASS", "PASS_WITH_CONCERNS"], summary).toContain(row.overallVerdict);
+    expect(executions.some((item) => item.command === "npm run build" && item.status === "PASSED"), summary).toBe(true);
+  }, 1_800_000);
 });

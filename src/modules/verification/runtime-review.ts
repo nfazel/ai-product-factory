@@ -1,3 +1,4 @@
+import { isGeneratedReviewPath } from '@/modules/coding/generated-paths';
 import {AuthorityUnavailableError,type AuthorityStatus} from './authority-status';
 import {unapprovedPreservationIssues} from '@/modules/coding/external-review';
 import 'server-only';
@@ -22,13 +23,20 @@ const invalidReason = 'Runtime/behaviour approval is missing, revoked or no long
 async function git(root: string, args: string[]) {
   return (await exec('git', ['--no-replace-objects','-c','core.fsmonitor=false',...args], { cwd: root, env: childEnv(), encoding: 'utf8', timeout: 30000, maxBuffer: 100_000_000 })).stdout.trim();
 }
+/**
+ * Whether `git status --porcelain` shows a change to source. Generated output (a build folder, installed packages) is not source:
+ * verification runs the committed snapshot, so a product that has not ignored its build folder must not be locked out of review.
+ */
+function uncommittedSourceChanges(porcelain: string) {
+  return porcelain.split('\n').filter(Boolean).some(line => !isGeneratedReviewPath(line.slice(3).replace(/^"|"$/g, '').split(' -> ').pop() ?? ''));
+}
 /** Read-only: no actor-supplied source path, configuration or task identity is trusted. */
 export async function prepareRuntimeReview(productId: string, workspaceId: string): Promise<RuntimeManifest> {
   const workspace = await db.repositoryWorkspace.findFirst({ where: { id: workspaceId, productId }, include: { plan: true, contract: true, task: { include: { plan: true, workItem: { include: { acceptanceCriteria: true } } } }, codeApprovals: { include: { approval: true }, orderBy: { createdAt: 'desc' } } } });
   const p = workspace?.plan, c = workspace?.contract;
   if (!workspace || !p || !c || workspace.task.plan.productId !== productId || workspace.task.id !== workspace.implementationTaskId || workspace.status !== 'COMPLETED' || workspace.task.status !== 'COMPLETED' || c.implementationTaskId !== workspace.implementationTaskId || workspace.executionContractStale || c.stale || !p.approvedAt || !p.approvedBy || !['APPROVED','COMPLETED'].includes(p.status) || ['DRAFT','ESCALATED'].includes(c.status)) throw new DomainError(invalidReason);
   const code = workspace.codeApprovals.find(a => !a.stale && a.productId === productId && a.implementationTaskId === workspace.implementationTaskId && a.workspaceId === workspaceId && a.baseCommit === workspace.baseCommit && a.headCommit === workspace.headCommit && a.approval.productId === productId && a.approval.status === 'APPROVED' && a.approval.approvalType === 'CODE_CHANGE' && a.approval.approvedBy && !/^(codex|coding agent|verification agent|testing agent)$/i.test(a.approval.approvedBy.trim()) && a.approval.approvedBy && a.approval.resolvedAt);
-  if (!code || !/^[a-f0-9]{40}$/.test(workspace.headCommit) || await git(workspace.workspacePath, ['rev-parse','HEAD']) !== workspace.headCommit || await git(workspace.workspacePath,['status','--porcelain','--untracked-files=all'])) throw new DomainError(invalidReason);
+  if (!code || !/^[a-f0-9]{40}$/.test(workspace.headCommit) || await git(workspace.workspacePath, ['rev-parse','HEAD']) !== workspace.headCommit || uncommittedSourceChanges(await git(workspace.workspacePath,['status','--porcelain','--untracked-files=all']))) throw new DomainError(invalidReason);
   if ((await unapprovedPreservationIssues(workspace.id,workspace.workspacePath,workspace.baseCommit,true)).length) throw new DomainError('Existing preservation/security approval is not current.');
   const criteria = (workspace.task.workItem?.acceptanceCriteria ?? []).map(({id,description}) => ({id,description})).sort((a,b) => a.id.localeCompare(b.id));
   validateRuntimeMetadata(p.validationPlan, criteria, parsePlannedCommands(p.validationCommands).filter(command => command.applicability !== 'NOT_APPLICABLE').map(command => command.command));
