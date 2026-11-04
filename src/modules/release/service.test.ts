@@ -1,8 +1,8 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { db } from "@/lib/db";
 import { setAIProviderForTests, type AIProvider } from "@/modules/ai/provider";
-import { verificationEvidenceFingerprint } from "@/modules/verification/integrity";
+import { VERIFICATION_EVIDENCE_INCLUDE, verificationEvidenceFingerprint } from "@/modules/verification/integrity";
 import {
   acceptReleaseRisk,
   approveDeploymentPlan,
@@ -24,6 +24,28 @@ import {
   saveDeploymentPlan,
   stageMoveBlockers,
 } from "@/modules/release/service";
+
+// Whether a feature can be accepted is the feature review's own business and has its own tests. Release governance only needs to know
+// that the features its tasks belong to were accepted, so those are stood in here, built from the real hierarchy in the database.
+vi.mock("@/modules/feature-review/release", async (original) => {
+  const standIn = async (_productId: string, tasks: { id: string; workItemId: string }[]) => {
+    const { db: database } = await import("@/lib/db");
+    const parents = await database.workItem.findMany({ where: { id: { in: tasks.map((task) => task.workItemId) } }, select: { id: true, parentId: true } });
+    const byFeature = new Map<string, string[]>();
+    for (const task of tasks) {
+      const featureId = parents.find((item) => item.id === task.workItemId)?.parentId;
+      if (featureId) byFeature.set(featureId, [...(byFeature.get(featureId) ?? []), task.id]);
+    }
+    return [...byFeature].map(([featureId, taskIds]) => ({ featureId, title: "Claim notice", status: "ACCEPTED", acceptanceId: "acceptance", digest: "a".repeat(64), commitSha: "a".repeat(40), taskIds }));
+  };
+  return { ...(await original<typeof import("@/modules/feature-review/release")>()), releaseFeatureAcceptance: vi.fn(standIn), guidanceFeatureAcceptance: vi.fn(standIn) };
+});
+
+// Whether a runtime review still matches is the runtime review's own business and has its own tests; release governance only consumes the answer.
+vi.mock("@/modules/verification/runtime-review", async (original) => ({
+  ...(await original<typeof import("@/modules/verification/runtime-review")>()),
+  inspectSessionRuntimeBinding: vi.fn(async () => "CURRENT" as const),
+}));
 
 const products: string[] = [];
 const sha = "a".repeat(40);
@@ -52,8 +74,10 @@ async function fixture() {
     },
   });
   const capability = await db.productCapability.create({ data: { productId: product.id, outcomeId: outcome.id, name: "Submit a claim", status: "CONFIRMED" } });
+  const epic = await db.workItem.create({ data: { productId: product.id, title: "Digital claims", type: "EPIC", stage: "PROVE" } });
+  const feature = await db.workItem.create({ data: { productId: product.id, title: "Claim notice", type: "FEATURE", stage: "PROVE", parentId: epic.id } });
   const story = await db.workItem.create({
-    data: { productId: product.id, title: "As a policyholder I want to submit a claim online", type: "STORY", stage: "PROVE", capabilityId: capability.id, sliceId: slice.id },
+    data: { productId: product.id, title: "As a policyholder I want to submit a claim online", type: "STORY", stage: "PROVE", capabilityId: capability.id, sliceId: slice.id, parentId: feature.id },
   });
   const criterion = await db.acceptanceCriterion.create({ data: { workItemId: story.id, description: "Customer receives a claim reference." } });
   const architecture = await db.solutionArchitecture.create({
@@ -108,19 +132,16 @@ async function fixture() {
   const coverage = await db.verificationCoverage.create({
     data: { sessionId: session.id, acceptanceCriterionId: criterion.id, status: "VERIFIED", rationale: "The reference was returned." },
   });
-  const verificationApproval = await db.approval.create({ data: { productId: product.id, approvalType: "VERIFICATION", status: "APPROVED", approvedBy: "Local user" } });
+  // A started attempt is bound to a signed runtime review, and an approval only counts against the evidence as it stands.
+  await db.verificationSession.update({
+    where: { id: session.id },
+    data: { runState: { runtimeBinding: { kind: "VERIFICATION_RUNTIME_BINDING", version: 1, approvalId: "runtime", evidenceId: "runtime-proof", digest: "d".repeat(64), manifest: { kind: "VERIFICATION_RUNTIME_MANIFEST", version: 1, productId: product.id, taskId: task.id, workspaceId: workspace.id, commitSha: sha } } } as never },
+  });
+  const bound = await db.verificationSession.findUniqueOrThrow({ where: { id: session.id }, include: VERIFICATION_EVIDENCE_INCLUDE });
+  void coverage;
+  const verificationApproval = await db.approval.create({ data: { productId: product.id, approvalType: "VERIFICATION", status: "APPROVED", approvedBy: "Local user", resolvedAt: new Date() } });
   await db.verificationApproval.create({
-    data: {
-      productId: product.id,
-      approvalId: verificationApproval.id,
-      sessionId: session.id,
-      implementationTaskId: task.id,
-      commitSha: sha,
-      evidenceFingerprint: verificationEvidenceFingerprint({
-        executions: [],
-        coverages: [{ acceptanceCriterionId: coverage.acceptanceCriterionId, status: coverage.status }],
-      }),
-    },
+    data: { productId: product.id, approvalId: verificationApproval.id, sessionId: session.id, implementationTaskId: task.id, commitSha: sha, evidenceFingerprint: verificationEvidenceFingerprint(bound) },
   });
   await db.integratedVerificationSession.create({
     data: { productId: product.id, productSliceId: slice.id, status: "BLOCKED", overallVerdict: "INCONCLUSIVE", evidenceGaps: ["End-to-end behaviour was not executed."] },
@@ -205,6 +226,20 @@ describe("release governance", () => {
     await db.releaseQuestion.update({ where: { id: question.id }, data: { status: "ANSWERED", answer: "The release owner.", answeredBy: "Local user" } });
     await db.deploymentPlan.updateMany({ where: { releaseCandidateId: candidateId }, data: { rollbackTrigger: "", rollbackSteps: "", rollbackRole: "", rollbackVerification: "" } });
     await expect(approveRelease(setup.product.id, candidateId)).rejects.toThrow(/Rollback/);
+  });
+
+  it("records each feature's acceptance once however often the release is refreshed", async () => {
+    const setup = await fixture();
+    const candidateId = await readyCandidate(setup.product.id);
+    await getShipView(setup.product.id);
+    await getShipView(setup.product.id);
+    const rows = await db.releaseEvidence.findMany({ where: { releaseCandidateId: candidateId, description: { startsWith: "Feature " } } });
+    expect(rows).toHaveLength(1);
+    // And an approval is not made stale just by looking at the release again.
+    const approved = await approveRelease(setup.product.id, candidateId);
+    await getShipView(setup.product.id);
+    expect((await getShipView(setup.product.id))?.candidate?.approval?.stale).toBe(false);
+    expect(approved?.candidate?.status).toBe("APPROVED");
   });
 
   it("keeps release approval human and stales it when the merged state changes", async () => {

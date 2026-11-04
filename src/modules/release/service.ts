@@ -266,7 +266,17 @@ async function replaceGenerated(candidateId: string, facts: ReleaseFacts) {
     return rows;
   });
   if (items.length > 0) await db.releaseCandidateItem.createMany({ data: items });
-  await db.releaseEvidence.deleteMany({ where: { releaseCandidateId: candidateId, source: { in: ["FACTORY", "GITHUB", "COMMAND_RUNNER"] } } });
+  // The feature acceptance rows are generated from the feature reviews but labelled as human, so they must be cleared with the rest
+  // of the generated evidence. Left behind, they pile up on every refresh, change the fingerprint each time, and make an approval stale.
+  await db.releaseEvidence.deleteMany({
+    where: {
+      releaseCandidateId: candidateId,
+      OR: [
+        { source: { in: ["FACTORY", "GITHUB", "COMMAND_RUNNER"] } },
+        { source: "HUMAN", type: "PRODUCT_APPROVAL", description: { startsWith: "Feature ", contains: ". Human acceptance " } },
+      ],
+    },
+  });
   await db.releaseEvidence.createMany({
     data: evidenceDrafts(facts).map((row) => ({ ...row, releaseCandidateId: candidateId })) as Prisma.ReleaseEvidenceCreateManyInput[],
   });

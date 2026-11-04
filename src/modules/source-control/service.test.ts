@@ -8,7 +8,8 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { db } from "@/lib/db";
 import { setAIProviderForTests, type AIProvider } from "@/modules/ai/provider";
 import { noteVerificationCommitChanged } from "@/modules/verification/impact";
-import { verificationEvidenceFingerprint } from "@/modules/verification/integrity";
+import { bindFixtureSession } from "@/modules/verification/completed-task.test-support";
+import { VERIFICATION_EVIDENCE_INCLUDE, verificationEvidenceFingerprint } from "@/modules/verification/integrity";
 import { createFakeSourceControl } from "@/modules/source-control/fake";
 import { setInstallationDirectoryForTests } from "@/modules/source-control/github-account";
 import { setSourceControlProviderForTests } from "@/modules/source-control/registry";
@@ -64,6 +65,14 @@ function makeRepo() {
   git(dir, ["commit", "-m", "init"]);
   git(dir, ["remote", "add", "origin", "https://github.com/acme/claims.git"]);
   return dir;
+}
+
+/** A passing verification the way a started attempt leaves it: bound to a signed runtime review and approved against the evidence as it now stands. */
+async function approveBound(productId: string, taskId: string, sessionId: string) {
+  await bindFixtureSession(sessionId, productId, taskId);
+  const session = await db.verificationSession.findUniqueOrThrow({ where: { id: sessionId }, include: VERIFICATION_EVIDENCE_INCLUDE });
+  const approval = await db.approval.create({ data: { productId, approvalType: "VERIFICATION", status: "APPROVED", approvedBy: "Local user", resolvedAt: new Date() } });
+  await db.verificationApproval.create({ data: { productId, approvalId: approval.id, sessionId, implementationTaskId: taskId, commitSha: session.commitSha, evidenceFingerprint: verificationEvidenceFingerprint(session) } });
 }
 
 async function deliveryFixture() {
@@ -123,6 +132,9 @@ async function deliveryFixture() {
   await db.codingExecutionContract.create({
     data: { implementationTaskId: task.id, workspaceId: workspace.id, objective: "Return a claim reference.", allowedPaths: ["src/**"], requiredChecks: ["unit tests"], executionMode: "SUPERVISED", riskLevel: "LOW" },
   });
+  await db.codingExecutionPlan.create({
+    data: { workspaceId: workspace.id, summary: "Claim submission", version: 1, status: "COMPLETED", filesExpectedToChange: ["src/claims/submit.ts"], steps: ["Update the claim form"], validationCommands: [{ command: "npm test", kind: "VALIDATION", applicability: "REQUIRED", reason: "The plan requires tests." }], approvedBy: "Local user", approvedAt: new Date("2020-01-01T00:00:00.000Z") },
+  });
   const codeApproval = await db.approval.create({ data: { productId: product.id, approvalType: "CODE_CHANGE", status: "APPROVED", approvedBy: "Local user" } });
   await db.codeChangeApproval.create({
     data: { productId: product.id, approvalId: codeApproval.id, implementationTaskId: task.id, workspaceId: workspace.id, baseCommit: sha, headCommit: sha, diffHash: "diff" },
@@ -131,20 +143,8 @@ async function deliveryFixture() {
     data: { productId: product.id, implementationTaskId: task.id, repositoryWorkspaceId: workspace.id, commitSha: sha, status: "PASSED", overallVerdict: "PASS" },
   });
   const regressionExecution = await db.verificationExecution.create({ data: { sessionId: session.id, command: "npm test", kind: "EXISTING_REGRESSION", status: "PASSED", exitCode: 0 } });
-  const verificationApproval = await db.approval.create({ data: { productId: product.id, approvalType: "VERIFICATION", status: "APPROVED", approvedBy: "Local user" } });
-  await db.verificationApproval.create({
-    data: {
-      productId: product.id,
-      approvalId: verificationApproval.id,
-      sessionId: session.id,
-      implementationTaskId: task.id,
-      commitSha: sha,
-      evidenceFingerprint: verificationEvidenceFingerprint({
-        executions: [{ id: regressionExecution.id, exitCode: regressionExecution.exitCode, status: regressionExecution.status }],
-        coverages: [],
-      }),
-    },
-  });
+  void regressionExecution;
+  await approveBound(product.id, task.id, session.id);
   await db.integratedVerificationSession.create({
     data: { productId: product.id, productSliceId: slice.id, status: "BLOCKED", overallVerdict: "INCONCLUSIVE", planSummary: "No integrated execution environment is available.", evidenceGaps: ["End-to-end behaviour was not executed."] },
   });
@@ -315,10 +315,7 @@ describe("github delivery", () => {
     const restored = await db.verificationSession.create({
       data: { productId: setup.product.id, implementationTaskId: setup.task.id, commitSha: setup.sha, status: "PASSED", overallVerdict: "PASS" },
     });
-    const approval = await db.approval.create({ data: { productId: setup.product.id, approvalType: "VERIFICATION", status: "APPROVED", approvedBy: "Local user" } });
-    await db.verificationApproval.create({
-      data: { productId: setup.product.id, approvalId: approval.id, sessionId: restored.id, implementationTaskId: setup.task.id, commitSha: setup.sha, evidenceFingerprint: verificationEvidenceFingerprint({ executions: [], coverages: [] }) },
-    });
+    await approveBound(setup.product.id, setup.task.id, restored.id);
     expect((await getSourceControlView(setup.product.id))?.tasks[0]?.readiness.label).toBe("READY FOR HUMAN MERGE");
     const pull = setup.fake.state.pulls[0];
     if (pull) {
@@ -352,10 +349,7 @@ describe("github delivery", () => {
     const session = await db.verificationSession.create({
       data: { productId: setup.product.id, implementationTaskId: setup.task.id, commitSha: next, status: "PASSED", overallVerdict: "PASS" },
     });
-    const approval = await db.approval.create({ data: { productId: setup.product.id, approvalType: "VERIFICATION", status: "APPROVED", approvedBy: "Local user" } });
-    await db.verificationApproval.create({
-      data: { productId: setup.product.id, approvalId: approval.id, sessionId: session.id, implementationTaskId: setup.task.id, commitSha: next, evidenceFingerprint: verificationEvidenceFingerprint({ executions: [], coverages: [] }) },
-    });
+    await approveBound(setup.product.id, setup.task.id, session.id);
     const updated = await updatePublishedBranch(setup.product.id, setup.task.id);
     expect(updated.remoteCommitSha).toBe(next);
     expect(setup.fake.state.pushes.at(-1)?.args.join(" ")).not.toContain("--force");
