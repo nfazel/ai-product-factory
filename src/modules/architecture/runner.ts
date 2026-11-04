@@ -44,8 +44,8 @@ export const architectureRunner: AgentRunner = {
         : "generate";
     const gate =
       mode === "plan"
-        ? await planEntryBlockers(request.productId)
-        : await architectureEntryBlockers(request.productId);
+        ? await planEntryBlockers(request.productId, { draftAhead: request.input.draftAhead === true })
+        : await architectureEntryBlockers(request.productId, { draftAhead: request.input.draftAhead === true });
     if (gate.reasons.length > 0) {
       throw new DomainError(gate.reasons.join(" "));
     }

@@ -6,6 +6,7 @@ import { getAIProvider, isAIConfigured } from "@/modules/ai/provider";
 import type { AgentRunner } from "@/modules/agent/types";
 import { loadGovernanceContext } from "@/modules/governance/context";
 import { governanceEntryBlockers } from "@/modules/governance/gates";
+import type { GateMode } from "@/modules/architecture/gates";
 import { mergeGovernanceSection } from "@/modules/governance/proposal";
 import { GOVERNANCE_SYSTEM_PROMPT, governanceMessages } from "@/modules/governance/prompt";
 import {
@@ -35,8 +36,8 @@ function asSection(value: unknown): GovernanceSection | undefined {
   return GOVERNANCE_SECTIONS.find((section) => section === value);
 }
 
-async function refuseUnlessReady(productId: string) {
-  const gate = await governanceEntryBlockers(productId);
+async function refuseUnlessReady(productId: string, mode: GateMode = {}) {
+  const gate = await governanceEntryBlockers(productId, mode);
   if (gate.reasons.length > 0) throw new DomainError(gate.reasons.join(" "));
   return gate;
 }
@@ -47,11 +48,11 @@ export const governanceRunner: AgentRunner = {
     return isAIConfigured();
   },
   async assertCanRun(request) {
-    await refuseUnlessReady(request.productId);
+    await refuseUnlessReady(request.productId, { draftAhead: request.input.draftAhead === true });
   },
   async execute(request) {
     const mode = request.input.mode === "regenerate" ? "regenerate" : "generate";
-    const gate = await refuseUnlessReady(request.productId);
+    const gate = await refuseUnlessReady(request.productId, { draftAhead: request.input.draftAhead === true });
     const section = asSection(request.input.section);
     const taskId = typeof request.input.taskId === "string" ? request.input.taskId : "";
     const open = await findOpenGovernanceProposal(request.productId);

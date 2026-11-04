@@ -13,31 +13,26 @@ export async function loadGovernanceContext(productId: string) {
       db.productDefinition.findUnique({ where: { productId } }),
       db.productOutcome.findMany({ where: { productId } }),
       db.productCapability.findMany({ where: { productId } }),
-      db.productSlice.findFirst({ where: { productId, status: "APPROVED" }, orderBy: { createdAt: "asc" } }),
+      // Approved when it is, otherwise the drafted one, so the review can be drafted ahead of the approvals before it.
+      (async () =>
+        (await db.productSlice.findFirst({ where: { productId, status: "APPROVED" }, orderBy: { createdAt: "asc" } })) ??
+        (await db.productSlice.findFirst({ where: { productId }, orderBy: { createdAt: "asc" } })))(),
       db.nonFunctionalRequirement.findMany({ where: { productId } }),
       db.requirementAssumption.findMany({ where: { productId } }),
-      db.solutionArchitecture.findFirst({
-        where: { productId, status: "APPROVED" },
-        orderBy: { version: "desc" },
-        include: {
-          components: true,
-          decisions: true,
-          technologies: true,
-          dataEntities: true,
-          integrations: true,
-          findings: true,
-        },
-      }),
-      db.implementationPlan.findFirst({
-        where: { productId, status: "APPROVED" },
-        orderBy: { version: "desc" },
-        include: {
-          tasks: {
-            orderBy: { sequence: "asc" },
-            include: { dependencies: true, components: true },
-          },
-        },
-      }),
+      (async () => {
+        const include = { components: true, decisions: true, technologies: true, dataEntities: true, integrations: true, findings: true } as const;
+        return (
+          (await db.solutionArchitecture.findFirst({ where: { productId, status: "APPROVED" }, orderBy: { version: "desc" }, include })) ??
+          (await db.solutionArchitecture.findFirst({ where: { productId, status: "READY_FOR_REVIEW" }, orderBy: { version: "desc" }, include }))
+        );
+      })(),
+      (async () => {
+        const include = { tasks: { orderBy: { sequence: "asc" }, include: { dependencies: true, components: true } } } as const;
+        return (
+          (await db.implementationPlan.findFirst({ where: { productId, status: "APPROVED" }, orderBy: { version: "desc" }, include })) ??
+          (await db.implementationPlan.findFirst({ where: { productId, status: "READY_FOR_REVIEW" }, orderBy: { version: "desc" }, include }))
+        );
+      })(),
       db.architectureQuestion.findMany({ where: { productId, status: "OPEN" } }),
     ]);
 

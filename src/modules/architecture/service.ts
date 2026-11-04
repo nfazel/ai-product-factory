@@ -7,7 +7,7 @@ import { recordActivity } from "@/modules/activity/service";
 import { executeAgent } from "@/modules/agent/service";
 import { requestApproval, resolveApproval } from "@/modules/approval/service";
 import { analyseConfiguredRoot } from "@/modules/architecture/context";
-import { architectureEntryBlockers, planEntryBlockers } from "@/modules/architecture/gates";
+import { architectureEntryBlockers, planEntryBlockers, type GateMode } from "@/modules/architecture/gates";
 import { noteArchitectureChange } from "@/modules/architecture/impact";
 import { noteGovernanceReviewRequired } from "@/modules/governance/impact";
 import { assessCodingReadiness } from "@/modules/governance/coding-readiness";
@@ -38,8 +38,8 @@ function assertHuman(actorName: string, target: "architecture" | "plan") {
   }
 }
 
-async function requireArchitectureGate(productId: string) {
-  const gate = await architectureEntryBlockers(productId);
+async function requireArchitectureGate(productId: string, mode: GateMode = {}) {
+  const gate = await architectureEntryBlockers(productId, mode);
   if (gate.reasons.length > 0) throw new DomainError(gate.reasons.join(" "));
   return gate;
 }
@@ -51,12 +51,12 @@ function splitList(value: string) {
     .filter(Boolean);
 }
 
-export async function generateArchitecture(productId: string) {
-  await requireArchitectureGate(productId);
+export async function generateArchitecture(productId: string, options: GateMode = {}) {
+  await requireArchitectureGate(productId, options);
   const run = await executeAgent({
     productId,
     agentType: "ARCHITECTURE",
-    input: { mode: "generate" },
+    input: { mode: "generate", ...(options.draftAhead ? { draftAhead: true } : {}) },
   });
   await recordActivity({
     productId,
@@ -104,13 +104,13 @@ export async function requestArchitectureReview(productId: string) {
   return run;
 }
 
-export async function generateImplementationPlan(productId: string) {
-  const gate = await planEntryBlockers(productId);
+export async function generateImplementationPlan(productId: string, options: GateMode = {}) {
+  const gate = await planEntryBlockers(productId, options);
   if (gate.reasons.length > 0) throw new DomainError(gate.reasons.join(" "));
   const run = await executeAgent({
     productId,
     agentType: "ARCHITECTURE",
-    input: { mode: "plan" },
+    input: { mode: "plan", ...(options.draftAhead ? { draftAhead: true } : {}) },
   });
   await recordActivity({
     productId,
@@ -161,12 +161,12 @@ export async function editProposalSummary(input: {
   return next;
 }
 
-export async function commitArchitecture(productId: string, proposalId: string) {
+export async function commitArchitecture(productId: string, proposalId: string, options: GateMode = {}) {
   const proposal = await requireOpen(productId, proposalId);
   if (proposal.kind !== "ARCHITECTURE") {
     throw new DomainError("This proposal is an implementation plan, not a solution architecture.");
   }
-  const gate = await architectureEntryBlockers(productId);
+  const gate = await architectureEntryBlockers(productId, options);
   const architecture = await persistCommittedArchitecture({
     productId,
     productSliceId: gate.slice?.id ?? null,
@@ -181,8 +181,8 @@ export async function commitArchitecture(productId: string, proposalId: string) 
   return architecture;
 }
 
-export async function commitImplementationPlan(productId: string, proposalId: string) {
-  const gate = await planEntryBlockers(productId);
+export async function commitImplementationPlan(productId: string, proposalId: string, options: GateMode = {}) {
+  const gate = await planEntryBlockers(productId, options);
   if (gate.reasons.length > 0 || !gate.architecture) {
     throw new DomainError(gate.reasons.join(" ") || "An approved Solution Architecture is required.");
   }
@@ -263,8 +263,8 @@ export async function approveSolutionArchitecture(
   return updated;
 }
 
-export async function markPlanReady(productId: string) {
-  const gate = await planEntryBlockers(productId);
+export async function markPlanReady(productId: string, options: GateMode = {}) {
+  const gate = await planEntryBlockers(productId, options);
   if (!gate.architecture) {
     throw new DomainError("An approved Solution Architecture is required before the plan can be reviewed.");
   }

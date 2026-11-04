@@ -70,7 +70,10 @@ export async function loadArchitectureContext(productId: string) {
       db.productDefinition.findUnique({ where: { productId } }),
       db.productOutcome.findMany({ where: { productId } }),
       db.productCapability.findMany({ where: { productId } }),
-      db.productSlice.findFirst({ where: { productId, status: "APPROVED" }, orderBy: { createdAt: "asc" } }),
+      // The approved first slice, or the drafted one when the design is being drafted ahead of that approval.
+      (async () =>
+        (await db.productSlice.findFirst({ where: { productId, status: "APPROVED" }, orderBy: { createdAt: "asc" } })) ??
+        (await db.productSlice.findFirst({ where: { productId }, orderBy: { createdAt: "asc" } })))(),
       db.workItem.findMany({
         where: { productId },
         include: { acceptanceCriteria: true, parent: { select: { id: true, title: true, type: true } } },

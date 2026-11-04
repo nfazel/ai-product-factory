@@ -8,6 +8,7 @@ import { executeAgent } from "@/modules/agent/service";
 import { requestApproval, resolveApproval } from "@/modules/approval/service";
 import { db } from "@/lib/db";
 import { assessCodingReadiness } from "@/modules/governance/coding-readiness";
+import type { GateMode } from "@/modules/architecture/gates";
 import { governanceEntryBlockers } from "@/modules/governance/gates";
 import { noteCodingPolicyReapproval } from "@/modules/governance/impact";
 import { acceptAllGovernance, setGovernanceReviewStatus } from "@/modules/governance/proposal";
@@ -35,18 +36,18 @@ function assertHuman(actorName: string, target: "review" | "policy") {
   }
 }
 
-async function requireGate(productId: string) {
-  const gate = await governanceEntryBlockers(productId);
+async function requireGate(productId: string, mode: GateMode = {}) {
+  const gate = await governanceEntryBlockers(productId, mode);
   if (gate.reasons.length > 0) throw new DomainError(gate.reasons.join(" "));
   return gate;
 }
 
-export async function generateGovernanceReview(productId: string) {
-  await requireGate(productId);
+export async function generateGovernanceReview(productId: string, options: GateMode = {}) {
+  await requireGate(productId, options);
   const run = await executeAgent({
     productId,
     agentType: "SECURITY",
-    input: { mode: "generate" },
+    input: { mode: "generate", ...(options.draftAhead ? { draftAhead: true } : {}) },
   });
   await recordActivity({
     productId,
@@ -106,8 +107,8 @@ export async function acceptEntireGovernanceProposal(productId: string, proposal
   return next;
 }
 
-export async function commitGovernanceReview(productId: string, proposalId: string) {
-  const gate = await requireGate(productId);
+export async function commitGovernanceReview(productId: string, proposalId: string, options: GateMode = {}) {
+  const gate = await requireGate(productId, options);
   if (!gate.architecture || !gate.plan) {
     throw new DomainError(gate.reasons.join(" ") || "Approved architecture and an approved plan are required.");
   }
