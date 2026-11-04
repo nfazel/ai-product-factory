@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { StatusPill } from "@/components/build/status-pill";
+import { PlanPrepareCard } from "@/components/plan/plan-prepare-card";
 import { buttonVariants } from "@/components/ui/button";
 import { planHeadline, SECTION_STATE_LABEL, type SectionState } from "@/modules/plan/presentation";
 import type { PlanSection, PlanView } from "@/modules/plan/view";
@@ -40,6 +41,8 @@ export function PlanPage({ plan }: { plan: PlanView }) {
           section links to. Approving the whole plan in one step is the next piece of work.
         </p>
       </header>
+
+      <PlanPrepareCard plan={plan} />
 
       <Section section={by("brief")}>
         {plan.brief ? (

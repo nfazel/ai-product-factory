@@ -1,11 +1,14 @@
 import "server-only";
 
 import { db } from "@/lib/db";
-import { sectionState, type ApprovalFact, type SectionState } from "@/modules/plan/presentation";
+import { draftState, sectionState, type ApprovalFact, type DraftState, type SectionState } from "@/modules/plan/presentation";
+import { preparationState } from "@/modules/plan/prepare-runner";
 
 export type PlanSection = { key: string; title: string; state: SectionState; approvedBy: string | null; detailsHref: string; detailsLabel: string };
 
 export type PlanView = {
+  productId: string;
+  draft: { state: DraftState; reason: string };
   sections: PlanSection[];
   brief: { problem: string; vision: string; value: string; users: string } | null;
   outcomes: { title: string; measure: string }[];
@@ -55,7 +58,15 @@ export async function getPlanView(productId: string): Promise<PlanView | null> {
     return { key, title, state: sectionState({ exists, approval: fact }), approvedBy: fact?.status === "APPROVED" ? fact.approvedBy : null, detailsHref, detailsLabel };
   };
   const base = `/products/${productId}`;
+  const prepared = preparationState(productId);
+  const candidate = (await db.planningPublication.count({ where: { productId, purpose: "DEFINITION_PROPOSAL" } })) > 0;
+  const failure = prepared.last?.status === "NEEDS_YOU" ? prepared.last.reason : "";
   return {
+    productId,
+    draft: {
+      state: draftState({ briefStatus: brief?.status ?? null, briefReadyForReview: Boolean(brief?.readyForReview), drafted: outcomes.length > 0 || items.length > 0, candidate, running: prepared.running, failure }),
+      reason: failure,
+    },
     sections: [
       section("brief", "What this is", Boolean(brief), "PRODUCT_DISCOVERY", `${base}/discovery`, "Open the brief"),
       section("features", "What it will do", features.length > 0, "PRODUCT_DEFINITION", `${base}/definition`, "Open the definition"),

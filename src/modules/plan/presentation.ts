@@ -27,3 +27,15 @@ export function planHeadline(sections: { title: string; state: SectionState }[])
   const label = next?.state === "NOT_STARTED" ? "has not been started" : "is drafted and waiting for you";
   return `${approved} of ${total} sections are approved. "${next?.title}" ${label}.`;
 }
+
+/** Where drafting the features stands. */
+export type DraftState = "NEEDS_BRIEF" | "BRIEF_READY" | "READY" | "RUNNING" | "DRAFTED" | "CANDIDATE" | "FAILED";
+
+/** `candidate` means the agent published a definition candidate that nothing can yet review, select or commit. */
+export function draftState(input: { briefStatus: string | null; briefReadyForReview: boolean; drafted: boolean; candidate?: boolean; running: boolean; failure: string }): DraftState {
+  if (input.briefStatus !== "APPROVED") return input.briefStatus && input.briefReadyForReview ? "BRIEF_READY" : "NEEDS_BRIEF";
+  if (input.drafted) return "DRAFTED";
+  if (input.candidate) return "CANDIDATE";
+  if (input.running) return "RUNNING";
+  return input.failure ? "FAILED" : "READY";
+}

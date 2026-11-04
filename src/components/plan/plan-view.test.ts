@@ -1,6 +1,9 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: () => undefined }) }));
+vi.mock("@/server/actions/plan", () => ({ approveBriefAndDraftAction: async () => ({ status: "idle" }), draftFeaturesAction: async () => ({ status: "idle" }) }));
 
 import { PlanPage } from "@/components/plan/plan-view";
 import type { PlanView } from "@/modules/plan/view";
@@ -8,6 +11,8 @@ import type { PlanView } from "@/modules/plan/view";
 const section = (key: string, title: string, state: PlanView["sections"][number]["state"], approvedBy: string | null = null) => ({ key, title, state, approvedBy, detailsHref: `/products/p/${key}`, detailsLabel: `Open ${key}` });
 
 const plan = (over: Partial<PlanView> = {}): PlanView => ({
+  productId: "p",
+  draft: { state: "DRAFTED", reason: "" },
   sections: [section("brief", "What this is", "APPROVED", "Local user"), section("features", "What it will do", "WAITING"), section("architecture", "How it will be built", "NOT_STARTED"), section("work", "The work", "NOT_STARTED"), section("rules", "The rules", "NOT_STARTED")],
   brief: { problem: "Friends cannot settle bets.", vision: "A betting app for friends.", value: "Fun without money.", users: "Friend groups" },
   outcomes: [{ title: "Friends place bets", measure: "20 bets a week" }],
@@ -46,4 +51,37 @@ describe("the Plan page", () => {
     expect(html).not.toContain("<button");
     expect(html).toContain("next piece of work");
   });
+
+describe("the card that says what to do about drafting the features", () => {
+  const card = (state: PlanView["draft"]["state"], reason = "") => renderToStaticMarkup(createElement(PlanPage, { plan: plan({ draft: { state, reason } }) }));
+
+  it("sends a person with no brief to the interview", () => {
+    const html = card("NEEDS_BRIEF");
+    expect(html).toContain("Start by describing the product");
+    expect(html).toContain('href="/products/p/discovery"');
+    expect(html).not.toContain("<button");
+  });
+
+  it("offers the first decision when the brief is ready, saying what approving does", () => {
+    const html = card("BRIEF_READY");
+    expect(html).toContain("Approve the brief and draft the features");
+    expect(html).toContain("first of your two decisions");
+  });
+
+  it("offers to draft the features once the brief is approved, and to try again with the reason after a failure", () => {
+    expect(card("READY")).toContain("Draft the features");
+    const failed = card("FAILED", "The model is temporarily unavailable. It was tried 3 times.");
+    expect(failed).toContain("Drafting the features stopped");
+    expect(failed).toContain("It was tried 3 times.");
+    expect(failed).toContain("Try again");
+  });
+
+  it("shows progress while drafting, and says plainly that nothing is confirmed once it is done", () => {
+    const running = card("RUNNING");
+    expect(running).toContain("Drafting the features");
+    expect(running).not.toContain("<button");
+    expect(card("DRAFTED")).toContain("Nothing is confirmed yet");
+    expect(card("CANDIDATE")).toContain("cannot be reviewed yet");
+  });
+});
 });
