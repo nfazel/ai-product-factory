@@ -139,6 +139,8 @@ export type GuidanceSnapshot = {
     entryReason: string;
   };
   release: {
+    /** Features that are ready to accept now, so the next step can say "accept" instead of approving one task's verification. */
+    acceptable?: { featureId: string; title: string; taskIds: string[] }[];
     real: null | {
       version: string;
       status: string;

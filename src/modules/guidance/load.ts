@@ -615,6 +615,7 @@ export async function loadSnapshots(productId?: string): Promise<GuidanceSnapsho
         entryReason: entry[0] ?? "",
       },
       release: {
+        acceptable: (facts.featureAcceptance ?? []).filter((feature) => feature.eligible && feature.status === "AWAITING_ACCEPTANCE").map((feature) => ({ featureId: feature.featureId, title: feature.title, taskIds: feature.taskIds })),
         real: real
           ? {
               version: real.version,

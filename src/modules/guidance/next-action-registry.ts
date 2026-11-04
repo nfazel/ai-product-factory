@@ -77,6 +77,7 @@ export const NEXT_ACTION_DESTINATIONS = {
   "recover-verification": { path: "/testing/tasks", hash: "verification-tabs", execution: "navigate", tab: "overview" },
   "retry-verification": { path: "/testing", hash: "check", execution: "command" },
   "review-verification": { path: "/testing/tasks", hash: "verification-tabs", execution: "confirm", tab: "approval" },
+  "accept-feature": { path: "/build", hash: "feature-reviews", execution: "confirm" },
   "approve-verification": { path: "/testing/tasks", hash: "verification-tabs", execution: "confirm", tab: "approval" },
   "review-verification-findings": { path: "/testing/tasks", hash: "verification-tabs", execution: "confirm", tab: "approval" },
   "configure-github": { path: "/settings", hash: "github", kind: "settings" },

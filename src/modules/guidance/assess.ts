@@ -1360,6 +1360,27 @@ function taskStep(snapshot: GuidanceSnapshot): { action: NextAction | null; bloc
     };
   }
   const verification = verificationAction(task.verification);
+  // A passing check waits for a person's decision. When the feature it belongs to can be accepted now, that one decision also
+  // approves this verification and every other task's, so the next step is to accept the feature, not to approve one task.
+  const acceptable = task.verification === "AWAITING" ? snapshot.release.acceptable?.find((feature) => feature.taskIds.includes(task.id)) : undefined;
+  if (acceptable) {
+    const destination = nextActionDestination("accept-feature");
+    return {
+      action: action(snapshot, {
+        key: "accept-feature",
+        label: "Accept the feature",
+        why: `The independent check passed. Accepting "${acceptable.title}" approves this verification and the rest of that feature's, so you decide once.`,
+        role: ENGINEERING,
+        stage: "PROVE",
+        decision: true,
+        path: destination.path,
+        hash: destination.hash,
+        waitingSince: task.updatedAt,
+        subjectId: task.id,
+      }),
+      blocker: null,
+    };
+  }
   if (verification && task.verification !== "APPROVED") {
     const destination = nextActionDestination(verification.key);
     return {

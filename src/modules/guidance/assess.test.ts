@@ -543,6 +543,22 @@ describe("next action", () => {
     expect(guidance.action?.subjectId).toBe("t1");
   });
 
+  it("says to accept the feature, not to approve one task, when the feature can be accepted now", () => {
+    const awaiting = pastDefine({
+      design: designed,
+      review: reviewed,
+      tasks: [task({ status: "COMPLETED", codeApproval: "CURRENT", verification: "AWAITING" })],
+    });
+    awaiting.release.acceptable = [{ featureId: "f1", title: "Find friends", taskIds: ["t1"] }];
+    const guidance = assessGuidance(awaiting);
+    expect(guidance.action).toMatchObject({ key: "accept-feature", label: "Accept the feature", decision: true, subjectId: "t1" });
+    expect(guidance.action?.why).toContain("Find friends");
+    expect(guidance.action?.href).toContain("#feature-reviews");
+    // A feature that cannot be accepted yet, or does not include this task, leaves the task-level approval as it was.
+    awaiting.release.acceptable = [{ featureId: "f2", title: "Other", taskIds: ["other"] }];
+    expect(assessGuidance(awaiting).action?.label).toBe("Approve Verification");
+  });
+
   it("does not offer approval when a failed verification has no verdict", () => {
     const guidance = assessGuidance(pastDefine({
       design: designed,
