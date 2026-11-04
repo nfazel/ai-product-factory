@@ -150,10 +150,10 @@ async function Discovery({
       {session?.status === "APPROVED" ? (
         <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-4">
           <h3 className="font-semibold text-emerald-950">
-            Discovery approved. Product is ready to move to Define.
+            Discovery approved. Your plan is next.
           </h3>
           <p className="mt-1 text-sm leading-6 text-emerald-950/80">
-            Approval did not change the product stage. Only a person can move Explore to Define.
+            The features, design, work and rules are drafted and approved from the Plan page, which moves the product on itself.
           </p>
           <div className="mt-3">
             {product.currentStage === "EXPLORE" ? (

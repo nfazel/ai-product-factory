@@ -1,6 +1,9 @@
 "use client";
 
+import Link from "next/link";
 import { useActionState } from "react";
+
+import { buttonVariants } from "@/components/ui/button";
 
 import { FormMessage, SubmitButton } from "@/components/forms/fields";
 import { idleState } from "@/lib/action-state";
@@ -8,7 +11,6 @@ import {
   approveDefinitionAction,
   continueDefinitionAction,
   generateDefinitionAction,
-  moveToBuildAction,
   requestDefinitionReviewAction,
   reviewDefinitionAction,
 } from "@/server/actions/requirements";
@@ -112,30 +114,16 @@ export function DefinitionControls({
           ) : null}
         </div>
       ) : null}
-      {approved ? (
-        <div id="move" tabIndex={-1} className="scroll-mt-20 rounded-xl border border-emerald-200 bg-emerald-50 p-4 focus:outline-none target:ring-2 target:ring-indigo-500 target:ring-offset-2">
-          <p className="text-sm font-medium text-emerald-950">
-            Product Definition approved. Product is ready for architecture and delivery planning.
-          </p>
-          <div className="mt-3">
-            <GateButton
-              productId={productId}
-              action={moveToBuildAction}
-              label="Move to Build"
-              pendingLabel="Moving…"
-              variant="outline"
-            />
-          </div>
+      <div id="move" tabIndex={-1} className="scroll-mt-20 rounded-xl border border-emerald-200 bg-emerald-50 p-4 focus:outline-none target:ring-2 target:ring-indigo-500 target:ring-offset-2">
+        <p className="text-sm font-medium text-emerald-950">
+          {approved ? "Product Definition approved." : "The definition is approved together with the rest of the plan."} The Plan page moves the product to Build when the plan is approved.
+        </p>
+        <div className="mt-3">
+          <Link href={`/products/${productId}/plan`} className={buttonVariants({ variant: "outline" })}>
+            Open your plan
+          </Link>
         </div>
-      ) : (
-        <GateButton
-          productId={productId}
-          action={moveToBuildAction}
-          label="Move to Build"
-          pendingLabel="Checking gates…"
-          variant="outline"
-        />
-      )}
+      </div>
     </div>
   );
 }

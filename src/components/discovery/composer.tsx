@@ -1,14 +1,15 @@
 "use client";
 
+import Link from "next/link";
 import { useActionState } from "react";
 
 import { AINotConfiguredNotice } from "@/components/ai/not-configured";
 import { FormMessage, SubmitButton, TextAreaField } from "@/components/forms/fields";
+import { buttonVariants } from "@/components/ui/button";
 import { idleState } from "@/lib/action-state";
 import {
   approveBriefAction,
   continueDiscoveryAction,
-  moveToDefineAction,
   reviewDiscoveryAction,
   retryDiscoveryAction,
 } from "@/server/actions/discovery";
@@ -126,13 +127,11 @@ export function ApproveBriefButton({ productId }: { productId: string }) {
   );
 }
 
+/** The brief is approved; the rest is drafted and approved on the Plan page, which moves the stage itself. */
 export function MoveToDefineButton({ productId }: { productId: string }) {
   return (
-    <ProductForm
-      productId={productId}
-      action={moveToDefineAction}
-      pendingLabel="Moving…"
-      label="Move to Define"
-    />
+    <Link href={`/products/${productId}/plan`} className={buttonVariants({ variant: "default" })}>
+      Open your plan
+    </Link>
   );
 }

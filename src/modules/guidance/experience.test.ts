@@ -51,7 +51,7 @@ describe("navigation", () => {
     expect(proposal).toContain("proposalId");
     expect(controls).toContain("approveDefinitionAction");
     expect(controls).toContain("reviewDefinitionAction");
-    expect(controls).toContain("moveToBuildAction");
+    expect(controls).toContain("/plan");
     expect(guidance).toContain('action.key === "draft-definition"');
     expect(guidance).toContain("moveStageAction");
     expect(guidance).toContain("scrollIntoView");

@@ -134,7 +134,7 @@ export async function approveBriefAction(
     refreshWorkspace(parsed.data.productId);
     return {
       status: "success",
-      message: "Discovery approved. Product is ready to move to Define.",
+      message: "Discovery approved. Your plan is next.",
     };
   } catch (error) {
     return actionFailure(error);

@@ -2,9 +2,14 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { assessGuidance, emptySnapshot } from "@/modules/guidance/assess";
+import { assessGuidance, chooseAction, emptySnapshot } from "@/modules/guidance/assess";
 import { NEXT_ACTION_DESTINATIONS, nextActionDestination, type NextActionDestination } from "@/modules/guidance/next-action-registry";
 import type { GuidanceSnapshot, TaskSnapshot } from "@/modules/guidance/types";
+
+/** What the step-by-step logic chose before the Plan page collapsed the plan stretch into one step. */
+function detail(snapshot: GuidanceSnapshot) {
+  return { ...assessGuidance(snapshot), ...chooseAction(snapshot) };
+}
 
 function snap(patch: Partial<GuidanceSnapshot> = {}): GuidanceSnapshot {
   return emptySnapshot({ productId: "p1", name: "Northwind", ...patch });
@@ -139,18 +144,18 @@ describe("next action", () => {
   });
 
   it("offers Move to Define only after the brief is approved", () => {
-    const guidance = assessGuidance(snap({ discovery: briefApproved }));
+    const guidance = detail(snap({ discovery: briefApproved }));
     expect(guidance.action?.key).toBe("move-define");
     expect(guidance.action?.decision).toBe(false);
   });
 
   it("asks to draft a definition when Define has not started", () => {
-    const guidance = assessGuidance(snap({ stage: "DEFINE", discovery: briefApproved }));
+    const guidance = detail(snap({ stage: "DEFINE", discovery: briefApproved }));
     expect(guidance.action?.label).toBe("Draft the Product Definition");
   });
 
   it("asks to confirm the first slice when it is still a proposal", () => {
-    const guidance = assessGuidance(snap({
+    const guidance = detail(snap({
       stage: "DEFINE",
       discovery: briefApproved,
       definition: { ...defined, status: "IN_PROGRESS", approved: false, slice: "PROPOSED" },
@@ -160,7 +165,7 @@ describe("next action", () => {
   });
 
   it("sends an open definition proposal to the draft review", () => {
-    const guidance = assessGuidance(snap({
+    const guidance = detail(snap({
       stage: "DEFINE",
       discovery: briefApproved,
       definition: {
@@ -179,7 +184,7 @@ describe("next action", () => {
   });
 
   it("asks to draft again when the definition has no First Slice to confirm", () => {
-    const guidance = assessGuidance(snap({
+    const guidance = detail(snap({
       stage: "DEFINE",
       discovery: briefApproved,
       definition: { ...defined, exists: true, status: "IN_PROGRESS", approved: false, slice: "NONE" },
@@ -207,14 +212,14 @@ describe("next action", () => {
   });
 
   it("prepares the definition before offering approval", () => {
-    const preparing = assessGuidance(snap({
+    const preparing = detail(snap({
       stage: "DEFINE",
       discovery: briefApproved,
       definition: { ...defined, exists: true, status: "IN_PROGRESS", approved: false, slice: "APPROVED" },
     }));
     expect(preparing.action?.key).toBe("prepare-definition");
     expect(preparing.action?.href).toBe("/products/p1/definition#approve");
-    const approving = assessGuidance(snap({
+    const approving = detail(snap({
       stage: "DEFINE",
       discovery: briefApproved,
       definition: { ...defined, exists: true, status: "READY_FOR_REVIEW", approved: false, slice: "APPROVED" },
@@ -226,7 +231,7 @@ describe("next action", () => {
   });
 
   it("offers Move to Build when the definition and slice are approved", () => {
-    const guidance = assessGuidance(snap({
+    const guidance = detail(snap({
       stage: "DEFINE",
       discovery: briefApproved,
       definition: defined,
@@ -241,7 +246,7 @@ describe("next action", () => {
   });
 
   it("lets a greenfield product continue without codebase context", () => {
-    const guidance = assessGuidance(pastDefine({ developmentContext: "GREENFIELD", codebaseCaptured: false }));
+    const guidance = detail(pastDefine({ developmentContext: "GREENFIELD", codebaseCaptured: false }));
     expect(guidance.action?.key).toBe("review-design");
     expect(guidance.action?.href).toBe("/products/p1/build#design");
     expect(guidance.action?.why).toMatch(/does not approve/);
@@ -250,21 +255,21 @@ describe("next action", () => {
   });
 
   it("asks an existing application for codebase context", () => {
-    const missing = assessGuidance(pastDefine({ developmentContext: "EXISTING_SYSTEM", codebaseCaptured: false }));
+    const missing = detail(pastDefine({ developmentContext: "EXISTING_SYSTEM", codebaseCaptured: false }));
     expect(missing.action?.key).toBe("add-codebase-context");
     expect(missing.action?.href).toBe("/products/p1/build#context");
-    const ready = assessGuidance(pastDefine({ developmentContext: "EXISTING_SYSTEM", codebaseCaptured: true }));
+    const ready = detail(pastDefine({ developmentContext: "EXISTING_SYSTEM", codebaseCaptured: true }));
     expect(ready.action?.key).toBe("review-design");
   });
 
   it("prepares a committed draft before offering design approval", () => {
-    const draft = assessGuidance(pastDefine({
+    const draft = detail(pastDefine({
       design: { ...designed, architecture: "DRAFT", plan: "NONE" },
     }));
     expect(draft.action?.key).toBe("prepare-design");
     expect(draft.action?.href).toBe("/products/p1/build#design");
     expect(draft.action?.why).toMatch(/does not approve/);
-    const ready = assessGuidance(pastDefine({
+    const ready = detail(pastDefine({
       design: { ...designed, architecture: "READY", plan: "NONE" },
     }));
     expect(ready.action?.key).toBe("approve-design");
@@ -274,7 +279,7 @@ describe("next action", () => {
   });
 
   it("moves from an approved design to the delivery plan without leaving Build", () => {
-    const guidance = assessGuidance(pastDefine({
+    const guidance = detail(pastDefine({
       design: { ...designed, architecture: "APPROVED", plan: "NONE" },
     }));
     expect(guidance.action?.key).toBe("review-plan");
@@ -308,7 +313,7 @@ describe("next action", () => {
       repositoryReady: true,
       tasks: [task({ status: "IN_PROGRESS", workspace: "OPEN", executionPlan: "APPROVED", codingRun: "READY" })],
     });
-    expect(assessGuidance(readyToCode).action?.key).toBe("start-coding");
+    expect(detail(readyToCode).action?.key).toBe("start-coding");
     const reviewedAnswer = assessGuidance({
       ...readyToCode,
       clarificationReview: {
@@ -320,7 +325,7 @@ describe("next action", () => {
     });
     expect(reviewedAnswer.action?.key).toBe("review-definition");
     expect(reviewedAnswer.action?.href).toBe("/products/p1/definition#proposal");
-    const cosmetic = assessGuidance({ ...readyToCode, clarificationReview: null });
+    const cosmetic = detail({ ...readyToCode, clarificationReview: null });
     expect(cosmetic.action?.key).toBe("start-coding");
   });
 
@@ -380,13 +385,13 @@ describe("next action", () => {
       [{ design: designed, review: reviewed, tasks: [task({ status: "COMPLETED", codeApproval: "CURRENT", verification: "APPROVED", published: true, pullRequest: "OPEN" })] }, "refresh-pr", "#publish"],
     ];
     for (const [patch, key, hash] of cases) {
-      const guidance = assessGuidance(pastDefine(patch));
+      const guidance = detail(pastDefine(patch));
       expect(guidance.action?.key, key).toBe(key);
       expect(guidance.action?.href, key).toContain(hash);
       expect(surfaces, `${key} ${hash}`).toContain(`id="${hash.slice(1)}"`);
     }
     expect(guidanceUi).toContain('"move-prove": "PROVE"');
-    const stale = assessGuidance(pastDefine({
+    const stale = detail(pastDefine({
       design: { ...designed, traceabilityIssue: "Governance review cannot complete because Design item NFR-001 references an NFR that is no longer part of the current approved definition." },
     }));
     expect(stale.action?.key).toBe("repair-traceability");
@@ -436,6 +441,7 @@ describe("next action", () => {
     const surfaces: Record<string, string> = {
       "/discovery": walk(resolve("src/app/(app)/products/[id]/discovery")) + walk(resolve("src/components/intake")),
       "/definition": walk(resolve("src/app/(app)/products/[id]/definition")) + walk(resolve("src/components/definition")) + readFileSync(resolve("src/components/intake/requirements-panel.tsx"), "utf8"),
+      "/plan": walk(resolve("src/app/(app)/products/[id]/plan")) + walk(resolve("src/components/plan")),
       "/build": walk(resolve("src/app/(app)/products/[id]/build")) + walk(resolve("src/components/build")),
       "/testing": walk(resolve("src/app/(app)/products/[id]/testing")) + walk(resolve("src/components/prove")) + walk(resolve("src/components/source-control")),
       "/testing/tasks": walk(resolve("src/app/(app)/products/[id]/testing/tasks")) + walk(resolve("src/components/prove")),
@@ -476,20 +482,20 @@ describe("next action", () => {
   });
 
   it("blocks on an engineering finding instead of offering coding", () => {
-    const guidance = assessGuidance(pastDefine({
+    const guidance = detail(pastDefine({
       design: designed,
       review: { ...reviewed, approved: false, reviewRequired: true, reviewReason: "A high finding is open." },
     }));
     expect(guidance.action?.label).toBe("Resolve Engineering Finding");
     expect(guidance.blocker?.what).toBe("Engineering review needs attention");
-    const blocking = assessGuidance(pastDefine({
+    const blocking = detail(pastDefine({
       design: designed,
       review: { ...reviewed, approved: false, openCritical: 1, openFindings: 2 },
     }));
     expect(blocking.action?.label).toBe("Resolve 1 blocking governance issue");
     expect(blocking.action?.href).toBe("/products/p1/build#review");
     expect(blocking.action?.label).not.toMatch(/complete/i);
-    const open = assessGuidance(pastDefine({
+    const open = detail(pastDefine({
       design: designed,
       review: { ...reviewed, approved: false, openFindings: 2 },
     }));
@@ -722,9 +728,9 @@ describe("progress", () => {
     expect(guidance.stages.find((stage) => stage.stage === "EXPLORE")?.status).toBe("WAITING_FOR_YOU");
   });
 
-  it("marks the current stage ready to move when the gate is satisfied", () => {
+  it("keeps the current stage in progress once the brief is approved, because the next step is the plan", () => {
     const guidance = assessGuidance(snap({ discovery: briefApproved }));
-    expect(guidance.stages.find((stage) => stage.stage === "EXPLORE")?.status).toBe("READY_TO_MOVE");
+    expect(guidance.stages.find((stage) => stage.stage === "EXPLORE")?.status).toBe("IN_PROGRESS");
     expect(guidance.stages.find((stage) => stage.stage === "EXPLORE")?.status).not.toBe("COMPLETED");
   });
 
@@ -895,17 +901,17 @@ describe("existing requirements next action", () => {
   });
 
   it("reviews and approves the requirements brief, then moves to Define", () => {
-    expect(assessGuidance(snap({
+    expect(detail(snap({
       ...openExplore,
       intake: intake({ activeSources: 1, analysed: true }),
       discovery: { ...briefApproved, briefStatus: "DRAFT", readyForReview: false },
     })).action?.label).toBe("Review requirements-derived Product Brief");
-    expect(assessGuidance(snap({
+    expect(detail(snap({
       ...openExplore,
       intake: intake({ activeSources: 1, analysed: true }),
       discovery: { ...briefApproved, briefStatus: "READY_FOR_REVIEW" },
     })).action?.label).toBe("Approve Product Brief");
-    expect(assessGuidance(snap({
+    expect(detail(snap({
       startMode: "EXISTING_REQUIREMENTS",
       discovery: briefApproved,
       intake: intake({ activeSources: 1, analysed: true }),
@@ -934,5 +940,36 @@ describe("existing requirements next action", () => {
 
   it("leaves the idea path on discovery", () => {
     expect(assessGuidance(snap()).action?.label).toBe("Start Discovery");
+  });
+});
+
+describe("the plan stretch is one step", () => {
+  const collapsed = [
+    ["after the brief is approved", () => snap({ discovery: briefApproved })],
+    ["while the definition is being drafted", () => snap({ stage: "DEFINE", discovery: briefApproved })],
+    ["when the definition and slice are approved", () => snap({ stage: "DEFINE", discovery: briefApproved, definition: defined })],
+    ["when the design is drafted", () => pastDefine({ design: { ...designed, architecture: "READY", plan: "NONE" } })],
+  ] as const;
+  for (const [when, make] of collapsed) {
+    it(`points at the Plan page ${when}`, () => {
+      const guidance = assessGuidance(make());
+      expect(guidance.action?.key).toBe("your-plan");
+      expect(guidance.action?.href).toBe("/products/p1/plan");
+      expect(guidance.action?.label).toBe("Your plan");
+    });
+  }
+
+  it("keeps the real work that needs a detail page", () => {
+    const guidance = assessGuidance(snap({
+      stage: "DEFINE",
+      discovery: briefApproved,
+      definition: { ...defined, exists: true, status: "READY_FOR_REVIEW", approved: false, slice: "APPROVED", openQuestions: 2 },
+    }));
+    expect(guidance.action?.key).toBe("answer-definition-questions");
+  });
+
+  it("leaves the steps after the rules alone", () => {
+    const guidance = assessGuidance(pastDefine({ design: designed, review: reviewed, tasks: [task({ status: "PROPOSED" })] }));
+    expect(guidance.action?.key).not.toBe("your-plan");
   });
 });

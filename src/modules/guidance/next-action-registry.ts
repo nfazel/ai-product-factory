@@ -31,6 +31,7 @@ export const NEXT_ACTION_DESTINATIONS = {
   "start-discovery": { path: "/discovery", hash: "", kind: "hash" },
   "answer-questions": { path: "/discovery", hash: "questions" },
   "review-brief": { path: "/discovery", hash: "brief" },
+  "your-plan": { path: "/plan", hash: "" },
   "move-define": { path: "/discovery", hash: "move", kind: "move" },
   "review-unmapped": { path: "/definition", hash: "requirements" },
   "review-definition": { path: "/definition", hash: "proposal" },

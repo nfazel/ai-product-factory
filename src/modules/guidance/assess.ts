@@ -348,7 +348,8 @@ function existingRequirementsExplore(snapshot: GuidanceSnapshot): { action: Next
   };
 }
 
-function chooseAction(snapshot: GuidanceSnapshot): { action: NextAction | null; blocker: BlockerView | null } {
+/** The step-by-step choice, before the plan stretch is collapsed. Exported for tests. */
+export function chooseAction(snapshot: GuidanceSnapshot): { action: NextAction | null; blocker: BlockerView | null } {
   if (snapshot.clarificationReview) {
     const review = snapshot.clarificationReview;
     const destination = nextActionDestination(review.key);
@@ -1770,8 +1771,36 @@ function risk(snapshot: GuidanceSnapshot) {
   return null;
 }
 
+/**
+ * The steps between the approved brief and the approved coding rules are one decision on the Plan page, so each of the procedural
+ * ones points there. The ones that are real work on a detail page (open findings, unmapped requirements, questions) are left alone.
+ */
+const PLAN_PAGE_STEPS = new Set([
+  "move-define", "draft-definition", "review-definition", "confirm-definition", "confirm-slice", "prepare-definition", "approve-definition", "move-build",
+  "review-design", "prepare-design", "approve-design", "review-plan", "prepare-plan", "approve-plan", "review-open-findings", "approve-review", "approve-rules",
+]);
+
+function collapsePlanSteps(snapshot: GuidanceSnapshot, chosen: ReturnType<typeof chooseAction>): ReturnType<typeof chooseAction> {
+  const current = chosen.action;
+  // A review of an approved part that a clarification answer changed is not a plan step; it stays where it is.
+  if (!current || snapshot.clarificationReview || !PLAN_PAGE_STEPS.has(current.key)) return chosen;
+  return {
+    blocker: chosen.blocker,
+    action: action(snapshot, {
+      key: "your-plan",
+      label: "Your plan",
+      why: "The features, the design, the work and the rules are on one page. Read it and approve it once.",
+      role: current.role,
+      stage: current.stage,
+      decision: current.decision,
+      path: "/plan",
+      waitingSince: current.waitingSince,
+    }),
+  };
+}
+
 export function assessGuidance(snapshot: GuidanceSnapshot): ProductGuidance {
-  const chosen = chooseAction(snapshot);
+  const chosen = collapsePlanSteps(snapshot, chooseAction(snapshot));
   const blocked = Boolean(chosen.blocker);
   const stages: StageMark[] = PRODUCT_STAGES.map((stage) => {
     const status = stageStatus(stage, snapshot, chosen.action, blocked);
