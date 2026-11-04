@@ -5,16 +5,17 @@ import { useRouter } from "next/navigation";
 import { useActionState, useEffect } from "react";
 
 import { FormMessage, SubmitButton } from "@/components/forms/fields";
-import { idleState } from "@/lib/action-state";
+import { idleState, type ActionState } from "@/lib/action-state";
 import type { PlanView } from "@/modules/plan/view";
-import { approveBriefAndDraftAction, draftFeaturesAction } from "@/server/actions/plan";
+import { approveBriefAndDraftAction, confirmFeaturesAction, draftFeaturesAction } from "@/server/actions/plan";
 
 /** The one place that says what to do about drafting the features, and starts it. */
 export function PlanPrepareCard({ plan }: { plan: PlanView }) {
   const router = useRouter();
-  const running = plan.draft.state === "RUNNING";
+  const running = plan.draft.state === "RUNNING" || plan.technical.state === "RUNNING";
   const [approveState, approve] = useActionState(approveBriefAndDraftAction, idleState);
   const [draftState, draft] = useActionState(draftFeaturesAction, idleState);
+  const [confirmState, confirm] = useActionState(confirmFeaturesAction, idleState);
 
   // Follow the drafting while it works; the page reads the real state again each time.
   useEffect(() => {
@@ -73,11 +74,58 @@ export function PlanPrepareCard({ plan }: { plan: PlanView }) {
         </section>
       );
     case "DRAFTED":
-      return (
-        <section aria-label="Next step" className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-950">
-          <h2 className="text-base font-semibold">The features are drafted</h2>
-          <p className="text-sm leading-6">Read them below. Nothing is confirmed yet.</p>
-        </section>
-      );
+      return <TechnicalCard plan={plan} confirm={confirm} confirmState={confirmState} hidden={hidden} />;
   }
+}
+
+/** After the features: the one pause to confirm them, then the progress of drafting the design, the work and the rules. */
+function TechnicalCard({ plan, confirm, confirmState, hidden }: { plan: PlanView; confirm: (formData: FormData) => void; confirmState: ActionState; hidden: React.ReactNode }) {
+  const { state, reason, steps } = plan.technical;
+  if (state === "CONFIRM" || state === "PARTIAL" || state === "FAILED") {
+    return (
+      <section aria-label="Next step" className="space-y-3 rounded-2xl border border-indigo-200 bg-indigo-50 p-4 text-indigo-950">
+        <h2 className="text-base font-semibold">{state === "FAILED" ? "Drafting the technical plan stopped" : state === "PARTIAL" ? "The technical plan is partly drafted" : "Are these the right features?"}</h2>
+        <p className="text-sm leading-6">
+          {state === "FAILED"
+            ? reason
+            : state === "PARTIAL"
+              ? "Some of the design, the work and the rules are drafted. The AI can carry on from there."
+              : "Read the features and their acceptance criteria below. If they look right, the AI drafts the design, the work and the rules. This is a checkpoint, not an approval. You can send any part back later."}
+        </p>
+        <form action={confirm} className="space-y-2">
+          {hidden}
+          <SubmitButton pendingLabel="Starting">{state === "FAILED" ? "Try again" : state === "PARTIAL" ? "Carry on" : "These look right, draft the rest"}</SubmitButton>
+          <FormMessage state={confirmState} />
+        </form>
+      </section>
+    );
+  }
+  if (state === "RUNNING") {
+    return (
+      <section aria-label="Next step" role="status" className="space-y-2 rounded-2xl border border-sky-200 bg-sky-50 p-4 text-sky-950">
+        <h2 className="text-base font-semibold">Drafting the design, the work and the rules</h2>
+        <StepList steps={steps} />
+        <p className="text-sm leading-6">This takes a few minutes. You can leave this page; it carries on and shows each part here as it is ready.</p>
+      </section>
+    );
+  }
+  return (
+    <section aria-label="Next step" className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-950">
+      <h2 className="text-base font-semibold">{state === "DRAFTED" ? "The whole plan is drafted" : "The features are drafted"}</h2>
+      <p className="text-sm leading-6">{state === "DRAFTED" ? "Read each part below. The label on each says whether it is approved." : "Read them below. Nothing is confirmed yet."}</p>
+    </section>
+  );
+}
+
+function StepList({ steps }: { steps: PlanView["technical"]["steps"] }) {
+  return (
+    <ol className="space-y-1 text-sm">
+      {steps.map((step) => (
+        <li key={step.label}>
+          {step.done ? "Done: " : step.current ? "Drafting now: " : "Waiting: "}
+          {step.label}
+        </li>
+      ))}
+    </ol>
+  );
 }

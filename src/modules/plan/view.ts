@@ -1,14 +1,16 @@
 import "server-only";
 
 import { db } from "@/lib/db";
-import { draftState, sectionState, type ApprovalFact, type DraftState, type SectionState } from "@/modules/plan/presentation";
+import { draftState, sectionState, technicalState, technicalSteps, type ApprovalFact, type DraftState, type SectionState, type TechnicalState } from "@/modules/plan/presentation";
 import { preparationState } from "@/modules/plan/prepare-runner";
+import { technicalPreparationState } from "@/modules/plan/prepare-technical-runner";
 
 export type PlanSection = { key: string; title: string; state: SectionState; approvedBy: string | null; detailsHref: string; detailsLabel: string };
 
 export type PlanView = {
   productId: string;
   draft: { state: DraftState; reason: string };
+  technical: { state: TechnicalState; reason: string; steps: { label: string; done: boolean; current: boolean }[] };
   sections: PlanSection[];
   brief: { problem: string; vision: string; value: string; users: string } | null;
   outcomes: { title: string; measure: string }[];
@@ -62,11 +64,20 @@ export async function getPlanView(productId: string): Promise<PlanView | null> {
   // A candidate the agent published but nobody has selected yet.
   const candidate = (await db.planningPublication.count({ where: { productId, purpose: "DEFINITION_PROPOSAL", selection: null } })) > 0;
   const failure = prepared.last?.status === "NEEDS_YOU" ? prepared.last.reason : "";
+  const technical = technicalPreparationState(productId);
+  const technicalFailure = technical.last?.status === "NEEDS_YOU" ? technical.last.reason : "";
+  const review = await db.engineeringGovernanceReview.count({ where: { productId, status: { not: "SUPERSEDED" } } });
+  const have = { design: Boolean(architecture), work: Boolean(plan && plan.tasks.length > 0), rules: review > 0 && Boolean(policy) };
   return {
     productId,
     draft: {
       state: draftState({ briefStatus: brief?.status ?? null, briefReadyForReview: Boolean(brief?.readyForReview), drafted: outcomes.length > 0 || items.length > 0, candidate, running: prepared.running, failure }),
       reason: failure,
+    },
+    technical: {
+      state: technicalState({ featuresDrafted: outcomes.length > 0 || items.length > 0, ...have, running: technical.running, failure: technicalFailure }),
+      reason: technicalFailure,
+      steps: technicalSteps({ ...have, running: technical.running }),
     },
     sections: [
       section("brief", "What this is", Boolean(brief), "PRODUCT_DISCOVERY", `${base}/discovery`, "Open the brief"),

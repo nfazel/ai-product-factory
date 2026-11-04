@@ -5,6 +5,7 @@ import { headers } from "next/headers";
 import { invalidState, type ActionState } from "@/lib/action-state";
 import { approveProductBrief } from "@/modules/discovery/service";
 import { startPreparation } from "@/modules/plan/prepare-runner";
+import { startTechnicalPreparation } from "@/modules/plan/prepare-technical-runner";
 import { DomainError } from "@/modules/shared/errors";
 import { actionFailure, formValues, refreshWorkspace } from "@/server/action-helpers";
 import { z } from "zod";
@@ -44,6 +45,20 @@ export async function draftFeaturesAction(_prev: ActionState, formData: FormData
     const result = startPreparation(parsed.data.productId);
     refreshWorkspace(parsed.data.productId);
     return { status: "success", message: result === "started" ? "Drafting the features." : "The features are already being drafted." };
+  } catch (error) {
+    return actionFailure(error);
+  }
+}
+
+/** The checkpoint: the person has read the features and the AI may draft the design, the work and the rules. Records no approval. */
+export async function confirmFeaturesAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const parsed = schema.safeParse(formValues(formData));
+  if (!parsed.success) return invalidState(parsed.error.issues);
+  try {
+    await assertLocalOrigin();
+    const result = startTechnicalPreparation(parsed.data.productId);
+    refreshWorkspace(parsed.data.productId);
+    return { status: "success", message: result === "started" ? "Drafting the design, the work and the rules." : "That is already being drafted." };
   } catch (error) {
     return actionFailure(error);
   }

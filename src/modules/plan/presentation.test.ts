@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { draftState, planHeadline, sectionState } from "@/modules/plan/presentation";
+import { draftState, planHeadline, sectionState, technicalState, technicalSteps } from "@/modules/plan/presentation";
 
 const approved = { status: "APPROVED", approvedBy: "Local user", resolvedAt: new Date() };
 
@@ -33,5 +33,24 @@ describe("where drafting the features stands", () => {
     expect(draftState({ ...base, drafted: true, running: true, failure: "x" })).toBe("DRAFTED");
     expect(draftState({ ...base, candidate: true })).toBe("CANDIDATE");
     expect(draftState({ ...base, candidate: true, drafted: true })).toBe("DRAFTED");
+  });
+});
+
+describe("where drafting the technical plan stands", () => {
+  const base = { featuresDrafted: true, design: false, work: false, rules: false, running: false, failure: "" };
+  it("waits for the features, then pauses for the person to confirm them", () => {
+    expect(technicalState({ ...base, featuresDrafted: false })).toBe("NOT_YET");
+    expect(technicalState(base)).toBe("CONFIRM");
+  });
+  it("is running, failed, partly done or done, with done taking priority", () => {
+    expect(technicalState({ ...base, running: true })).toBe("RUNNING");
+    expect(technicalState({ ...base, failure: "x" })).toBe("FAILED");
+    expect(technicalState({ ...base, design: true })).toBe("PARTIAL");
+    expect(technicalState({ ...base, design: true, running: true })).toBe("RUNNING");
+    expect(technicalState({ ...base, design: true, work: true, rules: true, running: true, failure: "x" })).toBe("DRAFTED");
+  });
+  it("marks the step being drafted now only while running", () => {
+    expect(technicalSteps({ design: true, work: false, rules: false, running: true }).map((step) => step.current)).toEqual([false, true, false]);
+    expect(technicalSteps({ design: true, work: false, rules: false, running: false }).some((step) => step.current)).toBe(false);
   });
 });

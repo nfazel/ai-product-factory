@@ -39,3 +39,28 @@ export function draftState(input: { briefStatus: string | null; briefReadyForRev
   if (input.running) return "RUNNING";
   return input.failure ? "FAILED" : "READY";
 }
+
+/**
+ * Where drafting the technical part (design, work, rules) stands. It waits for the person to confirm the features first: that
+ * pause is a checkpoint and records nothing. Once any of it exists the pause is over, whether or not this run made it.
+ */
+export type TechnicalState = "NOT_YET" | "CONFIRM" | "RUNNING" | "FAILED" | "PARTIAL" | "DRAFTED";
+
+export function technicalState(input: { featuresDrafted: boolean; design: boolean; work: boolean; rules: boolean; running: boolean; failure: string }): TechnicalState {
+  if (!input.featuresDrafted) return "NOT_YET";
+  if (input.design && input.work && input.rules) return "DRAFTED";
+  if (input.running) return "RUNNING";
+  if (input.failure) return "FAILED";
+  return input.design || input.work || input.rules ? "PARTIAL" : "CONFIRM";
+}
+
+/** The three steps in the order they are drafted, each done, being drafted now, or waiting. */
+export function technicalSteps(input: { design: boolean; work: boolean; rules: boolean; running: boolean }) {
+  const steps = [
+    { label: "The design", done: input.design },
+    { label: "The work", done: input.work },
+    { label: "The rules", done: input.rules },
+  ];
+  const current = input.running ? steps.findIndex((step) => !step.done) : -1;
+  return steps.map((step, index) => ({ ...step, current: index === current }));
+}

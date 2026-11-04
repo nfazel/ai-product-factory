@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: () => undefined }) }));
-vi.mock("@/server/actions/plan", () => ({ approveBriefAndDraftAction: async () => ({ status: "idle" }), draftFeaturesAction: async () => ({ status: "idle" }) }));
+vi.mock("@/server/actions/plan", () => ({ approveBriefAndDraftAction: async () => ({ status: "idle" }), draftFeaturesAction: async () => ({ status: "idle" }), confirmFeaturesAction: async () => ({ status: "idle" }) }));
 
 import { PlanPage } from "@/components/plan/plan-view";
 import type { PlanView } from "@/modules/plan/view";
@@ -13,6 +13,7 @@ const section = (key: string, title: string, state: PlanView["sections"][number]
 const plan = (over: Partial<PlanView> = {}): PlanView => ({
   productId: "p",
   draft: { state: "DRAFTED", reason: "" },
+  technical: { state: "DRAFTED", reason: "", steps: [{ label: "The design", done: true, current: false }, { label: "The work", done: true, current: false }, { label: "The rules", done: true, current: false }] },
   sections: [section("brief", "What this is", "APPROVED", "Local user"), section("features", "What it will do", "WAITING"), section("architecture", "How it will be built", "NOT_STARTED"), section("work", "The work", "NOT_STARTED"), section("rules", "The rules", "NOT_STARTED")],
   brief: { problem: "Friends cannot settle bets.", vision: "A betting app for friends.", value: "Fun without money.", users: "Friend groups" },
   outcomes: [{ title: "Friends place bets", measure: "20 bets a week" }],
@@ -80,8 +81,30 @@ describe("the card that says what to do about drafting the features", () => {
     const running = card("RUNNING");
     expect(running).toContain("Drafting the features");
     expect(running).not.toContain("<button");
-    expect(card("DRAFTED")).toContain("Nothing is confirmed yet");
     expect(card("CANDIDATE")).toContain("One more step makes them reviewable");
   });
 });
+
+  const technical = (state: PlanView["technical"]["state"], over: Partial<PlanView["technical"]> = {}) =>
+    renderToStaticMarkup(createElement(PlanPage, { plan: plan({ technical: { ...plan().technical, state, ...over } }) }));
+
+  it("pauses once after the features to ask whether they are right, and says it is not an approval", () => {
+    const html = technical("CONFIRM");
+    expect(html).toContain("Are these the right features?");
+    expect(html).toContain("These look right, draft the rest");
+    expect(html).toContain("not an approval");
+  });
+
+  it("shows which technical part is being drafted, and offers to carry on or try again", () => {
+    const running = technical("RUNNING", { steps: [{ label: "The design", done: true, current: false }, { label: "The work", done: false, current: true }, { label: "The rules", done: false, current: false }] });
+    expect(running).toContain("Done: The design");
+    expect(running).toContain("Drafting now: The work");
+    expect(running).toContain("Waiting: The rules");
+    expect(running).not.toContain("<button");
+    expect(technical("PARTIAL")).toContain("Carry on");
+    const failed = technical("FAILED", { reason: "The model is unavailable." });
+    expect(failed).toContain("The model is unavailable.");
+    expect(failed).toContain("Try again");
+    expect(technical("DRAFTED")).toContain("says whether it is approved");
+  });
 });
