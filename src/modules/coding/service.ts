@@ -96,6 +96,8 @@ import { asStrings } from "@/modules/coding/strings";
 import { executeRepositoryTool, type ToolContext } from "@/modules/coding/tools";
 import { assessCodingReadiness } from "@/modules/governance/coding-readiness";
 import { getCurrentActor } from "@/modules/identity/actor";
+import { codeGuardrails } from "@/modules/run-authority/guardrails";
+import { assertTaskWithinRisk, recordAuthorityStep, requireAuthority } from "@/modules/run-authority/service";
 import { DomainError } from "@/modules/shared/errors";
 
 const CODING_ACTOR = AGENT_CATALOG.CODING.name;
@@ -103,6 +105,10 @@ const CODING_ACTOR = AGENT_CATALOG.CODING.name;
 function assertHuman(actorName: string) {
   if (actorName === CODING_ACTOR || actorName === "Coding Agent") {
     throw new DomainError("The Coding Agent cannot approve its own code changes.");
+  }
+  // The words that mark an approval made under authority are only ever produced from a verified authority, never passed in as a name.
+  if (actorName.startsWith("Builder, under authority")) {
+    throw new DomainError("That wording is reserved for approvals made under a run authority.");
   }
 }
 
@@ -136,14 +142,16 @@ function draftFor(task: TaskGraph, policy: NonNullable<Awaited<ReturnType<typeof
   });
 }
 
-export async function approveImplementationTask(productId: string, taskId: string, options?: { actorName?: string; reworkApproval?: import("@/modules/rework/service").ReworkCodingApproval }) {
+export async function approveImplementationTask(productId: string, taskId: string, options?: { actorName?: string; reworkApproval?: import("@/modules/rework/service").ReworkCodingApproval; underAuthority?: { authorityId: string } }) {
   if (options?.reworkApproval) {
     const { approveReworkTaskForCoding } = await import("@/modules/rework/service");
     return approveReworkTaskForCoding({ ...options.reworkApproval, productId, taskId });
   }
   await assertLegacyCodingTask(productId,taskId);
-  const actor = options?.actorName ?? getCurrentActor().name;
-  assertHuman(actor);
+  const delegated = options?.underAuthority ? await requireAuthority({ authorityId: options.underAuthority.authorityId, productId, step: "APPROVE_TASK", taskId }) : null;
+  const actor = delegated ? delegated.wording : (options?.actorName ?? getCurrentActor().name);
+  if (!delegated) assertHuman(actor);
+  if (delegated) await assertTaskWithinRisk(taskId, delegated.riskCeiling);
   const task = await loadTaskGraph(productId, taskId);
   if (!task) throw new DomainError("The implementation task was not found.", "NOT_FOUND");
   if (task.plan.status !== "APPROVED") {
@@ -156,6 +164,7 @@ export async function approveImplementationTask(productId: string, taskId: strin
     where: { id: task.id },
     data: { status: "APPROVED" },
   });
+  if (delegated) await recordAuthorityStep(delegated.id, "APPROVE_TASK", task.id);
   await recordActivity({
     productId,
     type: "CODING_TASK_APPROVED",
@@ -325,10 +334,13 @@ export async function startCodingTask(productId: string, taskId: string) {
   return findWorkspace(productId, created.id);
 }
 
-export async function approveExecutionPlan(productId: string, workspaceId: string, options?: { actorName?: string }) {
+export async function approveExecutionPlan(productId: string, workspaceId: string, options?: { actorName?: string; underAuthority?: { authorityId: string } }) {
   await assertLegacyCodingWorkspace(productId,workspaceId);
-  const actor = options?.actorName ?? getCurrentActor().name;
-  assertHuman(actor);
+  const task = options?.underAuthority ? await db.repositoryWorkspace.findFirst({ where: { id: workspaceId, productId }, select: { implementationTaskId: true } }) : null;
+  const delegated = options?.underAuthority ? await requireAuthority({ authorityId: options.underAuthority.authorityId, productId, step: "APPROVE_PLAN", taskId: task?.implementationTaskId }) : null;
+  const actor = delegated ? delegated.wording : (options?.actorName ?? getCurrentActor().name);
+  if (!delegated) assertHuman(actor);
+  if (delegated && task) await assertTaskWithinRisk(task.implementationTaskId, delegated.riskCeiling);
   const workspace = await requireActiveContract(productId, workspaceId);
   if (!workspace.plan || !["PROPOSED", "ESCALATED"].includes(workspace.plan.status)) {
     throw new DomainError("There is no execution plan waiting for approval.");
@@ -393,6 +405,7 @@ export async function approveExecutionPlan(productId: string, workspaceId: strin
   if (workspace.status === "ABANDONED") {
     await saveWorkspace(workspaceId, { status: "ACTIVE", completedAt: null });
   }
+  if (delegated) await recordAuthorityStep(delegated.id, "APPROVE_PLAN", workspaceId, { planVersion: workspace.plan.version });
   const existingImplementation = workspace.status === "READY_FOR_REVIEW" || workspace.status === "COMPLETED";
   await recordActivity({
     productId,
@@ -857,10 +870,12 @@ function sourceStamps(root: string, files: { path: string }[]) {
   return stamps;
 }
 
-export async function approveCodeChanges(productId: string, workspaceId: string, options?: { actorName?: string }) {
+export async function approveCodeChanges(productId: string, workspaceId: string, options?: { actorName?: string; underAuthority?: { authorityId: string } }) {
   await assertLegacyCodingWorkspace(productId,workspaceId);
-  const actor = options?.actorName ?? getCurrentActor().name;
-  assertHuman(actor);
+  const taskRow = options?.underAuthority ? await db.repositoryWorkspace.findFirst({ where: { id: workspaceId, productId }, select: { implementationTaskId: true } }) : null;
+  const delegated = options?.underAuthority ? await requireAuthority({ authorityId: options.underAuthority.authorityId, productId, step: "APPROVE_CODE", taskId: taskRow?.implementationTaskId }) : null;
+  const actor = delegated ? delegated.wording : (options?.actorName ?? getCurrentActor().name);
+  if (!delegated) assertHuman(actor);
   const workspace = await requireActiveContract(productId, workspaceId);
   if (workspace.status !== "READY_FOR_REVIEW") {
     throw new DomainError("Code review is available after the required checks pass.");
@@ -911,16 +926,39 @@ export async function approveCodeChanges(productId: string, workspaceId: string,
     planAuthorised: planAuthorised(workspace.plan?.status),
   });
   if (!decision.approvable) throw new DomainError(decision.reason);
+  if (delegated) {
+    const guard = codeGuardrails({
+      riskLevel: workspace.contract?.riskLevel ?? "UNKNOWN",
+      riskCeiling: delegated.riskCeiling,
+      fileCount: files.length,
+      maxFiles: workspace.contract?.maxFiles ?? null,
+      openEscalations: workspace.escalations.filter((item) => item.status === "OPEN").length,
+    });
+    if (!guard.ok) throw new DomainError(guard.reasons.join(" "));
+  }
   const digest = hashText(diff.fullPatch);
-  const approval = await requestApproval({
-    productId,
-    workItemId: workspace.task.workItemId ?? undefined,
-    approvalType: "CODE_CHANGE",
-    comments: `Code change for implementation task ${workspace.implementationTaskId}.`,
-  });
+  const approval = delegated
+    ? await db.approval.create({
+        data: {
+          productId,
+          workItemId: workspace.task.workItemId ?? undefined,
+          approvalType: "CODE_CHANGE",
+          status: "PENDING",
+          authorityId: delegated.id,
+          comments: `Code change for implementation task ${workspace.implementationTaskId}.`,
+        },
+      })
+    : await requestApproval({
+        productId,
+        workItemId: workspace.task.workItemId ?? undefined,
+        approvalType: "CODE_CHANGE",
+        comments: `Code change for implementation task ${workspace.implementationTaskId}.`,
+      });
   await resolveApproval(approval.id, "APPROVED", {
     approvedBy: actor,
-    comments: "Approved the code change. The Coding Agent did not approve it.",
+    comments: delegated
+      ? `Approved by the Builder under the authority ${delegated.id}, which ${delegated.operatorName} granted. The Coding Agent did not approve it.`
+      : "Approved the code change. The Coding Agent did not approve it.",
   });
   await db.codeChangeApproval.create({
     data: {
@@ -933,13 +971,15 @@ export async function approveCodeChanges(productId: string, workspaceId: string,
       diffHash: digest,
     },
   });
+  if (delegated) await recordAuthorityStep(delegated.id, "APPROVE_CODE", workspaceId, { approvalId: approval.id, files: files.length });
   await recordEvidence({
     workspaceId,
     implementationTaskId: workspace.implementationTaskId,
-    type: "HUMAN_CONFIRMATION",
-    source: "HUMAN",
+    // Under authority this is the Builder's own record, never a human confirmation.
+    type: delegated ? "AGENT_ANALYSIS" : "HUMAN_CONFIRMATION",
+    source: delegated ? "AI_ANALYSIS" : "HUMAN",
     description: `${actor} approved the code change${!status.dirty && status.head ? ` at ${status.head}` : ""}.`,
-    result: "APPROVED",
+    result: delegated ? "APPROVED UNDER AUTHORITY" : "APPROVED",
   });
   await recordActivity({
     productId,

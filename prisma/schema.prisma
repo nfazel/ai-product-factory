@@ -77,6 +77,7 @@ enum AgentRunStatus {
 
 model Product {
   reworkAmendments ReworkAmendment[]
+  runAuthorities RunAuthority[]
   planningGenerations PlanningGeneration[]
   planningPublications PlanningPublication[]
   requirementsContextPins RequirementsContextPin[]
@@ -273,6 +274,9 @@ model Approval {
   codeChangeApprovals CodeChangeApproval[]
   verificationApprovals VerificationApproval[]
   releaseApprovals ReleaseApproval[]
+  authorityId String?
+  authority   RunAuthority? @relation("ApprovalUnderAuthority", fields: [authorityId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  runAuthorityGrant RunAuthority? @relation("RunAuthorityGrant")
 
   @@index([status])
   @@index([productId])
@@ -1093,6 +1097,7 @@ model ComponentTrace {
 
 model ImplementationPlan {
   reworkAmendments ReworkAmendment[]
+  runAuthorities RunAuthority[]
   id                     String     @id @default(cuid())
   productId              String
   productSliceId         String?
@@ -3762,4 +3767,37 @@ model ReworkTaskBinding {
  amendmentId String
  task ImplementationTask @relation(fields:[taskId],references:[id],onDelete:Restrict,onUpdate:Restrict)
  amendment ReworkAmendment @relation(fields:[amendmentId],references:[id],onDelete:Restrict,onUpdate:Restrict)
+}
+
+/// A person's signed grant that lets the Builder make routine approvals for one plan. It is a record of authority, never an
+/// approval by the person at each step. Append-only; revocation is an event.
+model RunAuthority {
+  id              String   @id
+  productId       String
+  planId          String
+  grantApprovalId String   @unique
+  manifest        Json
+  digest          String
+  signature       String
+  expiresAt       DateTime
+  maxRetries      Int
+  riskCeiling     String
+  createdAt       DateTime @default(now())
+  product         Product  @relation(fields: [productId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  plan            ImplementationPlan @relation(fields: [planId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  grantApproval   Approval @relation("RunAuthorityGrant", fields: [grantApprovalId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  events          RunAuthorityEvent[]
+  approvals       Approval[] @relation("ApprovalUnderAuthority")
+}
+
+/// One thing that happened under an authority: a routine step taken, or the grant being revoked. Append-only.
+model RunAuthorityEvent {
+  id          String   @id
+  authorityId String
+  type        String
+  step        String?
+  subjectId   String?
+  detail      Json
+  createdAt   DateTime @default(now())
+  authority   RunAuthority @relation(fields: [authorityId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 }
