@@ -44,6 +44,10 @@ import {
 } from "@/domain/constants";
 import { storedArchitectureSchema } from "@/modules/architecture/schema";
 import { NextActionPanel } from "@/components/guidance/guidance-ui";
+import { BuilderRunCard } from "@/components/build/builder-run-card";
+import { OperatorConfirmationProvider } from "@/components/build/operator-confirmation";
+import { operatorConfirmationRequired } from "@/modules/feature-review/authorization";
+import { getRunView } from "@/modules/run-authority/view";
 import { getProductGuidance } from "@/modules/guidance/service";
 import { getBuildWorkspace } from "@/modules/architecture/service";
 import { loadClarificationPresentation } from "@/modules/clarification/service";
@@ -144,6 +148,7 @@ async function Build({
   return (
     <div className="space-y-6">
       {showActionPanel ? <NextActionPanel guidance={guidance} /> : null}
+      <Suspense fallback={null}><BuilderRunSection productId={id} /></Suspense>
       <CollapsedGroup id="requirements-context" title="Requirements context" summary="Which approved requirements this build rests on">
       <RequirementsContextStatus {...workspace.requirementsPresentation}/>
       </CollapsedGroup>
@@ -1040,4 +1045,9 @@ function groupBy<T>(items: T[], key: (item: T) => string) {
     groups.set(name, [...(groups.get(name) ?? []), item]);
   }
   return groups;
+}
+
+async function BuilderRunSection({ productId }: { productId: string }) {
+  const view = await getRunView(productId);
+  return <OperatorConfirmationProvider required={operatorConfirmationRequired()}><BuilderRunCard productId={productId} view={view} /></OperatorConfirmationProvider>;
 }

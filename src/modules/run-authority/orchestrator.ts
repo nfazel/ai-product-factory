@@ -12,7 +12,7 @@ import {
   retryCodingTask,
   startCodingTask,
 } from "@/modules/coding/service";
-import { AuthorityStoppedError, recordAuthorityStep, requireAuthority } from "@/modules/run-authority/service";
+import { AuthorityStoppedError, recordAuthorityStep, recordHandedBack, requireAuthority } from "@/modules/run-authority/service";
 import { startNewVerificationAttempt, startVerification, failedOnlyForEnvironment } from "@/modules/verification/service";
 import { approveRuntimeReviewUnderAuthority, requireRuntimeReview } from "@/modules/verification/runtime-review";
 import { DomainError } from "@/modules/shared/errors";
@@ -91,7 +91,14 @@ function retryable(error: unknown) {
   return error instanceof AIFailure;
 }
 
+/** Runs the task and, when it has to stop for the person, writes down why, so the screen can show it after a reload. */
 export async function runTaskUnderAuthority(input: { productId: string; taskId: string; authorityId: string }): Promise<RunOutcome> {
+  const outcome = await advanceTask(input);
+  if (outcome.status === "NEEDS_YOU") await recordHandedBack(input.authorityId, input.taskId, outcome.step, outcome.reason).catch(() => undefined);
+  return outcome;
+}
+
+async function advanceTask(input: { productId: string; taskId: string; authorityId: string }): Promise<RunOutcome> {
   const { productId, taskId, authorityId } = input;
   const underAuthority = { authorityId };
   const attempts = new Map<Action, number>();

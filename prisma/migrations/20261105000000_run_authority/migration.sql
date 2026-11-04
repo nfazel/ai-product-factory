@@ -24,12 +24,15 @@ CREATE TABLE "RunAuthority" (
 CREATE TABLE "RunAuthorityEvent" (
  id TEXT PRIMARY KEY,
  "authorityId" TEXT NOT NULL REFERENCES "RunAuthority"(id) ON DELETE RESTRICT ON UPDATE RESTRICT,
- type TEXT NOT NULL CHECK (type IN ('STEP','REVOKED')),
+ type TEXT NOT NULL CHECK (type IN ('STEP','REVOKED','RUN_STARTED','HANDED_BACK')),
  step TEXT CHECK (step IN ('APPROVE_TASK','APPROVE_PLAN','APPROVE_CODE','RECORD_SNAPSHOT','SIGN_RUNTIME_REVIEW','START_VERIFICATION')),
  "subjectId" TEXT,
  detail JSONB NOT NULL DEFAULT '{}'::jsonb,
  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
- CHECK ((type = 'STEP' AND step IS NOT NULL AND "subjectId" IS NOT NULL) OR (type = 'REVOKED' AND step IS NULL))
+ CHECK ((type = 'STEP' AND step IS NOT NULL AND "subjectId" IS NOT NULL)
+  OR (type = 'REVOKED' AND step IS NULL)
+  OR (type = 'RUN_STARTED' AND step IS NULL)
+  OR (type = 'HANDED_BACK' AND step IS NULL AND "subjectId" IS NOT NULL AND detail ? 'reason'))
 );
 CREATE UNIQUE INDEX "RunAuthorityEvent_one_revocation" ON "RunAuthorityEvent"("authorityId") WHERE type = 'REVOKED';
 CREATE INDEX "RunAuthorityEvent_authorityId_idx" ON "RunAuthorityEvent"("authorityId");
@@ -60,13 +63,14 @@ BEGIN
 END $$;
 CREATE TRIGGER "RunAuthority_grant" BEFORE INSERT ON "RunAuthority" FOR EACH ROW EXECUTE FUNCTION run_authority_grant_guard();
 
--- No step can be recorded under an authority that has expired or been revoked.
+-- No step, and no new run, can be recorded under an authority that has expired or been revoked. Handing a task back to the
+-- person is always allowed, so a stopped run can still say why it stopped.
 CREATE FUNCTION run_authority_event_guard() RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE a RECORD;
 BEGIN
  SELECT * INTO a FROM "RunAuthority" WHERE id = NEW."authorityId";
  IF a.id IS NULL THEN RAISE EXCEPTION 'The run authority was not found'; END IF;
- IF NEW.type = 'STEP' AND (a."expiresAt" <= NEW."createdAt" OR EXISTS (SELECT 1 FROM "RunAuthorityEvent" e WHERE e."authorityId" = a.id AND e.type = 'REVOKED')) THEN
+ IF NEW.type IN ('STEP','RUN_STARTED') AND (a."expiresAt" <= NEW."createdAt" OR EXISTS (SELECT 1 FROM "RunAuthorityEvent" e WHERE e."authorityId" = a.id AND e.type = 'REVOKED')) THEN
   RAISE EXCEPTION 'The run authority has expired or been revoked';
  END IF;
  RETURN NEW;

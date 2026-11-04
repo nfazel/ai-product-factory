@@ -167,3 +167,30 @@ export async function assertTaskWithinRisk(taskId: string, riskCeiling: string) 
     throw new DomainError(`This task is ${assessment.riskLevel} risk. The Builder only acts on ${riskCeiling} risk tasks, so it needs you.`);
   }
 }
+
+/** A run began (or began again). Handed-back marks older than this are no longer current. */
+export async function recordRunStarted(authorityId: string) {
+  return db.runAuthorityEvent.create({ data: { id: randomUUID(), authorityId, type: "RUN_STARTED", detail: {} } });
+}
+
+/** The Builder stopped on a task because it needs the person, and says why. */
+export async function recordHandedBack(authorityId: string, taskId: string, step: string, reason: string) {
+  return db.runAuthorityEvent.create({ data: { id: randomUUID(), authorityId, type: "HANDED_BACK", subjectId: taskId, detail: { step, reason } } });
+}
+
+/**
+ * Stops the Builder without asking for the credential. Stopping can only reduce what the Builder may do, so it is never made
+ * harder than starting. The authority and its history stay; nothing more can be recorded under it.
+ */
+export async function stopRunAuthority(input: { authorityId: string; stoppedBy: string }) {
+  const authority = await db.runAuthority.findUnique({ where: { id: input.authorityId }, include: { events: { where: { type: "REVOKED" }, select: { id: true } } } });
+  if (!authority) throw new DomainError("That authority was not found.", "NOT_FOUND");
+  if (authority.events.length > 0) return;
+  await db.runAuthorityEvent.create({ data: { id: randomUUID(), authorityId: authority.id, type: "REVOKED", detail: { by: input.stoppedBy } } });
+  await recordActivity({
+    productId: authority.productId,
+    type: "APPROVAL_REJECTED",
+    description: `${input.stoppedBy} stopped the Builder's authority for this plan.`,
+    actor: input.stoppedBy,
+  });
+}

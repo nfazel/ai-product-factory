@@ -1,86 +1,16 @@
-import { execFileSync } from "node:child_process";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
-
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { db } from "@/lib/db";
 import { AIFailure } from "@/modules/ai/failures";
-import { setAIProviderForTests, type AIProvider } from "@/modules/ai/provider";
-import { readyCodingProduct } from "@/modules/coding/ready-product.test-support";
+import { setAIProviderForTests } from "@/modules/ai/provider";
+import { KEY, readyTask, scriptedProvider, installRunHarness } from "@/modules/run-authority/harness.test-support";
 import { grantRunAuthority, revokeRunAuthority } from "@/modules/run-authority/service";
 import { runTaskUnderAuthority } from "@/modules/run-authority/orchestrator";
 import { requireRuntimeReview } from "@/modules/verification/runtime-review";
 
-const KEY = "synthetic-run-authority-key-32-bytes-long!!";
-const repos: string[] = [];
-const worktreeRoot = fs.mkdtempSync(path.join(os.tmpdir(), "apf-ra-worktrees-"));
-const saved = { root: process.env.PRODUCT_REPOSITORY_ROOT, worktrees: process.env.PRODUCT_REPOSITORY_WORKTREE_ROOT, key: process.env.OPENAI_API_KEY };
-
-const answers = {
-  coding_repository_analysis: { summary: "The helper is the relevant file.", relevantFiles: ["src/claims/submit.ts"], notes: "Bounded." },
-  coding_execution_plan: { summary: "Update the helper.", filesExpectedToChange: ["src/claims/submit.ts"], steps: ["Update the helper"], risks: "", validationPlan: "npm test" },
-  coding_change_request: { summary: "Set the reference.", operations: [{ action: "WRITE_FILE", path: "src/claims/submit.ts", content: "export const claim = \"reference\"\n" }], commands: [], escalation: null, completionProposal: "COMPLETED" },
-  coding_self_review: { summary: "One small change.", potentialDefects: [], missingAcceptance: [], unnecessaryChanges: [], architectureDeviations: [], securityConcerns: [], missingTests: [] },
-  coding_completion: { proposal: "COMPLETED", rationale: "The checks decide." },
-} as Record<string, unknown>;
-
-function provider(onCall?: (schema: string) => void): AIProvider {
-  return {
-    async generate(request) {
-      onCall?.(request.schemaName);
-      const data = answers[request.schemaName];
-      if (!data) throw new Error(`No mock for ${request.schemaName}`);
-      return { data: data as never, usage: { inputTokens: 1, outputTokens: 1 }, model: "mock" };
-    },
-  };
-}
-
-function makeRepo() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "apf-ra-repo-"));
-  repos.push(dir);
-  fs.mkdirSync(path.join(dir, "src/claims"), { recursive: true });
-  fs.writeFileSync(path.join(dir, "src/claims/submit.ts"), "export const claim = \"notice\"\n");
-  const ok = "process.exit(0)";
-  fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify({ name: "demo", scripts: { test: `node -e "${ok}"`, lint: `node -e "${ok}"`, typecheck: `node -e "${ok}"`, build: `node -e "${ok}"` } }));
-  fs.writeFileSync(path.join(dir, "README.md"), "Demo\n");
-  const git = (args: string[]) => execFileSync("git", ["-c", "commit.gpgsign=false", "-c", "core.fsmonitor=false", ...args], { cwd: dir });
-  git(["init", "-b", "main"]);
-  git(["config", "user.email", "test@example.com"]);
-  git(["config", "user.name", "Test"]);
-  git(["add", "."]);
-  git(["commit", "-m", "init"]);
-  return dir;
-}
-
-async function setup(risk: "LOW" | "MEDIUM" = "LOW") {
-  process.env.PRODUCT_REPOSITORY_ROOT = makeRepo();
-  process.env.PRODUCT_REPOSITORY_WORKTREE_ROOT = worktreeRoot;
-  const ready = await readyCodingProduct({ taskStatus: "PROPOSED", mode: "SUPERVISED", risk });
-  // A task with no behavioural criteria, like a setup task, so the runtime review has nothing to link.
-  await db.acceptanceCriterion.deleteMany({ where: { workItemId: ready.task.workItemId ?? "" } });
-  const planId = (await db.implementationTask.findUniqueOrThrow({ where: { id: ready.task.id } })).implementationPlanId;
-  return { productId: ready.product.id, taskId: ready.task.id, planId };
-}
-
-beforeEach(() => {
-  vi.stubEnv("EXTERNAL_REVIEW_APPROVAL_KEY", KEY);
-  vi.stubEnv("OPENAI_API_KEY", "test-key");
-  vi.stubEnv("APF_CONTAINER_VERIFICATION_READY", "0");
-  setAIProviderForTests(provider());
-});
-
-afterEach(() => {
-  setAIProviderForTests(null);
-  vi.unstubAllEnvs();
-  process.env.PRODUCT_REPOSITORY_ROOT = saved.root;
-  process.env.PRODUCT_REPOSITORY_WORKTREE_ROOT = saved.worktrees;
-  for (const repo of repos.splice(0)) {
-    try { execFileSync("git", ["-c", "maintenance.auto=false", "worktree", "prune"], { cwd: repo, timeout: 2000 }); } catch { /* already gone */ }
-    fs.rmSync(repo, { recursive: true, force: true });
-  }
-});
+installRunHarness();
+const setup = readyTask;
+const provider = scriptedProvider;
 
 describe("a task run under one authority", () => {
   it("takes a LOW risk task from proposed to the verification step with no clicks, recording every step as the Builder's", async () => {
