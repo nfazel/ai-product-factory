@@ -46,14 +46,21 @@ export function PlanPrepareCard({ plan }: { plan: PlanView }) {
         </section>
       );
     case "READY":
+    case "CANDIDATE":
     case "FAILED":
       return (
         <section aria-label="Next step" className="space-y-3 rounded-2xl border border-indigo-200 bg-indigo-50 p-4 text-indigo-950">
-          <h2 className="text-base font-semibold">{plan.draft.state === "FAILED" ? "Drafting the features stopped" : "The brief is approved"}</h2>
-          <p className="text-sm leading-6">{plan.draft.state === "FAILED" ? plan.draft.reason : "The AI drafts the features, with their acceptance criteria, from the approved brief. Nothing is confirmed until you review it."}</p>
+          <h2 className="text-base font-semibold">{plan.draft.state === "FAILED" ? "Drafting the features stopped" : plan.draft.state === "CANDIDATE" ? "The features are drafted" : "The brief is approved"}</h2>
+          <p className="text-sm leading-6">
+            {plan.draft.state === "FAILED"
+              ? plan.draft.reason
+              : plan.draft.state === "CANDIDATE"
+                ? "The AI wrote the features. One more step makes them reviewable. Nothing is confirmed until you review it."
+                : "The AI drafts the features, with their acceptance criteria, from the approved brief. Nothing is confirmed until you review it."}
+          </p>
           <form action={draft} className="space-y-2">
             {hidden}
-            <SubmitButton pendingLabel="Starting">{plan.draft.state === "FAILED" ? "Try again" : "Draft the features"}</SubmitButton>
+            <SubmitButton pendingLabel="Starting">{plan.draft.state === "FAILED" ? "Try again" : plan.draft.state === "CANDIDATE" ? "Carry on" : "Draft the features"}</SubmitButton>
             <FormMessage state={draftState} />
           </form>
         </section>
@@ -63,16 +70,6 @@ export function PlanPrepareCard({ plan }: { plan: PlanView }) {
         <section aria-label="Next step" role="status" className="space-y-1 rounded-2xl border border-sky-200 bg-sky-50 p-4 text-sky-950">
           <h2 className="text-base font-semibold">Drafting the features</h2>
           <p className="text-sm leading-6">This takes a minute or two. You can leave this page; it carries on and shows the features here when they are ready.</p>
-        </section>
-      );
-    case "CANDIDATE":
-      return (
-        <section aria-label="Next step" role="status" className="space-y-1 rounded-2xl border border-amber-300 bg-amber-50 p-4 text-amber-950">
-          <h2 className="text-base font-semibold">The features were drafted, but cannot be reviewed yet</h2>
-          <p className="text-sm leading-6">
-            The AI wrote the features and its draft is saved, but the framework currently holds it as a read-only candidate. There is not yet a step that
-            lets you review, select and commit a candidate, so the plan cannot go further from here. That step is the next thing to build.
-          </p>
         </section>
       );
     case "DRAFTED":

@@ -59,7 +59,8 @@ export async function getPlanView(productId: string): Promise<PlanView | null> {
   };
   const base = `/products/${productId}`;
   const prepared = preparationState(productId);
-  const candidate = (await db.planningPublication.count({ where: { productId, purpose: "DEFINITION_PROPOSAL" } })) > 0;
+  // A candidate the agent published but nobody has selected yet.
+  const candidate = (await db.planningPublication.count({ where: { productId, purpose: "DEFINITION_PROPOSAL", selection: null } })) > 0;
   const failure = prepared.last?.status === "NEEDS_YOU" ? prepared.last.reason : "";
   return {
     productId,

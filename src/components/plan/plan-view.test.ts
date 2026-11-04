@@ -81,7 +81,7 @@ describe("the card that says what to do about drafting the features", () => {
     expect(running).toContain("Drafting the features");
     expect(running).not.toContain("<button");
     expect(card("DRAFTED")).toContain("Nothing is confirmed yet");
-    expect(card("CANDIDATE")).toContain("cannot be reviewed yet");
+    expect(card("CANDIDATE")).toContain("One more step makes them reviewable");
   });
 });
 });

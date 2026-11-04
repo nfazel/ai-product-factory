@@ -78,6 +78,7 @@ enum AgentRunStatus {
 model Product {
   reworkAmendments ReworkAmendment[]
   runAuthorities RunAuthority[]
+  definitionCandidateSelections DefinitionCandidateSelection[]
   planningGenerations PlanningGeneration[]
   planningPublications PlanningPublication[]
   requirementsContextPins RequirementsContextPin[]
@@ -3721,6 +3722,7 @@ model PlanningPublication {
   createdAt DateTime @default(now())
   generation PlanningGeneration @relation(fields:[generationId],references:[id],onDelete:Restrict,onUpdate:Restrict)
   product Product @relation(fields:[productId],references:[id],onDelete:Restrict,onUpdate:Restrict)
+  selection DefinitionCandidateSelection?
   baseline RequirementsBaseline? @relation(fields:[baselineId,productId],references:[id,productId],onDelete:Restrict,onUpdate:Restrict)
   finalPin RequirementsContextPin? @relation(fields:[finalPinId],references:[id],onDelete:Restrict,onUpdate:Restrict)
   @@unique([productId,idempotencyKey])
@@ -3802,4 +3804,19 @@ model RunAuthorityEvent {
   detail      Json
   createdAt   DateTime @default(now())
   authority   RunAuthority @relation(fields: [authorityId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+}
+
+/// Turns a sealed definition candidate into a normal, reviewable proposal. Append-only: it records which candidate was materialised
+/// as which proposal, by whom, and the digest of the candidate it was copied from.
+model DefinitionCandidateSelection {
+  id             String   @id
+  productId      String
+  publicationId  String   @unique
+  proposalId     String   @unique
+  contentDigest  String
+  selectedBy     String
+  selectedByKind String
+  createdAt      DateTime @default(now())
+  product        Product  @relation(fields: [productId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  publication    PlanningPublication @relation(fields: [publicationId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 }

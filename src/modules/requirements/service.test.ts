@@ -11,6 +11,7 @@ import {
   moveDefinitionToBuild,
   reviewProposalItem,
 } from "@/modules/requirements/service";
+import { selectDefinitionCandidate } from "@/modules/requirements/candidate-selection";
 import { toStoredProposal } from "@/modules/requirements/schema";
 import { requirementsFixture } from "@/modules/requirements/testing";
 
@@ -139,6 +140,9 @@ describe("requirements commit and traceability", () => {
     const brief = await approvedBrief(product.id);
     setAIProviderForTests(mockProvider(requirementsFixture()));
     await generateProductDefinition(product.id);
+    // Generation seals a candidate. Selecting it is what makes it a proposal a person can review.
+    const candidate = await db.planningPublication.findFirstOrThrow({ where: { productId: product.id, purpose: "DEFINITION_PROPOSAL" } });
+    await selectDefinitionCandidate({ productId: product.id, publicationId: candidate.id, selector: { name: "Local user", kind: "PERSON" } });
 
     const run = await db.agentRun.findFirst({ where: { productId: product.id, agentType: "REQUIREMENTS" } });
     expect(run?.output).toMatchObject({ provider: "anthropic", model: "mock-definition" });

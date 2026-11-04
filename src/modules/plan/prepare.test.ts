@@ -5,6 +5,7 @@ import { AIFailure } from "@/modules/ai/failures";
 import { setAIProviderForTests, type AIProvider } from "@/modules/ai/provider";
 import { nextPrepareAction, prepareFeatures } from "@/modules/plan/prepare";
 import { startPreparation, waitForPreparation } from "@/modules/plan/prepare-runner";
+import { approveFirstSlice, approveProductDefinition, moveDefinitionToBuild } from "@/modules/requirements/service";
 import { requirementsFixture } from "@/modules/requirements/testing";
 
 const created: string[] = [];
@@ -48,7 +49,7 @@ afterEach(async () => {
 });
 
 describe("drafting the features after the brief is approved", () => {
-  it("moves the product on and asks the agent once, leaving a candidate and approving or confirming nothing", async () => {
+  it("moves the product on, asks the agent once, selects its candidate and commits the proposal as a draft, approving and confirming nothing", async () => {
     const product = await approvedBriefProduct();
     let calls = 0;
     setAIProviderForTests(provider(requirementsFixture(), () => { calls += 1; }));
@@ -57,12 +58,17 @@ describe("drafting the features after the brief is approved", () => {
     expect(calls).toBe(1);
 
     expect((await db.product.findUniqueOrThrow({ where: { id: product.id } })).currentStage).toBe("DEFINE");
-    expect(await db.planningPublication.count({ where: { productId: product.id, purpose: "DEFINITION_PROPOSAL" } })).toBe(1);
-    // Nothing was approved or confirmed.
+    // The candidate was selected by the run, and said so.
+    const selection = await db.definitionCandidateSelection.findFirstOrThrow({ where: { productId: product.id } });
+    expect(selection).toMatchObject({ selectedBy: "Plan run", selectedByKind: "PLAN_RUN" });
+    // The features are on the backlog as drafts.
+    expect(await db.productOutcome.count({ where: { productId: product.id } })).toBeGreaterThan(0);
+    expect(await db.workItem.count({ where: { productId: product.id, type: "FEATURE" } })).toBeGreaterThan(0);
+    // Nothing was approved or confirmed by a person.
     expect(await db.approval.count({ where: { productId: product.id, approvalType: "PRODUCT_DEFINITION" } })).toBe(0);
     expect(await db.productOutcome.count({ where: { productId: product.id, status: "CONFIRMED" } })).toBe(0);
     expect(await db.productSlice.count({ where: { productId: product.id, status: "APPROVED" } })).toBe(0);
-    expect((await db.productDefinition.findUnique({ where: { productId: product.id } }))?.status ?? "NOT_STARTED").not.toBe("APPROVED");
+    expect((await db.productDefinition.findUnique({ where: { productId: product.id } }))?.status).not.toBe("APPROVED");
   }, 60_000);
 
   it("waits for the brief rather than drafting from one that is not approved", async () => {
@@ -108,5 +114,17 @@ describe("drafting the features after the brief is approved", () => {
     expect(startPreparation(product.id)).toBe("already-running");
     await waitForPreparation(product.id);
     expect(await nextPrepareAction(product.id)).toEqual({ kind: "done" });
+  }, 60_000);
+
+  it("leaves a definition that the existing steps can then approve, so the pipeline is no longer stuck", async () => {
+    const product = await approvedBriefProduct();
+    setAIProviderForTests(provider(requirementsFixture()));
+    expect(await prepareFeatures(product.id)).toEqual({ status: "DRAFTED" });
+    const slice = await db.productSlice.findFirstOrThrow({ where: { productId: product.id } });
+    await approveFirstSlice(product.id, slice.id);
+    await approveProductDefinition(product.id);
+    await moveDefinitionToBuild(product.id);
+    expect((await db.product.findUniqueOrThrow({ where: { id: product.id } })).currentStage).toBe("BUILD");
+    expect((await db.productDefinition.findUniqueOrThrow({ where: { productId: product.id } })).status).toBe("APPROVED");
   }, 60_000);
 });

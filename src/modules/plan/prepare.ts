@@ -7,6 +7,7 @@ import { findCurrentBrief } from "@/modules/discovery/repository";
 import { moveDiscoveryToDefine } from "@/modules/discovery/service";
 import { findProductRow } from "@/modules/product/repository";
 import { findOpenProposal } from "@/modules/requirements/repository";
+import { selectDefinitionCandidate } from "@/modules/requirements/candidate-selection";
 import { acceptEntireProposal, commitProductDefinition, generateProductDefinition } from "@/modules/requirements/service";
 import { DomainError } from "@/modules/shared/errors";
 
@@ -19,7 +20,7 @@ import { DomainError } from "@/modules/shared/errors";
  */
 export type PrepareOutcome = { status: "DRAFTED" } | { status: "NEEDS_YOU"; step: string; reason: string };
 
-type Action = "move-to-define" | "generate-definition" | "accept-proposal" | "commit-proposal";
+type Action = "move-to-define" | "generate-definition" | "select-candidate" | "accept-proposal" | "commit-proposal";
 type Next = { kind: Action } | { kind: "done" } | { kind: "needs-you"; step: string; reason: string };
 
 const MAX_RETRIES = 2;
@@ -38,9 +39,11 @@ export async function nextPrepareAction(productId: string): Promise<Next> {
   if (product.currentStage === "EXPLORE") return { kind: "move-to-define" };
   if (product.currentStage !== "DEFINE") return { kind: "needs-you", step: "stage", reason: `The product is in ${product.currentStage}, so its features cannot be drafted from here.` };
   if (await findOpenProposal(productId)) return { kind: "accept-proposal" };
-  // The Requirements Agent now publishes an immutable definition candidate rather than an open proposal. Once one exists the
-  // features are drafted, and asking the model again would only be refused (a definition may be generated once from a clean start).
-  if ((await db.planningPublication.count({ where: { productId, purpose: "DEFINITION_PROPOSAL" } })) > 0) return { kind: "done" };
+  // The Requirements Agent publishes an immutable candidate. Selecting it makes a reviewable proposal. A definition may be generated
+  // once from a clean start, so an existing candidate is never asked for again.
+  const candidate = await db.planningPublication.findFirst({ where: { productId, purpose: "DEFINITION_PROPOSAL" }, orderBy: { createdAt: "desc" }, select: { id: true, selection: { select: { id: true } } } });
+  if (candidate && !candidate.selection) return { kind: "select-candidate" };
+  if (candidate) return { kind: "done" };
   return { kind: "generate-definition" };
 }
 
@@ -75,6 +78,13 @@ async function perform(productId: string, action: Action) {
     case "generate-definition":
       await generateProductDefinition(productId);
       return;
+    case "select-candidate": {
+      const candidate = await db.planningPublication.findFirst({ where: { productId, purpose: "DEFINITION_PROPOSAL", selection: null }, orderBy: { createdAt: "desc" }, select: { id: true } });
+      if (!candidate) return;
+      // The run selects the candidate it just generated, as a draft. It is recorded as the run, never as a person.
+      await selectDefinitionCandidate({ productId, publicationId: candidate.id, selector: { name: "Plan run", kind: "PLAN_RUN" } });
+      return;
+    }
     case "accept-proposal":
     case "commit-proposal": {
       const proposal = await findOpenProposal(productId);

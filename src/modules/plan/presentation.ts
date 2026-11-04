@@ -31,7 +31,7 @@ export function planHeadline(sections: { title: string; state: SectionState }[])
 /** Where drafting the features stands. */
 export type DraftState = "NEEDS_BRIEF" | "BRIEF_READY" | "READY" | "RUNNING" | "DRAFTED" | "CANDIDATE" | "FAILED";
 
-/** `candidate` means the agent published a definition candidate that nothing can yet review, select or commit. */
+/** `candidate` means the agent published a definition candidate that has not yet been selected, so it cannot yet be reviewed. */
 export function draftState(input: { briefStatus: string | null; briefReadyForReview: boolean; drafted: boolean; candidate?: boolean; running: boolean; failure: string }): DraftState {
   if (input.briefStatus !== "APPROVED") return input.briefStatus && input.briefReadyForReview ? "BRIEF_READY" : "NEEDS_BRIEF";
   if (input.drafted) return "DRAFTED";

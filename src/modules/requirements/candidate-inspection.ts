@@ -25,7 +25,10 @@ async function inspect<T>(productId:string,work:(tx:ContextReader,product:{id:st
 }
 async function load(tx:ContextReader,product:{id:string;name:string},publicationId:string){
  const p=await readPlanningPublication(product.id,publicationId,tx),g=await readPlanningGeneration(product.id,p.row.generationId,tx);
- if(await tx.definitionProposal.count({where:{id:p.row.artifactId}}))integrity('Unexpected materialisation without a supported candidate selection record.');
+ // A proposal carrying the candidate's identity is legitimate only when a selection record names it. The record and the proposal must agree.
+ const physical=await tx.definitionProposal.count({where:{id:p.row.artifactId}}),selection=await tx.definitionCandidateSelection.findUnique({where:{publicationId:p.row.id}});
+ if(physical&&!selection)integrity('Unexpected materialisation without a supported candidate selection record.');
+ if(selection&&(!physical||selection.proposalId!==p.row.artifactId||selection.contentDigest!==p.row.contentDigest||selection.productId!==product.id))integrity('The candidate selection record does not match the candidate.');
  if(p.row.purpose!=='DEFINITION_PROPOSAL'||p.row.artifactKind!=='DEFINITION_PROPOSAL'||g.row.inputIdentity!==contract)integrity('Not a supported immutable definition candidate.');
  const input=inputSchema.parse(g.manifest.inputSnapshot),snapshot=outputSchema.parse(p.manifest.snapshot),proposal=validateDefinitionCandidate(snapshot.payload);
  if(input.productId!==product.id||planningHash(input.facts)!==input.factsDigest||planningHash(input.context)!==planningHash(g.manifest.context)||snapshot.summary!==proposal.assistantSummary||planningHash(snapshot.payload)!==planningHash(proposal))integrity('Candidate capture or proposal content is inconsistent.');
@@ -49,7 +52,7 @@ async function load(tx:ContextReader,product:{id:string;name:string},publication
  }
  return{product,publicationId:p.row.id,artifactId:p.row.artifactId,generationId:g.row.id,reservedAt:g.row.createdAt.toISOString(),generatedAt:run!.completedAt!.toISOString(),publishedAt:p.row.createdAt.toISOString(),contentDigest:p.row.contentDigest,revision:p.row.artifactRevision,
   provenance:{kind:'AI_GENERATED' as const,agentRunId:run!.id,provider:typeof result?.provider==='string'?result.provider:input.provider.provider,model:typeof result?.model==='string'?result.model:input.provider.model,mode:input.mode,sourceArtifactId:input.sourceId},
-  requirements:{mode:p.manifest.mode,baseline:p.manifest.baseline,currentBaseline,applicability,reason},context:{briefId:brief.id,briefVersion:brief.version,problemStatement:brief.problemStatement},proposal,selected:false as const,approved:false as const,grantsApproval:false as const};
+  requirements:{mode:p.manifest.mode,baseline:p.manifest.baseline,currentBaseline,applicability,reason},context:{briefId:brief.id,briefVersion:brief.version,problemStatement:brief.problemStatement},proposal,selected:Boolean(selection),selection:selection?{selectedBy:selection.selectedBy,selectedByKind:selection.selectedByKind,selectedAt:selection.createdAt.toISOString()}:null,approved:false as const,grantsApproval:false as const};
 }
 export type DefinitionCandidateInspection=Awaited<ReturnType<typeof load>>;
 export async function loadDefinitionCandidateInspection(productId:string,publicationId:string){return inspect(productId,(tx,product)=>load(tx,product,publicationId))}
