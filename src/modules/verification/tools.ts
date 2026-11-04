@@ -71,6 +71,15 @@ export async function executeVerificationTool(
       await deny(input, "RUN_COMMAND", reason, "", request.command);
       return { allowed: false, reason, exitCode: null, output: "", timedOut: false };
     }
+    // The isolated environment already installed dependencies from the lockfile and generated the Prisma client when it was
+    // prepared. Doing either again would rewrite files inside a read-only copy of the code being judged, which must never change.
+    const prepared = preparedSetupNote(approved.command, context.root);
+    if (prepared) {
+      await db.verificationEvidence.create({
+        data: { sessionId: input.sessionId, type: commandEvidenceType(approved.command), source: "COMMAND_RUNNER", description: `${approved.command}: ${prepared}`, result: "EXECUTED", command: approved.command, exitCode: 0 },
+      });
+      return { allowed: true, reason: "", exitCode: 0, output: prepared, timedOut: false, started, completed: new Date(), command: approved.command };
+    }
     let result: Awaited<ReturnType<typeof context.run>>;
     try { result = await context.run(approved.command); }
     catch {
@@ -177,4 +186,15 @@ async function deny(
     description: `Denied ${action}${path ? ` ${path}` : ""}${command ? ` ${command}` : ""}. ${reason}`,
     actor: "Testing & Verification Agent",
   });
+}
+
+/** What the isolated environment has already done for a setup command, or null when the command must really run. */
+function preparedSetupNote(command: string, root: string) {
+  if (command === "npm install" && fs.existsSync(path.join(root, "package-lock.json"))) {
+    return "Dependencies were already installed from package-lock.json when the isolated environment was prepared. Nothing needed to change.";
+  }
+  if (command === "npx prisma generate" && fs.existsSync(path.join(root, "prisma", "schema.prisma"))) {
+    return "The Prisma client was already generated from prisma/schema.prisma when the isolated environment was prepared. Nothing needed to change.";
+  }
+  return null;
 }

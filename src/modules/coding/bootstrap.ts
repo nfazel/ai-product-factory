@@ -194,7 +194,12 @@ export function validationProcessEnvironment(command: string, builderDatabaseUrl
 }
 
 export function commandFailureIsEnvironment(output: string) {
-  return /environment variable not found:\s*DATABASE_URL/i.test(output) || /non-standard "NODE_ENV"/i.test(output);
+  return (
+    /environment variable not found:\s*DATABASE_URL/i.test(output) ||
+    /non-standard "NODE_ENV"/i.test(output) ||
+    // The sandbox keeps the code under test read-only. A tool stopped from writing inside it says nothing about the product.
+    /EACCES: permission denied, (?:mkdir|open|unlink|rename|copyfile|symlink) '\/work\//i.test(output)
+  );
 }
 
 function isSchemaValidationCommand(command: string) {

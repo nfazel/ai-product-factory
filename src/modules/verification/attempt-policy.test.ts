@@ -167,3 +167,11 @@ describe("attemptStateFor", () => {
     expect(state.progress).not.toBe("APPROVED");
   });
 });
+
+describe("failures caused by the test environment", () => {
+  it("recognises a sandbox write refusal as environment, not product", async () => {
+    const { commandFailureIsEnvironment } = await import("@/modules/coding/bootstrap");
+    expect(commandFailureIsEnvironment("Error: EACCES: permission denied, mkdir '/work/.next'")).toBe(true);
+    expect(commandFailureIsEnvironment("Error: EACCES: permission denied, open '/etc/passwd'")).toBe(false);
+  });
+});

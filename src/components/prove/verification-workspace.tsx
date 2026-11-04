@@ -190,10 +190,10 @@ function ActionControl({ action, ctx }: { action: ProveNextAction; ctx: Ctx }) {
     case "retry-verification":
       return <RetryVerificationButton productId={ctx.productId} taskId={ctx.taskId} />;
     case "start-new-verification":
-      // The control itself lives in the Verification Inconclusive panel. This link only moves the person to it.
+      // The control lives in the Verification Inconclusive panel, or in the Approval tab for any other result. This link only moves the person to it.
       return (
         <Link
-          href={`${ctx.workspaceHref}#new-verification-attempt`}
+          href={ctx.session?.overallVerdict === "INCONCLUSIVE" ? `${ctx.workspaceHref}#new-verification-attempt` : `${ctx.workspaceHref}?tab=approval#new-verification-attempt`}
           className="inline-flex rounded-lg bg-stone-900 px-3 py-2 text-sm font-medium text-white hover:bg-stone-800"
         >
           {action.label}
@@ -706,7 +706,7 @@ function ApprovalPanel({ ctx }: { ctx: Ctx }) {
           <Empty message="No decision is available until verification completes." />
         )}
         {session && !session.demo && !state.humanApproved && session.overallVerdict !== "INCONCLUSIVE" && row.newAttempt.allowed ? (
-          <div className="space-y-2 rounded-xl border bg-stone-50 px-4 py-3">
+          <div id="new-verification-attempt" className="scroll-mt-20 space-y-2 rounded-xl border bg-stone-50 px-4 py-3">
             <p className="text-sm leading-6">
               A new attempt re-runs verification against the same approved snapshot. It does not change the current result or any approval.
             </p>

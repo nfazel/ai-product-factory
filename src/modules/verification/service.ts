@@ -34,6 +34,7 @@ import { buildVerificationContract } from "@/modules/verification/contract";
 import { verificationEntryBlockers } from "@/modules/verification/gates";
 import { blockersOrUnavailable } from "@/modules/verification/authority-status";
 import { attemptPolicy, attemptStateFor, type AttemptKind } from "@/modules/verification/attempt-policy";
+import { commandFailureIsEnvironment } from "@/modules/coding/bootstrap";
 import { executeVerificationTool } from "@/modules/verification/tools";
 import {
   assertVerificationEvidenceMutable,
@@ -147,13 +148,25 @@ async function assertAttemptAllowed(productId: string, taskId: string, kind: Att
   const state = attemptStateFor(sessions.map(withCurrentVerificationApprovals), { interrupted: false });
   const decision = attemptPolicy({
     kind,
-    failedBeforeReview: state.progress === "FAILED" && await reviewedSinceFailure(productId, taskId, (sessions.find((session) => !session.demo) ?? sessions[0])?.runState),
+    failedBeforeReview: state.progress === "FAILED" && await (async () => {
+      const latest = sessions.find((session) => !session.demo) ?? sessions[0];
+      return (await reviewedSinceFailure(productId, taskId, latest?.runState)) || failedOnlyForEnvironment(latest?.executions ?? []);
+    })(),
     progress: state.progress,
     humanApproved: state.humanApproved,
     openAttempt: false,
     entryBlockers: await blockersOrUnavailable(() => verificationEntryBlockers(productId, taskId)),
   });
   if (!decision.allowed) throw new DomainError(decision.reason);
+}
+
+/**
+ * A failed attempt whose every failing check failed because the isolated sandbox stopped it (for example it could not write
+ * where it was never allowed to), not because of the product. That is a defect in the test environment, so a new attempt is fair.
+ */
+export function failedOnlyForEnvironment(executions: { status: string; outputSummary: string }[]) {
+  const failed = executions.filter((item) => item.status === "FAILED");
+  return failed.length > 0 && failed.every((item) => commandFailureIsEnvironment(item.outputSummary ?? ""));
 }
 
 /** A current signed runtime review exists for the task's latest workspace, and the latest attempt was made without one. */
@@ -731,7 +744,8 @@ export async function getProveView(productId: string) {
       // Only a task whose latest attempt failed can need this, and working it out reads the repository, so skip it otherwise.
       reviewedSinceFailure: await (async () => {
         const latest = sessions.find((session) => session.implementationTaskId === task.id && !session.demo);
-        return latest && latest.overallVerdict === "FAIL" && !latest.stale ? reviewedSinceFailure(productId, task.id, latest.runState) : false;
+        if (!latest || latest.overallVerdict !== "FAIL" || latest.stale) return false;
+        return (await reviewedSinceFailure(productId, task.id, latest.runState)) || failedOnlyForEnvironment(latest.executions ?? []);
       })(),
     })),
   );
