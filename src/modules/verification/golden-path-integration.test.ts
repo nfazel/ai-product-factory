@@ -147,8 +147,8 @@ afterAll(async () => {
   }
 }, 120_000);
 
-describe.skipIf(!RUN)("golden path: a real product, verified in the real sandbox", () => {
-  it("sets up, validates and builds the product and reaches a verdict", async () => {
+/** Verifies the product in `repo` as a completed, code-approved task and returns what the framework recorded. */
+async function verifyProductIn(repo: string) {
     process.env.PRODUCT_REPOSITORY_WORKTREE_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), "apf-golden-worktrees-"));
     tempDirectories.push(process.env.PRODUCT_REPOSITORY_WORKTREE_ROOT);
     process.env.APF_CONTAINER_VERIFICATION_READY = "1";
@@ -156,7 +156,7 @@ describe.skipIf(!RUN)("golden path: a real product, verified in the real sandbox
     process.env.AI_MODEL = "gpt-4.1-mini";
     process.env.OPENAI_API_KEY = "test-key";
 
-    const setup = await completedTaskIn(snapshotOfProduct(), { build: true, testApplicability: "NOT_APPLICABLE" });
+    const setup = await completedTaskIn(repo, { build: true, testApplicability: "NOT_APPLICABLE" });
     // An infrastructure task has no behavioural criteria, and its plan has the setup and checks the real plan had.
     if (setup.task.workItemId) await db.acceptanceCriterion.deleteMany({ where: { workItemId: setup.task.workItemId } });
     const workspace = await db.repositoryWorkspace.findFirstOrThrow({ where: { productId: setup.product.id, implementationTaskId: setup.task.id } });
@@ -188,10 +188,34 @@ describe.skipIf(!RUN)("golden path: a real product, verified in the real sandbox
     const row = await db.verificationSession.findUniqueOrThrow({ where: { id: session.id } });
     const summary = `status ${row.status}, verdict ${row.overallVerdict ?? "none"}, failure ${row.failureClass || "none"}, reason: ${row.verdictReason}\n${report.join("\n")}\nAI calls: ${provider.requests.join(" -> ")}`;
 
+    return { session, executions, row, summary, provider };
+}
+
+describe.skipIf(!RUN)("golden path: a real product, verified in the real sandbox", () => {
+  it("sets up, validates and builds the product and reaches a verdict", async () => {
+    const { executions, row, summary } = await verifyProductIn(snapshotOfProduct());
+
     expect(executions.some((item) => item.command === "npm run build" && item.status === "PASSED"), summary).toBe(true);
     expect(executions.some((item) => item.command === "npx prisma validate" && item.status === "PASSED"), summary).toBe(true);
     expect(row.failureClass, summary).toBe("");
     expect(["PASS", "PASS_WITH_CONCERNS"], summary).toContain(row.overallVerdict);
+  }, 900_000);
+
+  it("reports a genuine product failure as a product failure, and refuses a retry", async () => {
+    const repo = snapshotOfProduct();
+    // A committed change that really breaks the product: the page no longer compiles.
+    fs.writeFileSync(path.join(repo, "src/app/page.tsx"), "export default function Home() { return <main>broken\n");
+    git(repo, ["add", "."]);
+    git(repo, ["-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-q", "-m", "Break the home page"]);
+    const { executions, row, summary } = await verifyProductIn(repo);
+
+    expect(executions.some((item) => item.command === "npm run build" && item.status === "FAILED"), summary).toBe(true);
+    expect(row.status, summary).toBe("FAILED");
+    expect(row.overallVerdict, summary).toBe("FAIL");
+    expect(row.failureClass, summary).toBe("PRODUCT_VERIFICATION_FAILED");
+    // The sandbox did not cause this, so it must not be offered as a retry.
+    const { failedOnlyForEnvironment } = await import("@/modules/verification/service");
+    expect(failedOnlyForEnvironment(executions), summary).toBe(false);
   }, 900_000);
 
   it("goes from an approved task through coding, review and commit to a verified result", async () => {
