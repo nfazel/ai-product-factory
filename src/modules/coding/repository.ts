@@ -195,8 +195,8 @@ export async function recordToolEvent(input: {
 export async function recordEvidence(input: {
   workspaceId: string;
   implementationTaskId: string;
-  type: "FILE_CHANGE" | "TEST_RESULT" | "TYPECHECK" | "LINT" | "BUILD" | "STATIC_ANALYSIS" | "AGENT_ANALYSIS" | "HUMAN_CONFIRMATION";
-  source: "REPOSITORY" | "COMMAND_RUNNER" | "AI_ANALYSIS" | "HUMAN";
+  type: "FILE_CHANGE" | "TEST_RESULT" | "TYPECHECK" | "LINT" | "BUILD" | "STATIC_ANALYSIS" | "AGENT_ANALYSIS" | "HUMAN_CONFIRMATION" | "DELEGATED_CONFIRMATION";
+  source: "REPOSITORY" | "COMMAND_RUNNER" | "AI_ANALYSIS" | "HUMAN" | "DELEGATED";
   description: string;
   result: string;
   command?: string;

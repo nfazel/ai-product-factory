@@ -55,6 +55,8 @@ let signFixtureRuntimeReview: typeof import("@/modules/verification/completed-ta
 let readyCodingProduct: typeof import("@/modules/coding/ready-product.test-support").readyCodingProduct;
 let coding: typeof import("@/modules/coding/service");
 let advance: typeof import("@/modules/coding/auto-advance");
+let authority: typeof import("@/modules/run-authority/service");
+let orchestrator: typeof import("@/modules/run-authority/orchestrator");
 let setAIProviderForTests: typeof import("@/modules/ai/provider").setAIProviderForTests;
 type AIProvider = import("@/modules/ai/provider").AIProvider;
 
@@ -124,6 +126,8 @@ beforeAll(async () => {
   ({ readyCodingProduct } = await import("@/modules/coding/ready-product.test-support"));
   coding = await import("@/modules/coding/service");
   advance = await import("@/modules/coding/auto-advance");
+  authority = await import("@/modules/run-authority/service");
+  orchestrator = await import("@/modules/run-authority/orchestrator");
   ({ setAIProviderForTests } = await import("@/modules/ai/provider"));
 }, 300_000);
 
@@ -288,5 +292,48 @@ describe.skipIf(!RUN)("golden path: a real product, verified in the real sandbox
     expect(row.failureClass, summary).toBe("");
     expect(["PASS", "PASS_WITH_CONCERNS"], summary).toContain(row.overallVerdict);
     expect(executions.some((item) => item.command === "npm run build" && item.status === "PASSED"), summary).toBe(true);
+  }, 1_800_000);
+
+  it("runs a whole task from one signed authority to a verified result, with no clicks", async () => {
+    const repo = snapshotOfProduct();
+    process.env.PRODUCT_REPOSITORY_ROOT = repo;
+    process.env.PRODUCT_REPOSITORY_WORKTREE_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), "apf-golden-worktrees-"));
+    tempDirectories.push(process.env.PRODUCT_REPOSITORY_WORKTREE_ROOT);
+    process.env.APF_CONTAINER_VERIFICATION_READY = "1";
+    process.env.AI_PROVIDER = "openai";
+    process.env.AI_MODEL = "gpt-4.1-mini";
+    process.env.OPENAI_API_KEY = "test-key";
+    process.env.EXTERNAL_REVIEW_APPROVAL_KEY = "synthetic-golden-authority-key-32-bytes!!";
+
+    const setup = await readyCodingProduct({ taskStatus: "PROPOSED", mode: "SUPERVISED", risk: "LOW", allowed: ["src/app/**", "package.json"], restricted: ["prisma/**"] });
+    await db.acceptanceCriterion.deleteMany({ where: { workItemId: setup.task.workItemId ?? "" } });
+    const original = fs.readFileSync(path.join(repo, "src/app/page.tsx"), "utf8");
+    const changed = `${original.trimEnd()}\n// Golden path: a small, safe change made by the stubbed Coding Agent.\n`;
+    const answers: Record<string, unknown> = {
+      coding_repository_analysis: { summary: "The home page is the relevant file.", relevantFiles: ["src/app/page.tsx"], notes: "Bounded to the app folder." },
+      coding_execution_plan: { summary: "Add a comment to the home page.", filesExpectedToChange: ["src/app/page.tsx", "package.json"], steps: ["Install the dependencies with npm install", "Generate the database client with npx prisma generate", "Edit the home page"], risks: "", validationPlan: "Run npx prisma validate, then npm run build." },
+      coding_change_request: { summary: "Add the comment.", operations: [{ action: "WRITE_FILE", path: "src/app/page.tsx", content: changed }], commands: [], escalation: null, completionProposal: "COMPLETED" },
+      coding_self_review: { summary: "The change is one comment.", potentialDefects: [], missingAcceptance: [], unnecessaryChanges: [], architectureDeviations: [], securityConcerns: [], missingTests: [] },
+      coding_completion: { proposal: "COMPLETED", rationale: "The deterministic checks decide." },
+      ...ANSWERS,
+    };
+    setAIProviderForTests({
+      async generate(request: { schemaName: string }) {
+        const data = answers[request.schemaName];
+        if (data === undefined) throw new Error(`The golden-path stub has no answer for ${request.schemaName}.`);
+        return { data: data as never, usage: { inputTokens: 1, outputTokens: 1 }, model: "stub" };
+      },
+    } as unknown as AIProvider);
+
+    const planId = (await db.implementationTask.findUniqueOrThrow({ where: { id: setup.task.id } })).implementationPlanId;
+    // The person signs once. Everything after this is the Builder, under that authority.
+    const grant = await authority.grantRunAuthority({ productId: setup.product.id, planId, credential: process.env.EXTERNAL_REVIEW_APPROVAL_KEY });
+    const outcome = await orchestrator.runTaskUnderAuthority({ productId: setup.product.id, taskId: setup.task.id, authorityId: grant.id });
+    const steps = (await db.runAuthorityEvent.findMany({ where: { authorityId: grant.id, type: "STEP" }, orderBy: { createdAt: "asc" } })).map((event) => event.step);
+    const summary = `${JSON.stringify(outcome)}\nsteps: ${steps.join(" -> ")}`;
+
+    expect(outcome.status, summary).toBe("DONE");
+    expect(["PASS", "PASS_WITH_CONCERNS"], summary).toContain(outcome.status === "DONE" ? outcome.verdict : "");
+    expect(steps, summary).toEqual(["APPROVE_TASK", "APPROVE_PLAN", "APPROVE_CODE", "RECORD_SNAPSHOT", "SIGN_RUNTIME_REVIEW", "START_VERIFICATION"]);
   }, 1_800_000);
 });

@@ -4,6 +4,8 @@ import {unapprovedPreservationIssues} from '@/modules/coding/external-review';
 import 'server-only';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { randomUUID } from 'node:crypto';
+import { approveVerificationCommand } from './policy';
 import { db } from '@/lib/db';
 import { childEnv } from '@/modules/coding/git';
 import { canonicalJson, contentHash, requireReviewCredential } from '@/modules/coding/external-manifest';
@@ -12,6 +14,7 @@ import { snapshotFingerprints } from './containers/inputs';
 import { currentRuntimeIdentity } from './runtime-identity';
 import { runtimeManifestDigest, withReviewerRuntime, manifestRuntimes, validateRuntimeMetadata, validRuntimeReview, signRuntimeReview, bindingFromState, type RuntimeManifest, type RuntimeAttestation, type RuntimeBinding } from './runtime-manifest';
 import { DomainError } from '@/modules/shared/errors';
+import { assertTaskWithinRisk, requireAuthority } from '@/modules/run-authority/service';
 const exec = promisify(execFile);
 const KEY = 'EXTERNAL_REVIEW_APPROVAL_KEY';
 function rejectCredentialDisclosure(value:unknown) {
@@ -49,6 +52,35 @@ export async function prepareRuntimeReview(productId: string, workspaceId: strin
   rejectCredentialDisclosure(manifest); return manifest;
 }
 /** Local operator only. Never expose through agent tools or a public server action. */
+/**
+ * The Builder signs the runtime review under a run authority, for standard commands only. It adds no declared runtime and no
+ * coverage link, so verification runs exactly what the approved plan lists and nothing the Builder chose. Anything beyond
+ * that needs a person. The record says so: the approver, the label and the signed attestation all name the authority.
+ */
+export async function approveRuntimeReviewUnderAuthority(input: { productId: string; workspaceId: string; authorityId: string }) {
+  const key = process.env[KEY];
+  if (!key || Buffer.byteLength(key) < 32) throw new AuthorityUnavailableError();
+  const workspace = await db.repositoryWorkspace.findFirst({ where: { id: input.workspaceId, productId: input.productId }, select: { implementationTaskId: true } });
+  if (!workspace) throw new DomainError(invalidReason);
+  const delegated = await requireAuthority({ authorityId: input.authorityId, productId: input.productId, step: 'SIGN_RUNTIME_REVIEW', taskId: workspace.implementationTaskId });
+  await assertTaskWithinRisk(workspace.implementationTaskId, delegated.riskCeiling);
+  const manifest = await prepareRuntimeReview(input.productId, input.workspaceId);
+  const plan = await db.codingExecutionPlan.findUnique({ where: { workspaceId: input.workspaceId }, select: { validationCommands: true } });
+  const nonStandard = parsePlannedCommands(plan?.validationCommands).filter(item => item.applicability !== 'NOT_APPLICABLE').filter(item => !approveVerificationCommand(item.command).ok);
+  if (nonStandard.length) throw new DomainError(`The plan runs a command outside the standard catalogue (${nonStandard.map(item => item.command).join(', ')}), so the runtime review needs you.`);
+  const digest = runtimeManifestDigest(manifest);
+  const reason = `Standard commands only, approved by the Builder under authority ${delegated.id}. Nothing beyond the approved plan was declared.`;
+  return db.$transaction(async tx => {
+    const approvedAt = new Date();
+    const approval = await tx.approval.create({ data: { productId: input.productId, approvalType: 'VERIFICATION_RUNTIME', status: 'PENDING', authorityId: delegated.id } });
+    await tx.approval.update({ where: { id: approval.id }, data: { status: 'APPROVED', approvedBy: delegated.wording, requestedAt: approvedAt, resolvedAt: approvedAt, comments: `Runtime/behaviour review only. Manifest ${digest}. ${reason}` } });
+    const attestation: RuntimeAttestation = { kind: 'VERIFICATION_RUNTIME_REVIEW', version: 1, approvalId: approval.id, digest, manifest, actor: { id: `builder:${delegated.id}`, name: delegated.wording }, reason, approvedAt: approvedAt.toISOString(), authorityId: delegated.id };
+    const evidence = await tx.codingEvidence.create({ data: { workspaceId: manifest.workspaceId, implementationTaskId: manifest.taskId, type: 'DELEGATED_CONFIRMATION', source: 'DELEGATED', result: 'APPROVED', description: `Runtime/behaviour review ${digest} by the Builder under authority ${delegated.id}`, output: JSON.stringify({ attestation, signature: signRuntimeReview(attestation, key) }) } });
+    await tx.runAuthorityEvent.create({ data: { id: randomUUID(), authorityId: delegated.id, type: 'STEP', step: 'SIGN_RUNTIME_REVIEW', subjectId: manifest.workspaceId, detail: { approvalId: approval.id, digest } } });
+    return { approvalId: approval.id, evidenceId: evidence.id, digest };
+  });
+}
+
 export async function approveRuntimeReview(input: { productId: string; workspaceId: string; digest: string; credential: string; actor: { id: string; name: string }; reason: string; runAgainstApp?: string[]; coverage?: { command: string; criterionId: string }[] }) {
   requireReviewCredential(input.credential, process.env[KEY]);
   if (!input.actor.id.trim() || !input.actor.name.trim() || /^(codex|coding agent|verification agent|testing agent)$/i.test(input.actor.name.trim()) || input.reason.trim().length < 12) throw new DomainError('Explicit human attribution and a substantive runtime review reason are required.');
@@ -67,11 +99,11 @@ export async function approveRuntimeReview(input: { productId: string; workspace
   });
 }
 async function effectiveReview(manifest: RuntimeManifest): Promise<RuntimeBinding | null> {
-  const records = await db.codingEvidence.findMany({ where: { workspaceId: manifest.workspaceId, implementationTaskId: manifest.taskId, type: 'HUMAN_CONFIRMATION' }, orderBy: { createdAt: 'desc' } });
+  const records = await db.codingEvidence.findMany({ where: { workspaceId: manifest.workspaceId, implementationTaskId: manifest.taskId, type: { in: ['HUMAN_CONFIRMATION', 'DELEGATED_CONFIRMATION'] } }, orderBy: { createdAt: 'desc' } });
   const invalid = new Set<string>();
   for (const record of records) { try { const value=JSON.parse(record.output); if(record.result==='INVALIDATED' && value.kind==='RUNTIME_REVIEW_INVALIDATED') invalid.add(value.approvalId); } catch {} }
   for (const record of records) {
-    if (record.source !== 'HUMAN' || record.result !== 'APPROVED') continue;
+    if ((record.source !== 'HUMAN' && record.source !== 'DELEGATED') || record.result !== 'APPROVED') continue;
     let attestation:RuntimeAttestation,candidate:RuntimeManifest;
     try {
       const parsed=JSON.parse(record.output) as {attestation:RuntimeAttestation;signature:string};attestation=parsed.attestation;
@@ -82,6 +114,8 @@ async function effectiveReview(manifest: RuntimeManifest): Promise<RuntimeBindin
     }catch{continue} // Malformed or untrusted payloads grant no authority.
     // Database observation failures must propagate as unavailable, not revoked.
     const approval=await db.approval.findUnique({where:{id:attestation.approvalId}});
+    // A person's review and the Builder's review under authority are told apart by the signed attestation, the label and the approval's link, which must all agree.
+    const delegated=record.source==='DELEGATED';if(delegated!==Boolean(attestation.authorityId)||(delegated&&approval?.authorityId!==attestation.authorityId)||(!delegated&&approval?.authorityId))continue;
     if(approval?.status!=='APPROVED'||approval.approvalType!=='VERIFICATION_RUNTIME'||approval.productId!==manifest.productId||approval.approvedBy!==attestation.actor.name||approval.resolvedAt?.toISOString()!==attestation.approvedAt||!approval.comments.startsWith(`Runtime/behaviour review only. Manifest ${attestation.digest}.`))continue;
     return {kind:'VERIFICATION_RUNTIME_BINDING',version:1,approvalId:approval.id,evidenceId:record.id,digest:attestation.digest,manifest:candidate};
   }
@@ -108,7 +142,7 @@ export async function assertSessionRuntimeBinding(sessionId: string) {
   }
 }
 async function invalidateRuntimeBinding(sessionId:string,binding:RuntimeBinding) {
-  const record=await db.codingEvidence.findFirst({where:{id:binding.evidenceId,workspaceId:binding.manifest.workspaceId,implementationTaskId:binding.manifest.taskId,type:'HUMAN_CONFIRMATION',source:'HUMAN',result:'APPROVED'}});
+  const record=await db.codingEvidence.findFirst({where:{id:binding.evidenceId,workspaceId:binding.manifest.workspaceId,implementationTaskId:binding.manifest.taskId,type:{in:['HUMAN_CONFIRMATION','DELEGATED_CONFIRMATION']},source:{in:['HUMAN','DELEGATED']},result:'APPROVED'}});
   let authentic=false;
   try{const value=JSON.parse(record?.output??'');authentic=value.attestation?.approvalId===binding.approvalId&&value.attestation?.digest===binding.digest&&validRuntimeReview(value.attestation,value.signature,process.env[KEY],binding.manifest)}catch{}
   await db.$transaction(async tx=>{

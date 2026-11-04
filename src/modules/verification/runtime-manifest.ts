@@ -85,7 +85,7 @@ export function manifestRuntimes(manifest: RuntimeManifest): Map<string, Runtime
 /** What a review records in place of the framework fingerprint while development mode is on (APF_RUNTIME_IDENTITY=off). */
 export const DEVELOPMENT_RUNTIME_DIGEST = 'development-mode:framework-version-not-enforced';
 export const runtimeManifestDigest = (manifest: RuntimeManifest) => contentHash(canonicalJson(manifest));
-export type RuntimeAttestation = { kind: 'VERIFICATION_RUNTIME_REVIEW'; version: 1; approvalId: string; digest: string; manifest: RuntimeManifest; actor: { id: string; name: string }; approvedAt: string; reason: string };
+export type RuntimeAttestation = { kind: 'VERIFICATION_RUNTIME_REVIEW'; version: 1; approvalId: string; digest: string; manifest: RuntimeManifest; actor: { id: string; name: string }; approvedAt: string; reason: string; /** Set only when the Builder signed this under a run authority; part of what is signed. */ authorityId?: string };
 const DOMAIN = 'AI_PRODUCT_FACTORY_VERIFICATION_RUNTIME_REVIEW_V1\0';
 export const signRuntimeReview = (attestation: RuntimeAttestation, key: string) => createHmac('sha256', key).update(DOMAIN).update(canonicalJson(attestation)).digest('hex');
 export function validRuntimeReview(attestation: RuntimeAttestation, signature: string, key: string | undefined, manifest: RuntimeManifest) {

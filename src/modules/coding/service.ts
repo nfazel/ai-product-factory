@@ -976,8 +976,8 @@ export async function approveCodeChanges(productId: string, workspaceId: string,
     workspaceId,
     implementationTaskId: workspace.implementationTaskId,
     // Under authority this is the Builder's own record, never a human confirmation.
-    type: delegated ? "AGENT_ANALYSIS" : "HUMAN_CONFIRMATION",
-    source: delegated ? "AI_ANALYSIS" : "HUMAN",
+    type: delegated ? "DELEGATED_CONFIRMATION" : "HUMAN_CONFIRMATION",
+    source: delegated ? "DELEGATED" : "HUMAN",
     description: `${actor} approved the code change${!status.dirty && status.head ? ` at ${status.head}` : ""}.`,
     result: delegated ? "APPROVED UNDER AUTHORITY" : "APPROVED",
   });
@@ -1344,11 +1344,13 @@ export async function createCodingCommit(productId: string, workspaceId: string)
   const description = reusedExistingCommit
     ? `Existing validated commit ${sha} was recorded as the approved source snapshot ${digest} for execution plan v${workspace.plan?.version ?? "unknown"}. Code change approval ${approval.id}.${workspace.agentRunId ? ` Coding run ${workspace.agentRunId}.` : ""} No duplicate commit was created. The commit was not pushed.`
     : `Local commit ${sha} locks approved snapshot ${digest} for execution plan v${workspace.plan?.version ?? "unknown"}. Code change approval ${approval.id}.${workspace.agentRunId ? ` Coding run ${workspace.agentRunId}.` : ""} The commit was not pushed.`;
+  // Recording a snapshot of code the Builder approved under authority is the Builder's own record, not a person's confirmation.
+  const underAuthority = Boolean((await db.approval.findUnique({ where: { id: approval.approvalId }, select: { authorityId: true } }))?.authorityId);
   await recordEvidence({
     workspaceId,
     implementationTaskId: workspace.implementationTaskId,
-    type: "HUMAN_CONFIRMATION",
-    source: "HUMAN",
+    type: underAuthority ? "DELEGATED_CONFIRMATION" : "HUMAN_CONFIRMATION",
+    source: underAuthority ? "DELEGATED" : "HUMAN",
     description,
     result: "COMMITTED",
   });

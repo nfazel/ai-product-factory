@@ -2,6 +2,10 @@
 -- No existing row is rewritten. An authority is a person's signed grant; it is never recorded as the person's own approval.
 BEGIN;
 
+-- Evidence the Builder records under authority is labelled as such, never as human confirmation.
+ALTER TYPE "CodingEvidenceType" ADD VALUE IF NOT EXISTS 'DELEGATED_CONFIRMATION';
+ALTER TYPE "CodingEvidenceSource" ADD VALUE IF NOT EXISTS 'DELEGATED';
+
 CREATE TABLE "RunAuthority" (
  id TEXT PRIMARY KEY,
  "productId" TEXT NOT NULL REFERENCES "Product"(id) ON DELETE RESTRICT ON UPDATE RESTRICT,
@@ -70,7 +74,7 @@ END $$;
 CREATE TRIGGER "RunAuthorityEvent_guard" BEFORE INSERT ON "RunAuthorityEvent" FOR EACH ROW EXECUTE FUNCTION run_authority_event_guard();
 
 -- The words "Builder, under authority ..." and the link to an authority belong together. Neither can be used alone, and
--- only a code-change approval may be made under an authority.
+-- only a code-change or runtime-review approval may be made under an authority.
 CREATE FUNCTION run_authority_approval_guard() RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE a RECORD;
 BEGIN
@@ -84,8 +88,8 @@ BEGIN
   RETURN NEW;
  END IF;
  SELECT * INTO a FROM "RunAuthority" WHERE id = NEW."authorityId";
- IF a.id IS NULL OR a."productId" <> NEW."productId" OR NEW."approvalType" <> 'CODE_CHANGE' THEN
-  RAISE EXCEPTION 'Only a code change approval of the same product may be made under a run authority';
+ IF a.id IS NULL OR a."productId" <> NEW."productId" OR NEW."approvalType" NOT IN ('CODE_CHANGE','VERIFICATION_RUNTIME') THEN
+  RAISE EXCEPTION 'Only a code change or runtime review approval of the same product may be made under a run authority';
  END IF;
  IF TG_OP = 'INSERT' AND (a."expiresAt" <= now() OR EXISTS (SELECT 1 FROM "RunAuthorityEvent" e WHERE e."authorityId" = a.id AND e.type = 'REVOKED')) THEN
   RAISE EXCEPTION 'The run authority has expired or been revoked';

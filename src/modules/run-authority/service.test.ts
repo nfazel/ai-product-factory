@@ -120,10 +120,10 @@ describe("what the database refuses on its own", () => {
     await expect(db.approval.create({ data: { productId, approvalType: "CODE_CHANGE", status: "APPROVED", approvedBy: authorityWording(authority.id, "Local operator"), authorityId: authority.id } })).resolves.toBeTruthy();
   });
 
-  it("allows only a code change approval to be made under an authority", async () => {
+  it("allows only a code change or runtime review approval to be made under an authority", async () => {
     const { productId, authority } = await granted();
     for (const approvalType of ["VERIFICATION", "RELEASE", "IMPLEMENTATION_PLAN"]) {
-      await expect(db.approval.create({ data: { productId, approvalType, status: "APPROVED", approvedBy: authorityWording(authority.id, "Local operator"), authorityId: authority.id } })).rejects.toThrow(/code change/);
+      await expect(db.approval.create({ data: { productId, approvalType, status: "APPROVED", approvedBy: authorityWording(authority.id, "Local operator"), authorityId: authority.id } })).rejects.toThrow(/code change or runtime review/);
     }
   });
 

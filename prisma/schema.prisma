@@ -1692,6 +1692,7 @@ enum CodingEvidenceType {
   STATIC_ANALYSIS
   AGENT_ANALYSIS
   HUMAN_CONFIRMATION
+  DELEGATED_CONFIRMATION
 }
 
 enum CodingEvidenceSource {
@@ -1699,6 +1700,7 @@ enum CodingEvidenceSource {
   COMMAND_RUNNER
   AI_ANALYSIS
   HUMAN
+  DELEGATED
 }
 
 enum CodingToolAction {

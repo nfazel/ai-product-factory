@@ -21,6 +21,9 @@ import {
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+/** The authority was stopped or has run out. The run stops cleanly instead of retrying. */
+export class AuthorityStoppedError extends DomainError {}
+
 /** A person signs a grant for one approved plan. Requires the operator credential, like every protected decision. */
 export async function grantRunAuthority(input: {
   productId: string;
@@ -135,8 +138,8 @@ export async function requireAuthority(input: {
   if (!manifestIsAuthentic(manifest, authority.digest, authority.signature)) {
     throw new DomainError("The Builder's authority could not be verified, so it was not used.");
   }
-  if (authority.events.length > 0) throw new DomainError("The Builder's authority was stopped.");
-  if (authority.expiresAt <= now) throw new DomainError("The Builder's authority has expired. Grant it again to continue.");
+  if (authority.events.length > 0) throw new AuthorityStoppedError("The Builder's authority was stopped.");
+  if (authority.expiresAt <= now) throw new AuthorityStoppedError("The Builder's authority has expired. Grant it again to continue.");
   if (!manifest.steps.includes(input.step)) throw new DomainError("The Builder's authority does not cover this step.");
   if (input.taskId && !manifest.tasks.some((task) => task.id === input.taskId)) {
     throw new DomainError("This task is not part of the plan the Builder was given authority for.");
