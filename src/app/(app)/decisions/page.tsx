@@ -1,9 +1,9 @@
+import { stageDisplayLabel } from "@/modules/plan/display";
 import { Suspense } from "react";
 import Link from "next/link";
 
 import { EmptyState, PageSkeleton } from "@/components/feedback/states";
 import { PageHeader } from "@/components/layout/page-header";
-import { STAGE_META } from "@/domain/constants";
 import { formatRelative } from "@/lib/format";
 import { listPendingDecisions } from "@/modules/guidance/service";
 import { markDynamic } from "@/server/dynamic";
@@ -45,7 +45,7 @@ async function Decisions() {
               <Link href={item.action.href} className="block rounded-2xl border bg-card p-4 hover:border-primary/40">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <p className="text-sm text-muted-foreground">{item.productName}{item.sample ? " · Sample" : ""}</p>
-                  <p className="text-xs text-muted-foreground">{STAGE_META[item.action.stage].label}</p>
+                  <p className="text-xs text-muted-foreground">{stageDisplayLabel(item.action.stage)}</p>
                 </div>
                 <h2 className="mt-1 text-base font-semibold">{item.action.label}</h2>
                 <p className="mt-2 text-sm leading-6">{item.action.why}</p>

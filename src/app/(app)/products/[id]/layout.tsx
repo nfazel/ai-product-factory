@@ -1,3 +1,4 @@
+import { stageDisplayLabel } from "@/modules/plan/display";
 import { Suspense } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -9,7 +10,7 @@ import { NextStepBar } from "@/components/guidance/next-step-bar";
 import { RestoreProductForm } from "@/components/products/product-forms";
 import { ProductTabs } from "@/components/products/product-tabs";
 import { ProductStatusBadge, StageBadge } from "@/components/status/badges";
-import { PRODUCT_START_LABEL, STAGE_META } from "@/domain/constants";
+import { PRODUCT_START_LABEL } from "@/domain/constants";
 import { getProductGuidance } from "@/modules/guidance/service";
 import { getProduct } from "@/modules/product/service";
 import { feedbackWaiting } from "@/modules/rework/waiting";
@@ -66,7 +67,7 @@ async function ProductFrame({
         </div>
       </div>
       <p className="text-sm text-muted-foreground">
-        {STAGE_META[product.currentStage].label} · {PRODUCT_START_LABEL[product.startMode]}. A stage is complete only after its gate is met.
+        {stageDisplayLabel(product.currentStage)} · {PRODUCT_START_LABEL[product.startMode]}. A stage is complete only after its gate is met.
       </p>
       <ProgressStrip stages={guidance.stages} />
       <NextStepBar productId={product.id} action={guidance.action} blocker={guidance.blocker} />

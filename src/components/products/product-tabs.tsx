@@ -4,17 +4,19 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 import { productTabs } from "@/components/products/product-nav";
+import { activeTabSlug } from "@/modules/plan/display";
 import { cn } from "cn";
 
 export function ProductTabs({ productId }: { productId: string }) {
   const pathname = usePathname();
+  const current = activeTabSlug(pathname, productId);
 
   return (
     <div className="overflow-x-auto">
       <nav aria-label="Product workspace" className="flex min-w-max gap-1 border-b">
         {productTabs.map((tab) => {
           const href = `/products/${productId}${tab.slug}`;
-          const active = pathname === href;
+          const active = current === tab.slug;
           return (
             <Link
               key={tab.label}

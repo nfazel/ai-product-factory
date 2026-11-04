@@ -1,3 +1,4 @@
+import { stageDisplayLabel } from "@/modules/plan/display";
 import { Suspense } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -7,7 +8,6 @@ import { AgentRunEvidenceList } from "@/components/ai/run-evidence";
 import { PageSkeleton } from "@/components/feedback/states";
 import { EvidencePanel, EvidenceSummary, NextActionPanel } from "@/components/guidance/guidance-ui";
 import { EditProductForm, RemoveProductForm } from "@/components/products/product-forms";
-import { STAGE_META } from "@/domain/constants";
 import { STAGE_PROGRESS_LABEL } from "@/modules/guidance/types";
 import { getProductGuidance } from "@/modules/guidance/service";
 import { listAgentRuns } from "@/modules/agent/service";
@@ -46,7 +46,7 @@ async function Overview({ params }: { params: Promise<{ id: string }> }) {
       <section className="grid gap-4 lg:grid-cols-3">
         <article className="rounded-2xl border bg-card p-5 lg:col-span-2">
           <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">Current stage</p>
-          <h2 className="mt-1 text-2xl font-semibold">{STAGE_META[guidance.stage].label}</h2>
+          <h2 className="mt-1 text-2xl font-semibold">{stageDisplayLabel(guidance.stage)}</h2>
           <p className="mt-2 text-sm text-muted-foreground">Status: {current?.label ?? STAGE_PROGRESS_LABEL.IN_PROGRESS}</p>
           <p className="mt-3 text-sm leading-6">
             {overview.product.problemStatement ||

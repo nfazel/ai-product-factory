@@ -1,3 +1,4 @@
+import { stageDisplayLabel } from "@/modules/plan/display";
 import { Suspense } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -20,8 +21,7 @@ import {
   DISCOVERY_STATUS_LABEL,
   PRODUCT_BRIEF_STATUS_LABEL,
   SIGNAL_LEVEL_LABEL,
-  STAGE_META,
-} from "@/domain/constants";
+  } from "@/domain/constants";
 import { formatDateTime } from "@/lib/format";
 import { NextActionPanel } from "@/components/guidance/guidance-ui";
 import { readinessSummary } from "@/modules/discovery/merge";
@@ -160,7 +160,7 @@ async function Discovery({
               <MoveToDefineButton productId={product.id} />
             ) : (
               <p className="text-sm text-emerald-950">
-                This product is already in {STAGE_META[product.currentStage].label}. Discovery will not move it backward.
+                This product is already in {stageDisplayLabel(product.currentStage)}. Discovery will not move it backward.
               </p>
             )}
           </div>

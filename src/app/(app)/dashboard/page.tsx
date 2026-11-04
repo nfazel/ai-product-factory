@@ -1,3 +1,4 @@
+import { stageDisplayLabel } from "@/modules/plan/display";
 import { Suspense } from "react";
 import Link from "next/link";
 
@@ -5,7 +6,6 @@ import { PageSkeleton } from "@/components/feedback/states";
 import { PageHeader } from "@/components/layout/page-header";
 import { ProductStatusBadge, StageBadge } from "@/components/status/badges";
 import { Button } from "@/components/ui/button";
-import { STAGE_META } from "@/domain/constants";
 import { formatRelative } from "@/lib/format";
 import { getPortfolioIntelligence } from "@/modules/analytics/service";
 import { parseWindow } from "@/modules/analytics/time";
@@ -66,7 +66,7 @@ async function DashboardContent({ searchParams }: { searchParams: Promise<{ wind
                 <Link href={item.action.href} className="flex items-start justify-between gap-3 px-4 py-3 hover:bg-muted/40">
                   <span>
                     <span className="block text-sm font-medium">{item.action.label}</span>
-                    <span className="mt-1 block text-xs text-muted-foreground">{item.productName} · {STAGE_META[item.action.stage].label}</span>
+                    <span className="mt-1 block text-xs text-muted-foreground">{item.productName} · {stageDisplayLabel(item.action.stage)}</span>
                   </span>
                   <span className="text-xs text-muted-foreground">{item.action.role}</span>
                 </Link>

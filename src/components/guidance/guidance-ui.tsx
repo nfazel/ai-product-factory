@@ -5,10 +5,11 @@ import { useActionState, useEffect, useState } from "react";
 
 import { FormMessage, SubmitButton } from "@/components/forms/fields";
 import { RetryVerificationButton, StartVerificationButton } from "@/components/prove/prove-controls";
-import { STAGE_META, type ProductStage } from "@/domain/constants";
+import { type ProductStage } from "@/domain/constants";
 import { idleState } from "@/lib/action-state";
 import { formatRelative } from "@/lib/format";
 import { nextActionDestination } from "@/modules/guidance/next-action-registry";
+import { displayStages } from "@/modules/plan/display";
 import type { BlockerView, EvidenceItem, NextAction, ProductGuidance, StageMark } from "@/modules/guidance/types";
 import { generateDefinitionAction } from "@/server/actions/requirements";
 import { moveStageAction } from "@/server/actions/products";
@@ -24,10 +25,10 @@ const MOVE_TARGET: Record<string, ProductStage> = {
 export function ProgressStrip({ stages }: { stages: StageMark[] }) {
   return (
     <ol aria-label="Product progress" className="flex gap-2 overflow-x-auto pb-1">
-      {stages.map((stage) => (
-        <li key={stage.stage} className="min-w-28 flex-1 rounded-xl border bg-card px-3 py-2">
-          <p className="text-xs text-muted-foreground">{STAGE_META[stage.stage].label}</p>
-          <p className="mt-1 text-sm font-medium">{stage.label}</p>
+      {displayStages(stages).map((stage) => (
+        <li key={stage.key} className="min-w-28 flex-1 rounded-xl border bg-card px-3 py-2">
+          <p className="text-xs text-muted-foreground">{stage.label}</p>
+          <p className="mt-1 text-sm font-medium">{stage.text}</p>
         </li>
       ))}
     </ol>

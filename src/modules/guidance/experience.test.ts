@@ -23,24 +23,11 @@ describe("navigation", () => {
     expect(labels).not.toContain("Agents");
   });
 
-  it("keeps product navigation to the lifecycle and intelligence", () => {
-    expect(productTabs.map((tab) => tab.label)).toEqual([
-      "Overview",
-      "Explore",
-      "Define",
-      "UI/UX",
-      "Build",
-      "Prove",
-      "Ship",
-      "Learn",
-      "Intelligence",
-    ]);
+  it("keeps product navigation to Plan, Build, Prove, Ship and intelligence", () => {
+    expect(productTabs.map((tab) => tab.label)).toEqual(["Overview", "Plan", "Build", "Prove", "Ship", "Intelligence"]);
     const labels = productTabs.map((tab) => tab.label);
-    expect(labels).not.toContain("Backlog");
-    expect(labels).not.toContain("Architecture");
-    expect(labels).not.toContain("Activity");
+    for (const hidden of ["Explore", "Define", "UI/UX", "Learn", "Backlog", "Architecture", "Activity"]) expect(labels).not.toContain(hidden);
     expect(productTabs.map((tab) => tab.slug)).not.toContain("/architecture");
-    expect(productTabs.map((tab) => tab.slug)).not.toContain("/backlog");
   });
 
   it("keeps old approval and architecture routes pointed at the new experience", () => {
