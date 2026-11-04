@@ -14,7 +14,8 @@
     "db:validate": "prisma validate && prisma migrate status",
     "db:test:setup": "tsx scripts/test-database.ts setup",
     "db:test:reset": "tsx scripts/test-database.ts reset",
-    "postinstall": "prisma generate"
+    "postinstall": "prisma generate",
+    "test:golden": "vitest run src/modules/verification/golden-path-integration.test.ts"
   },
   "dependencies": {
     "@google/genai": "^2.28.0",
