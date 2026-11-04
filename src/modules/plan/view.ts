@@ -3,6 +3,7 @@ import "server-only";
 import { db } from "@/lib/db";
 import { draftState, sectionState, technicalState, technicalSteps, type ApprovalFact, type DraftState, type SectionState, type TechnicalState } from "@/modules/plan/presentation";
 import { preparationState } from "@/modules/plan/prepare-runner";
+import { planApprovalBlockers, type PlanBlocker } from "@/modules/plan/approve";
 import { technicalPreparationState } from "@/modules/plan/prepare-technical-runner";
 
 export type PlanSection = { key: string; title: string; state: SectionState; approvedBy: string | null; detailsHref: string; detailsLabel: string };
@@ -11,6 +12,8 @@ export type PlanView = {
   productId: string;
   draft: { state: DraftState; reason: string };
   technical: { state: TechnicalState; reason: string; steps: { label: string; done: boolean; current: boolean }[] };
+  /** Shown once everything is drafted and something is still unapproved. The blockers say which section stops the decision. */
+  planApproval: { offered: boolean; blockers: PlanBlocker[] };
   sections: PlanSection[];
   brief: { problem: string; vision: string; value: string; users: string } | null;
   outcomes: { title: string; measure: string }[];
@@ -68,8 +71,19 @@ export async function getPlanView(productId: string): Promise<PlanView | null> {
   const technicalFailure = technical.last?.status === "NEEDS_YOU" ? technical.last.reason : "";
   const review = await db.engineeringGovernanceReview.count({ where: { productId, status: { not: "SUPERSEDED" } } });
   const have = { design: Boolean(architecture), work: Boolean(plan && plan.tasks.length > 0), rules: review > 0 && Boolean(policy) };
+  const sections = [
+      section("brief", "What this is", Boolean(brief), "PRODUCT_DISCOVERY", `${base}/discovery`, "Open the brief"),
+      section("features", "What it will do", features.length > 0, "PRODUCT_DEFINITION", `${base}/definition`, "Open the definition"),
+      section("architecture", "How it will be built", Boolean(architecture), "SOLUTION_ARCHITECTURE", `${base}/design`, "Open the design"),
+      section("work", "The work", Boolean(plan && plan.tasks.length > 0), "IMPLEMENTATION_PLAN", `${base}/build#delivery-plan`, "Open the delivery plan"),
+      section("rules", "The rules", Boolean(policy), "CODING_POLICY", `${base}/build#engineering-review`, "Open the coding rules"),
+  ];
+  const technicalNow = technicalState({ featuresDrafted: outcomes.length > 0 || items.length > 0, ...have, running: technical.running, failure: technicalFailure });
+  const offered = technicalNow === "DRAFTED" && sections.some((item) => item.state !== "APPROVED");
+  const planApproval = { offered, blockers: offered ? await planApprovalBlockers(productId) : [] };
   return {
     productId,
+    planApproval,
     draft: {
       state: draftState({ briefStatus: brief?.status ?? null, briefReadyForReview: Boolean(brief?.readyForReview), drafted: outcomes.length > 0 || items.length > 0, candidate, running: prepared.running, failure }),
       reason: failure,
@@ -79,13 +93,7 @@ export async function getPlanView(productId: string): Promise<PlanView | null> {
       reason: technicalFailure,
       steps: technicalSteps({ ...have, running: technical.running }),
     },
-    sections: [
-      section("brief", "What this is", Boolean(brief), "PRODUCT_DISCOVERY", `${base}/discovery`, "Open the brief"),
-      section("features", "What it will do", features.length > 0, "PRODUCT_DEFINITION", `${base}/definition`, "Open the definition"),
-      section("architecture", "How it will be built", Boolean(architecture), "SOLUTION_ARCHITECTURE", `${base}/design`, "Open the design"),
-      section("work", "The work", Boolean(plan && plan.tasks.length > 0), "IMPLEMENTATION_PLAN", `${base}/build#delivery-plan`, "Open the delivery plan"),
-      section("rules", "The rules", Boolean(policy), "CODING_POLICY", `${base}/build#engineering-review`, "Open the coding rules"),
-    ],
+    sections,
     brief: brief ? { problem: brief.problemStatement, vision: brief.productVision, value: brief.valueProposition, users: product.targetUsers } : null,
     outcomes: outcomes.map((outcome) => ({ title: outcome.title, measure: outcome.successMeasure })),
     features,

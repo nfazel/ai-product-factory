@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: () => undefined }) }));
-vi.mock("@/server/actions/plan", () => ({ approveBriefAndDraftAction: async () => ({ status: "idle" }), draftFeaturesAction: async () => ({ status: "idle" }), confirmFeaturesAction: async () => ({ status: "idle" }) }));
+vi.mock("@/server/actions/plan", () => ({ approveBriefAndDraftAction: async () => ({ status: "idle" }), draftFeaturesAction: async () => ({ status: "idle" }), approvePlanAction: async () => ({ status: "idle" }), approvePlanAndStartAction: async () => ({ status: "idle" }), confirmFeaturesAction: async () => ({ status: "idle" }) }));
 
 import { PlanPage } from "@/components/plan/plan-view";
 import type { PlanView } from "@/modules/plan/view";
@@ -12,6 +12,7 @@ const section = (key: string, title: string, state: PlanView["sections"][number]
 
 const plan = (over: Partial<PlanView> = {}): PlanView => ({
   productId: "p",
+  planApproval: { offered: false, blockers: [] },
   draft: { state: "DRAFTED", reason: "" },
   technical: { state: "DRAFTED", reason: "", steps: [{ label: "The design", done: true, current: false }, { label: "The work", done: true, current: false }, { label: "The rules", done: true, current: false }] },
   sections: [section("brief", "What this is", "APPROVED", "Local user"), section("features", "What it will do", "WAITING"), section("architecture", "How it will be built", "NOT_STARTED"), section("work", "The work", "NOT_STARTED"), section("rules", "The rules", "NOT_STARTED")],
@@ -47,10 +48,10 @@ describe("the Plan page", () => {
     for (const text of ["No brief yet", "No features yet", "No design yet", "No tasks yet", "No coding rules yet", "Nothing is open"]) expect(html).toContain(text);
   });
 
-  it("does not offer to approve anything, because approving the whole plan is not built yet", () => {
+  it("does not offer to approve anything when nothing is offered, because approving the whole plan is not built yet", () => {
     const html = renderToStaticMarkup(createElement(PlanPage, { plan: plan() }));
     expect(html).not.toContain("<button");
-    expect(html).toContain("next piece of work");
+    expect(html).not.toContain("Approve plan");
   });
 
 describe("the card that says what to do about drafting the features", () => {
@@ -106,5 +107,23 @@ describe("the card that says what to do about drafting the features", () => {
     expect(failed).toContain("The model is unavailable.");
     expect(failed).toContain("Try again");
     expect(technical("DRAFTED")).toContain("says whether it is approved");
+  });
+
+  const offered = (blockers: PlanView["planApproval"]["blockers"] = []) =>
+    renderToStaticMarkup(createElement(PlanPage, { plan: plan({ planApproval: { offered: true, blockers } }) }));
+
+  it("offers the two approval buttons once everything is drafted, and says what approving records", () => {
+    const html = offered();
+    expect(html).toContain("Approve plan");
+    expect(html).toContain("Approve and start building");
+    expect(html).toContain("The AI approves nothing");
+  });
+
+  it("names the section that blocks the approval, links to it, and offers no button", () => {
+    const html = offered([{ section: "rules", reason: "A critical finding in the review is still open." }]);
+    expect(html).toContain("It cannot be approved yet");
+    expect(html).toContain('href="#rules"');
+    expect(html).toContain("A critical finding in the review is still open.");
+    expect(html).not.toContain("Approve and start building");
   });
 });

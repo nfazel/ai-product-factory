@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { StatusPill } from "@/components/build/status-pill";
+import { PlanApproveCard } from "@/components/plan/plan-approve-card";
 import { PlanPrepareCard } from "@/components/plan/plan-prepare-card";
 import { buttonVariants } from "@/components/ui/button";
 import { planHeadline, SECTION_STATE_LABEL, type SectionState } from "@/modules/plan/presentation";
@@ -37,12 +38,13 @@ export function PlanPage({ plan }: { plan: PlanView }) {
         <h1 className="text-xl font-semibold">Your plan</h1>
         <p className="max-w-3xl text-sm leading-6 text-muted-foreground">{planHeadline(plan.sections)}</p>
         <p className="max-w-3xl text-sm leading-6 text-muted-foreground">
-          Everything that has to be settled before building, on one page. For now each part is still approved on its own page, which each
-          section links to. Approving the whole plan in one step is the next piece of work.
+          Everything that has to be settled before building, on one page. Read it, then approve it once. The detail pages stay available
+          from each section.
         </p>
       </header>
 
       <PlanPrepareCard plan={plan} />
+      <PlanApproveCard plan={plan} />
 
       <Section section={by("brief")}>
         {plan.brief ? (
