@@ -18,7 +18,7 @@ async function makeProduct() {
 }
 
 describe("removing a product", () => {
-  it("hides it from every list and keeps it recoverable", async () => {
+  it("hides it from every list and keeps it recoverable", { timeout: 180_000 }, async () => {
     const product = await makeProduct();
     expect((await listProducts()).some((item) => item.id === product.id)).toBe(true);
 

@@ -26,7 +26,7 @@ export function FeatureReviewCard({productId,feature}:{productId:string;feature:
    <OperatorCredentialField note="Use the protected local operator credential. It is cleared on submission and is not saved with the review."/>
    <label className="block text-sm">Review note (optional)<textarea name="reason" maxLength={2000} className="block rounded border p-2"/></label>
    <div className="flex gap-3"><button type="submit" name="decision" value="ACCEPTED" disabled={!feature.eligible||pending||!feature.concerns.every(concern=>ack.includes(concern.id))||feature.status==='ACCEPTED'} className="btn btn-primary">Accept Feature</button><button type="submit" name="decision" value="DEFERRED" disabled={pending||feature.status==='ACCEPTED'} className="btn btn-secondary">Review Later</button><button type="button" onClick={()=>setFeedbackOpen(true)} className="btn btn-secondary">Request Changes</button></div>
-   <p className="text-xs">Acceptance is a business decision for this verified version. Review Later does not stop other development.</p>
+   <p className="text-xs">Acceptance is a business decision for this verified version. It also records your approval of each task&apos;s verification, so you do not need to approve them one by one first. Review Later does not stop other development.</p>
   </form>}
   {closed&&<button type="button" onClick={()=>setFeedbackOpen(true)} className="btn btn-secondary">Feedback history</button>}
   {feedbackOpen&&<FeatureFeedbackPanel key={`${productId}:${feature.featureId}`} productId={productId} featureId={feature.featureId} title={feature.title} onClose={()=>setFeedbackOpen(false)} readOnly={closed}/>}

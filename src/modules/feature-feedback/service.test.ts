@@ -33,7 +33,7 @@ beforeAll(async()=>{
  // import is accidentally moved above isolation setup in a future revision.
  expect(()=>requireIsolatedEnvironment()).toThrow(/isolated feedback test database/);
  if(!originalUrl)throw new Error('Local test database configuration is required.');
- const url=new URL(originalUrl);if(url.hostname!=='127.0.0.1'||url.port!=='5433'||url.pathname!=='/ai_product_factory')throw new Error('Expected the approved local Docker development endpoint.');
+ const url=new URL(originalUrl);if(url.hostname!=='127.0.0.1'||url.port!=='5433'||!/^\/ai_product_factory(_test)?$/.test(url.pathname))throw new Error('Expected the approved local Docker development endpoint.');
  const maintenance=new URL(originalUrl);maintenance.pathname='/postgres';
  admin=new pg.Client({connectionString:maintenance.toString()});await admin.connect();
  const identity=(await admin.query("SELECT current_database() AS name,(SELECT system_identifier::text FROM pg_control_system()) AS system")).rows[0];

@@ -8,6 +8,7 @@ import {confirmLocalOperator,operatorConfirmationAvailable,currentOperatorPrinci
 import {loadFeatureManifest,type ReviewReader} from './loader';
 import {forgetGuidanceFeatureAcceptance} from './acceptance-cache';
 import {featureManifestDigest,knownFeatureChange,reviewEligibility,type FeatureReviewManifest} from './manifest';
+import {approveVerificationsAtAcceptance} from './acceptance-approvals';
 
 type Reader=ReviewReader;
 function signedPayload<T extends {createdAt:Date}>(event:T){const value={...event} as T&{sequence?:number};delete value.sequence;return {...value,createdAt:event.createdAt.toISOString()}}
@@ -57,6 +58,8 @@ export async function recordFeatureReview(input:ReviewDecisionInput){
   confirmLocalOperator(input.credential);rejectOperatorSecret({reason,acknowledgedConcerns});
   const payload={id:randomUUID(),productId:input.productId,featureId:input.featureId,type:input.decision,manifestVersion:1,manifestDigest:input.reviewedDigest,actorKind:actor.kind,actorId:actor.id,actorName:actor.name,reason,acknowledgedConcerns,idempotencyKey:input.idempotencyKey,requestDigest,invalidatesEventId:null,createdAt:new Date()};
   const event=await tx.featureReviewEvent.create({data:{...payload,manifest:json(manifest),signature:signFeatureDecision(signedPayload(payload))}});
+  // One signature covers the whole feature: the owner's approval of each task's verification is recorded in the same transaction.
+  if(input.decision==='ACCEPTED')await approveVerificationsAtAcceptance(tx,{manifest,eventId:event.id,actorName:actor.name});
   return {eventId:event.id,replayed:false};
  });
  forgetGuidanceFeatureAcceptance(input.productId);

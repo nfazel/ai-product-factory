@@ -126,6 +126,9 @@ export function VerificationReview({
         <form action={approve} className="space-y-2">
           <Hidden productId={productId} sessionId={sessionId} />
           <SubmitButton pendingLabel="Approving">Approve Verification</SubmitButton>
+          <p className="text-sm text-muted-foreground">
+            You can also leave this: accepting the feature in Build records your approval of every task&apos;s verification at once.
+          </p>
           <FormMessage state={approveState} />
         </form>
       ) : null}

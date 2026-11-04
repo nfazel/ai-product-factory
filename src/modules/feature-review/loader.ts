@@ -11,6 +11,7 @@ import {inspectSessionRuntimeBinding} from '@/modules/verification/runtime-revie
 import {VERIFICATION_EVIDENCE_INCLUDE,verificationApprovalIsCurrent,verificationEvidenceFingerprint} from '@/modules/verification/integrity';
 import {bindingFromState} from '@/modules/verification/runtime-manifest';
 import {featureScope,type FeatureReviewManifest,type TechnicalFact} from './manifest';
+import {isAcceptanceApproval,reviewedApprovals} from './acceptance-approvals';
 import {rejectOperatorSecret} from './authorization';
 import {DomainError} from '@/modules/shared/errors';
 const exec=promisify(execFile);
@@ -38,7 +39,13 @@ export async function loadFeatureManifest(productId:string,featureId:string,read
   const session=await reader.verificationSession.findFirst({where:{productId,implementationTaskId:task.id,demo:false},include:VERIFICATION_EVIDENCE_INCLUDE,orderBy:{createdAt:'desc'}});
   if(!session){technical.push({taskId:task.id,taskStatus:task.status,sessionId:'',commitSha:'',verdict:'NOT_RUN',fingerprint:'',approvalIds:[],authorityDigest:'',current:false,criteria:[],mandatoryPassed:false,concerns:[]});continue}
   const binding=bindingFromState(session.runState);
-  const authority=session.approvals.filter(approval=>approval.productId===productId&&approval.implementationTaskId===task.id&&approval.sessionId===session.id&&approval.approval.approvalType==='VERIFICATION'&&approval.approval.approvedBy&&approval.approval.resolvedAt&&verificationApprovalIsCurrent(approval,session));
+  const authority=reviewedApprovals(session.approvals).filter(approval=>approval.productId===productId&&approval.implementationTaskId===task.id&&approval.sessionId===session.id&&approval.approval.approvalType==='VERIFICATION'&&approval.approval.approvedBy&&approval.approval.resolvedAt&&verificationApprovalIsCurrent(approval,session));
+  // The owner's own approvals decide as before. Approvals recorded by accepting a feature are kept out of what was reviewed, but
+  // evidence that no longer matches them still voids the acceptance. With no approval at all, a passing verification bound to a
+  // signed runtime review is awaiting acceptance, which is what accepting the feature then approves.
+  const ownApprovals=reviewedApprovals(session.approvals),acceptanceApprovals=session.approvals.filter(approval=>isAcceptanceApproval(approval.approval.comments));
+  const awaitingAcceptance=!ownApprovals.some(approval=>approval.approval.status==='APPROVED')&&Boolean(binding)&&verificationEvidenceFingerprint(session).startsWith('v2:');
+  const acceptanceEvidenceIntact=!acceptanceApprovals.some(approval=>approval.approval.status==='APPROVED'&&!verificationApprovalIsCurrent(approval,session));
   const runtimeStatus=await inspectSessionRuntimeBinding(session.id),runtimeCurrent=runtimeStatus==='CURRENT';
   if(runtimeStatus==='UNAVAILABLE'){observation.unavailable=true;observation.reasons.push('Runtime approval authority could not be established.')}
   if(runtimeStatus==='CHANGED')observation.changed=true;
@@ -56,7 +63,7 @@ export async function loadFeatureManifest(productId:string,featureId:string,read
   for(const defect of session.defectLinks.filter(link=>link.workItem.status!=='DONE'&&!['HIGH','CRITICAL'].includes(link.workItem.priority)))concerns.push({id:`${session.id}:defect:${contentHash(canonicalJson(defect.workItem))}`,text:`${defect.workItem.title}: ${defect.workItem.description}`});
   for(const escalation of session.escalations.filter(value=>value.status==='OPEN'&&!failureClassForEscalation(value.type)))concerns.push({id:`${session.id}:escalation:${contentHash(canonicalJson(escalation))}`,text:escalation.description});
   concerns.sort((a,b)=>a.id.localeCompare(b.id));
-  technical.push({taskId:task.id,taskStatus:task.status,sessionId:session.id,commitSha:session.commitSha,verdict:session.overallVerdict??'NOT_RUN',fingerprint:verificationEvidenceFingerprint(session),approvalIds:authority.map(approval=>approval.id).sort(),authorityDigest:contentHash(canonicalJson({binding,approvals:authority.map(approval=>({id:approval.id,approval:approval.approval,stale:approval.stale})).sort((a,b)=>a.id.localeCompare(b.id)),entry,plan:task.plan,task:{id:task.id,workItemId:task.workItemId,objective:task.objective,description:task.description,validation:task.validation}})),current:!entryUnavailable&&runtimeCurrent&&authority.length>0&&entry.length===0&&!session.stale&&session.contract?.objective===(task.objective||task.title),criteria:covered,mandatoryPassed,concerns});
+  technical.push({taskId:task.id,taskStatus:task.status,sessionId:session.id,commitSha:session.commitSha,verdict:session.overallVerdict??'NOT_RUN',fingerprint:verificationEvidenceFingerprint(session),approvalIds:authority.map(approval=>approval.id).sort(),authorityDigest:contentHash(canonicalJson({binding,approvals:authority.map(approval=>({id:approval.id,approval:approval.approval,stale:approval.stale})).sort((a,b)=>a.id.localeCompare(b.id)),entry,plan:task.plan,task:{id:task.id,workItemId:task.workItemId,objective:task.objective,description:task.description,validation:task.validation}})),current:!entryUnavailable&&runtimeCurrent&&(authority.length>0||awaitingAcceptance)&&acceptanceEvidenceIntact&&entry.length===0&&!session.stale&&session.contract?.objective===(task.objective||task.title),criteria:covered,mandatoryPassed,concerns});
  }
  const defects=await reader.workItem.findMany({where:{productId,type:'DEFECT',status:{not:'DONE'},priority:{in:['HIGH','CRITICAL']}}});
  for(const defect of defects)blockingIssues.push(`Open ${defect.priority} defect ${defect.id}.`);
