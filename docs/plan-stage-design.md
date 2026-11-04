@@ -94,3 +94,23 @@ Each part keeps the existing pages and data working, and each must pass its test
 4. **Only the display changes.** The stored stage names stay, and the app shows Plan, Build and Ship. No database change.
 
 Nothing is open. The next step is P1, the read-only Plan page.
+
+## What building P2 showed (2026-11-04)
+
+The framework only lets each part be drafted after the part before it is **approved**. The definition needs an approved brief.
+The design needs an approved definition, an approved first slice and the product to be in Build. The delivery plan needs an
+approved design. The engineering review needs an approved plan, and the coding rules need an approved review. So "draft everything,
+then sign once" cannot work as first described, and two decisions above are refined:
+
+- **The first signature approves the brief only.** The brief is the one part that has to be approved before the next can be
+  drafted at all. It is signed when the interview ends ("this is right, go on"). The system then moves the product on itself.
+- **The pause to confirm the features stays an unrecorded checkpoint**, as first designed. It is not an approval.
+- **The second signature covers everything else:** the definition and first slice, the design, the delivery plan, the engineering
+  review and the coding rules. To make that possible, drafting is allowed ahead of approval for that chain. Concretely: the checks
+  that say "the previous part must be approved" (and "the product must be in Build" for the design) are relaxed for **drafting
+  only**, in the design and review modules. The approval checks before coding are untouched. The signed bundle records the
+  approvals in order, and each one still has to pass its own existing check at that moment.
+
+Build order for P2: **P2a** automate the brief to definition drafting (no gate changes, the system moves the stage and commits
+the drafts); **P2b** draft ahead for the technical chain with the relaxed drafting checks; **P2c** the progress and the pause on the
+Plan page.
