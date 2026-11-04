@@ -2,6 +2,7 @@
 import {headers} from 'next/headers';
 import {draftReworkAmendment,decideReworkAmendment,activateReworkAmendment,readReworkForScope,authoriseReworkTaskExecution,type ReworkView} from '@/modules/rework/service';
 import {approveImplementationTask} from '@/modules/coding/service';
+import {afterTaskApproved} from '@/modules/coding/auto-advance';
 import {db} from '@/lib/db';
 import {findDevelopmentScopeId} from '@/modules/development-scope';
 import {confirmLocalOperator,operatorConfirmationAvailable,resolveOperatorCredential} from '@/modules/feature-review/authorization';
@@ -53,7 +54,8 @@ export async function reworkAction(data:FormData):Promise<ReworkActionResult>{
    const approval={amendmentId:row.id,scopeRevisionId:row.scopeRevisionId,reviewedDigest:shown.reviewedDigest,credential};
    await approveImplementationTask(productId,taskId,{reworkApproval:{...approval,idempotencyKey:`${nonce}:coding`}});
    await authoriseReworkTaskExecution({...approval,productId,taskId,idempotencyKey:`${nonce}:execution`});
-   return{status:'success',message:'Authorised. This task can now be built in Build, with its own plan, code review and verification.',rework:await load()};
+   const next=await afterTaskApproved(productId,taskId);
+   return{status:'success',message:next.ok?'Authorised, and the execution plan was drafted. Read the plan in Build, then approve it.':`Authorised. Drafting the plan stopped: ${next.reason} Open the task in Build and use Generate Execution Plan to try again.`,rework:await load()};
   }
   const reviewedDigest=text('digest');
   if(reviewedDigest!==amendment.digest)throw new DomainError('These tasks changed; review the latest version.');

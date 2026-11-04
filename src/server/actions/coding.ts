@@ -26,6 +26,7 @@ import {
   startCodingTask,
   validateExistingImplementation,
 } from "@/modules/coding/service";
+import { afterCodeApproved, afterPlanApproved, afterTaskApproved } from "@/modules/coding/auto-advance";
 import { actionFailure, formValues, refreshWorkspace } from "@/server/action-helpers";
 
 const ids = z.object({
@@ -48,7 +49,13 @@ export async function approveTaskAction(_prev: ActionState, formData: FormData):
   if (!parsed.success) return invalidState(parsed.error.issues);
   try {
     await approveImplementationTask(parsed.data.productId, parsed.data.taskId);
-    return done(parsed.data.productId, "The implementation task is approved for coding.");
+    const next = await afterTaskApproved(parsed.data.productId, parsed.data.taskId);
+    return done(
+      parsed.data.productId,
+      next.ok
+        ? "Task approved and its execution plan drafted. Read the plan, then approve it."
+        : `Task approved. Drafting the plan stopped: ${next.reason} Use Generate Execution Plan to try again.`,
+    );
   } catch (error) {
     return actionFailure(error);
   }
@@ -81,7 +88,13 @@ export async function approvePlanAction(_prev: ActionState, formData: FormData):
   if (!parsed.success) return invalidState(parsed.error.issues);
   try {
     await approveExecutionPlan(parsed.data.productId, parsed.data.workspaceId);
-    return done(parsed.data.productId, "Execution plan approved. Coding has not started.");
+    const next = await afterPlanApproved(parsed.data.productId, parsed.data.workspaceId);
+    return done(
+      parsed.data.productId,
+      next.ok
+        ? "Plan approved and coding finished. Review the change, then approve it."
+        : `Plan approved. Coding stopped: ${next.reason} Use Start Coding to try again.`,
+    );
   } catch (error) {
     return actionFailure(error);
   }
@@ -151,7 +164,13 @@ export async function approveCodeAction(_prev: ActionState, formData: FormData):
   if (!parsed.success) return invalidState(parsed.error.issues);
   try {
     await approveCodeChanges(parsed.data.productId, parsed.data.workspaceId);
-    return done(parsed.data.productId, "Code changes approved. Create a local commit to lock this approved source snapshot before Independent Verification.");
+    const next = await afterCodeApproved(parsed.data.productId, parsed.data.workspaceId);
+    return done(
+      parsed.data.productId,
+      next.ok
+        ? `Code approved and the approved snapshot recorded (${(next.sha ?? "").slice(0, 12)}). It is ready for Independent Verification.`
+        : `Code approved. Recording the snapshot stopped: ${next.reason} Use Record Approved Snapshot to try again.`,
+    );
   } catch (error) {
     return actionFailure(error);
   }

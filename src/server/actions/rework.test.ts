@@ -4,6 +4,7 @@ const mock=vi.hoisted(()=>({resolve:vi.fn((value:string)=>value),headers:vi.fn()
 vi.mock('next/headers',()=>({headers:mock.headers}));
 vi.mock('@/modules/rework/service',()=>({draftReworkAmendment:mock.draft,decideReworkAmendment:mock.decide,activateReworkAmendment:mock.activate,readReworkForScope:mock.read,authoriseReworkTaskExecution:mock.authorise}));
 vi.mock('@/modules/coding/service',()=>({approveImplementationTask:mock.approveTask}));
+vi.mock('@/modules/coding/auto-advance',()=>({afterTaskApproved:vi.fn(async()=>({ok:true}))}));
 vi.mock('@/lib/db',()=>({db:{reworkAmendment:{findFirst:mock.amendmentRow}}}));
 vi.mock('@/modules/development-scope',()=>({findDevelopmentScopeId:mock.find}));
 vi.mock('@/modules/feature-review/authorization',()=>({operatorConfirmationAvailable:mock.available,confirmLocalOperator:mock.confirm,resolveOperatorCredential:mock.resolve}));
@@ -32,7 +33,7 @@ describe('rework server transport',()=>{
   beforeEach(()=>{mock.read.mockResolvedValue(view(made()));mock.amendmentRow.mockResolvedValue({id:'amend-1',scopeRevisionId:'rev-1'})});
   it('records the coding decision, then the execution authority, using the amendment and revision the server found',async()=>{
    const result=await ask({amendmentId:'forged',scopeRevisionId:'forged'});
-   expect(result.status).toBe('success');expect(result.message).toContain('built in Build');
+   expect(result.status).toBe('success');expect(result.message).toContain('execution plan was drafted');
    expect(mock.approveTask).toHaveBeenCalledWith('p','task-1',{reworkApproval:expect.objectContaining({amendmentId:'amend-1',scopeRevisionId:'rev-1',reviewedDigest:D,idempotencyKey:'request-12345:coding'})});
    expect(mock.authorise).toHaveBeenCalledWith(expect.objectContaining({productId:'p',taskId:'task-1',amendmentId:'amend-1',scopeRevisionId:'rev-1',idempotencyKey:'request-12345:execution'}));
    expect(mock.approveTask.mock.invocationCallOrder[0]).toBeLessThan(mock.authorise.mock.invocationCallOrder[0]);

@@ -1,4 +1,4 @@
-import {describe,it,expect} from 'vitest';import {createHash} from 'node:crypto';import {safeInputPath,inputTar,archiveEntry,dependencyArtifacts} from './inputs';
+import {describe,it,expect,vi} from 'vitest';import {createHash} from 'node:crypto';import {safeInputPath,inputTar,archiveEntry,dependencyArtifacts} from './inputs';
 const bytes=Buffer.from('verified-artifact'),integrity='sha512-'+createHash('sha512').update(bytes).digest('base64');
 describe('bounded immutable verification inputs',()=>{
  it('rejects secret, traversal and Git paths',()=>{for(const path of ['../x','/x','a/../b','.git/config','.env','.npmrc','a\\b'])expect(safeInputPath(path),path).toBe(false);expect(safeInputPath('src/app/api/route.ts')).toBe(true)});
@@ -6,4 +6,11 @@ describe('bounded immutable verification inputs',()=>{
  it('verifies lockfile integrity before accepting registry bytes',async()=>{const lock={packages:{'node_modules/example':{resolved:'https://registry.npmjs.org/example/-/example.tgz',integrity}}};const fetcher=async()=>new Response(bytes);expect(await dependencyArtifacts(lock,fetcher as typeof fetch)).toHaveLength(1);await expect(dependencyArtifacts({...lock,packages:{'node_modules/example':{...lock.packages['node_modules/example'],integrity:'sha512-bad'}}},fetcher as typeof fetch)).rejects.toThrow(/integrity/)});
  it('does not download incompatible optional binaries and rejects unapproved registries',async()=>{let called=false;const fetcher=async()=>{called=true;return new Response(bytes)};expect(await dependencyArtifacts({packages:{'node_modules/x':{os:['darwin'],optional:true}}},fetcher as typeof fetch)).toEqual([]);expect(called).toBe(false);await expect(dependencyArtifacts({packages:{'node_modules/x':{resolved:'https://private.example/x',integrity}}},fetcher as typeof fetch)).rejects.toThrow(/registry/);expect(called).toBe(false)});
  it('rejects missing and weak integrity rather than executing a network installer',async()=>{for(const integrity of [undefined,'sha1-weak'])await expect(dependencyArtifacts({packages:{'node_modules/x':{resolved:'https://registry.npmjs.org/x',integrity}}})).rejects.toThrow()});
+
+ describe('dependency downloads',()=>{
+  const lock=()=>({packages:{'node_modules/example':{resolved:'https://registry.npmjs.org/example/-/example.tgz',integrity}}});
+  it('retries a failed fetch and then succeeds, so one network hiccup does not fail verification',async()=>{let calls=0;const fetcher=async()=>{calls+=1;if(calls===1)throw new TypeError('fetch failed');return new Response(bytes)};expect(await dependencyArtifacts(lock(),fetcher as typeof fetch)).toHaveLength(1);expect(calls).toBe(2)});
+  it('does not retry a missing file',async()=>{let calls=0;const fetcher=async()=>{calls+=1;return new Response('',{status:404})};await expect(dependencyArtifacts(lock(),fetcher as typeof fetch)).rejects.toThrow(/could not be downloaded/);expect(calls).toBe(1)});
+  it('retries a server error, then explains plainly after three attempts',async()=>{vi.useFakeTimers();try{let calls=0;const fetcher=async()=>{calls+=1;return new Response('',{status:503})};const outcome=dependencyArtifacts(lock(),fetcher as typeof fetch).then(()=>null,(error:Error)=>error);await vi.runAllTimersAsync();const error=await outcome;expect(error?.message).toMatch(/three attempts/);expect(calls).toBe(3)}finally{vi.useRealTimers()}});
+ });
 });

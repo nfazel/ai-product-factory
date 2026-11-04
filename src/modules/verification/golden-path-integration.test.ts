@@ -54,6 +54,7 @@ let completedTaskIn: typeof import("@/modules/verification/completed-task.test-s
 let signFixtureRuntimeReview: typeof import("@/modules/verification/completed-task.test-support").signFixtureRuntimeReview;
 let readyCodingProduct: typeof import("@/modules/coding/ready-product.test-support").readyCodingProduct;
 let coding: typeof import("@/modules/coding/service");
+let advance: typeof import("@/modules/coding/auto-advance");
 let setAIProviderForTests: typeof import("@/modules/ai/provider").setAIProviderForTests;
 type AIProvider = import("@/modules/ai/provider").AIProvider;
 
@@ -122,6 +123,7 @@ beforeAll(async () => {
   ({ completedTaskIn, signFixtureRuntimeReview } = await import("@/modules/verification/completed-task.test-support"));
   ({ readyCodingProduct } = await import("@/modules/coding/ready-product.test-support"));
   coding = await import("@/modules/coding/service");
+  advance = await import("@/modules/coding/auto-advance");
   ({ setAIProviderForTests } = await import("@/modules/ai/provider"));
 }, 300_000);
 
@@ -254,16 +256,18 @@ describe.skipIf(!RUN)("golden path: a real product, verified in the real sandbox
 
     const human = { actorName: "Local user" };
     await coding.approveImplementationTask(setup.product.id, setup.task.id, human);
-    const workspace = await coding.startCodingTask(setup.product.id, setup.task.id);
-    if (!workspace) throw new Error("Coding did not create a workspace.");
+    // The step after each decision runs by itself, exactly as it does after the button is pressed.
+    expect(await advance.afterTaskApproved(setup.product.id, setup.task.id), "drafting the plan after approving the task").toEqual({ ok: true });
+    const workspace = await db.repositoryWorkspace.findFirstOrThrow({ where: { productId: setup.product.id, implementationTaskId: setup.task.id } });
     await coding.approveExecutionPlan(setup.product.id, workspace.id, human);
-    await coding.resumeCodingTask(setup.product.id, workspace.id);
+    expect(await advance.afterPlanApproved(setup.product.id, workspace.id), "coding after approving the plan").toEqual({ ok: true });
     const afterCoding = await db.repositoryWorkspace.findUniqueOrThrow({ where: { id: workspace.id } });
     const evidence = await db.codingEvidence.findMany({ where: { workspaceId: workspace.id }, orderBy: { createdAt: "asc" } });
     const detail = evidence.map((item) => `${item.command || item.type}: ${item.result} ${String(item.description).slice(0, 240).replace(/\s+/g, " ")} ${String(item.output).slice(-300).replace(/\s+/g, " ")}`).join("\n");
     expect(afterCoding.status, `coding ended as ${afterCoding.status}\n${detail}\nAI calls: ${requests.join(" -> ")}\n${JSON.stringify(afterCoding).slice(0, 600)}`).toBe("READY_FOR_REVIEW");
     await coding.approveCodeChanges(setup.product.id, workspace.id, human);
-    await coding.createCodingCommit(setup.product.id, workspace.id);
+    const snapshot = await advance.afterCodeApproved(setup.product.id, workspace.id);
+    expect(snapshot.ok, "recording the snapshot after approving the code").toBe(true);
     const committed = await db.repositoryWorkspace.findUniqueOrThrow({ where: { id: workspace.id } });
     expect(committed.status).toBe("COMPLETED");
     expect(committed.headCommit).not.toBe(committed.baseCommit);

@@ -45,7 +45,7 @@ export function ApproveTaskButton({ productId, taskId }: { productId: string; ta
   return (
     <form action={action} className="space-y-2">
       <Hidden productId={productId} taskId={taskId} />
-      <SubmitButton pendingLabel="Approving">Approve implementation task</SubmitButton>
+      <SubmitButton pendingLabel="Approving, then drafting the plan">Approve implementation task</SubmitButton>
       <FormMessage state={state} />
     </form>
   );
@@ -85,7 +85,7 @@ export function ApprovePlanButton({ productId, workspaceId }: { productId: strin
   return (
     <form action={action} className="space-y-2">
       <Hidden productId={productId} workspaceId={workspaceId} />
-      <SubmitButton pendingLabel="Approving">Approve Execution Plan</SubmitButton>
+      <SubmitButton pendingLabel="Approving, then coding">Approve Execution Plan</SubmitButton>
       <FormMessage state={state} />
     </form>
   );
@@ -313,7 +313,7 @@ export function ApproveCodeChangesButton({ productId, workspaceId }: { productId
   return (
     <form action={action} className="space-y-2">
       <Hidden productId={productId} workspaceId={workspaceId} />
-      <SubmitButton pendingLabel="Approving">Approve Code Changes</SubmitButton>
+      <SubmitButton pendingLabel="Approving, then saving the snapshot">Approve Code Changes</SubmitButton>
       <FormMessage state={state} />
     </form>
   );

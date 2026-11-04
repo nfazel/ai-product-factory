@@ -1,5 +1,5 @@
 import 'server-only';
-import {execFile} from 'node:child_process';import {promisify} from 'node:util';import {createHash} from 'node:crypto';import {gunzipSync} from 'node:zlib';
+import fs from 'node:fs';import os from 'node:os';import nodePath from 'node:path';import {execFile} from 'node:child_process';import {promisify} from 'node:util';import {createHash} from 'node:crypto';import {gunzipSync} from 'node:zlib';
 import {isSecretPath} from '@/modules/coding/policy';import {SOURCE_BYTES,ARTIFACT_BYTES} from './policy';
 const exec=promisify(execFile);
 export type InputFile={path:string;bytes:Buffer;mode?:number};
@@ -40,7 +40,21 @@ export type Artifact={path:string;bytes:Buffer;sha256:string};
 export async function dependencyArtifacts(lock:unknown,fetcher:typeof fetch=fetch,signal:AbortSignal=AbortSignal.timeout(600000)):Promise<Artifact[]>{
  const packages=(lock as {lockfileVersion?:number;packages?:Record<string,Record<string,unknown>>})?.packages;
  if(!packages)throw new Error('A supported committed npm lockfile is required.');const result:Artifact[]=[],seen=new Set<string>();let size=0;
- const download=async(url:string,max=128*1024*1024)=>{const u=new URL(url);if(u.protocol!=='https:'||!['registry.npmjs.org','binaries.prisma.sh'].includes(u.hostname)||u.username||u.password||(u.port&&u.port!=='443')||u.search||u.hash)throw new Error('Dependency URL is not permitted.');const response=await fetcher(u,{redirect:'error',signal:AbortSignal.any([signal,AbortSignal.timeout(60000)])});if(!response.ok||!response.body)throw new Error('An integrity-bound dependency artifact could not be downloaded.');let count=0;const chunks:Buffer[]=[];for await(const part of response.body as unknown as AsyncIterable<Uint8Array>){count+=part.length;if(count>max||size+count>ARTIFACT_BYTES)throw new Error('Dependency artifact storage limit exceeded.');chunks.push(Buffer.from(part))}return Buffer.concat(chunks)};
+ const cacheDir=fetcher===fetch?(process.env.APF_ARTIFACT_CACHE?.trim()||nodePath.join(os.homedir(),'.ai-product-factory','artifact-cache')):null;
+ // One attempt. A slow or failed fetch is retried by `download`; a refused URL, an oversized file or a bad hash never is.
+ const fetchOnce=async(u:URL,max:number)=>{const response=await fetcher(u,{redirect:'error',signal:AbortSignal.any([signal,AbortSignal.timeout(120000)])});if(!response.ok||!response.body){const failure=new Error('An integrity-bound dependency artifact could not be downloaded.') as Error&{retryable?:boolean};failure.retryable=response.status>=500||response.status===429;throw failure}let count=0;const chunks:Buffer[]=[];for await(const part of response.body as unknown as AsyncIterable<Uint8Array>){count+=part.length;if(count>max||size+count>ARTIFACT_BYTES)throw new Error('Dependency artifact storage limit exceeded.');chunks.push(Buffer.from(part))}return Buffer.concat(chunks)};
+ const download=async(url:string,max=128*1024*1024)=>{const u=new URL(url);if(u.protocol!=='https:'||!['registry.npmjs.org','binaries.prisma.sh'].includes(u.hostname)||u.username||u.password||(u.port&&u.port!=='443')||u.search||u.hash)throw new Error('Dependency URL is not permitted.');
+  // Large files are remembered on disk. Every caller still checks the bytes against a hash it did not take from the cache, so a damaged entry is refused, never trusted.
+  const cacheFile=cacheDir&&max>1024?nodePath.join(cacheDir,createHash('sha256').update(u.toString()).digest('hex')):null;
+  if(cacheFile){try{const kept=fs.readFileSync(cacheFile);if(kept.length<=max)return kept}catch{/* not cached yet */}}
+  for(let attempt=1;;attempt++){
+   try{const bytes=await fetchOnce(u,max);if(cacheFile){try{fs.mkdirSync(cacheDir!,{recursive:true,mode:0o700});const partial=`${cacheFile}.${process.pid}.tmp`;fs.writeFileSync(partial,bytes,{mode:0o600});fs.renameSync(partial,cacheFile)}catch{/* a cache that cannot be written is only slower */}}return bytes}
+   catch(error){const name=(error as Error).name,transient=name==='TimeoutError'||name==='AbortError'||error instanceof TypeError||(error as {retryable?:boolean}).retryable===true;
+    if(!transient||signal.aborted)throw error;
+    if(attempt>=3)throw new Error('A dependency download did not finish after three attempts. Check the network connection and try again.');
+    await new Promise(resolve=>setTimeout(resolve,1000*attempt*attempt))}
+  }
+ };
  const add=(path:string,bytes:Buffer)=>{if(seen.has(path))return;size+=bytes.length;if(size>ARTIFACT_BYTES)throw new Error('Dependency artifact storage limit exceeded.');seen.add(path);result.push({path,bytes,sha256:createHash('sha256').update(bytes).digest('hex')})};
  for(const [name,p]of Object.entries(packages)){
   if(!name.startsWith('node_modules/')||p.link||p.inBundle)continue;
