@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useActionState, useEffect } from "react";
+import { useActionState, useEffect, useTransition } from "react";
 
 import { FormMessage, SubmitButton } from "@/components/forms/fields";
 import { buttonVariants } from "@/components/ui/button";
@@ -18,12 +18,14 @@ export function PlanPrepareCard({ plan }: { plan: PlanView }) {
   const [draftState, draft] = useActionState(draftFeaturesAction, idleState);
   const [confirmState, confirm] = useActionState(confirmFeaturesAction, idleState);
 
-  // Follow the drafting while it works; the page reads the real state again each time.
+  // Follow the drafting while it works; the page reads the real state again each time. The next read waits for the last one to
+  // finish, so a slow page cannot pile up requests behind the drafting it is waiting on.
+  const [refreshing, startRefresh] = useTransition();
   useEffect(() => {
-    if (!running) return;
-    const timer = window.setInterval(() => router.refresh(), 4000);
-    return () => window.clearInterval(timer);
-  }, [running, router]);
+    if (!running || refreshing) return;
+    const timer = window.setTimeout(() => startRefresh(() => router.refresh()), 4000);
+    return () => window.clearTimeout(timer);
+  }, [running, refreshing, router]);
 
   const hidden = <input type="hidden" name="productId" value={plan.productId} />;
   switch (plan.draft.state) {
