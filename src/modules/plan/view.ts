@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { draftState, sectionState, technicalState, technicalSteps, type ApprovalFact, type DraftState, type SectionState, type TechnicalState } from "@/modules/plan/presentation";
 import { preparationState } from "@/modules/plan/prepare-runner";
 import { planApprovalBlockers, type PlanBlocker } from "@/modules/plan/approve";
+import { developmentContextGap } from "@/modules/plan/prepare-technical";
 import { technicalPreparationState } from "@/modules/plan/prepare-technical-runner";
 
 export type PlanSection = { key: string; title: string; state: SectionState; approvedBy: string | null; detailsHref: string; detailsLabel: string };
@@ -78,7 +79,9 @@ export async function getPlanView(productId: string): Promise<PlanView | null> {
       section("work", "The work", Boolean(plan && plan.tasks.length > 0), "IMPLEMENTATION_PLAN", `${base}/build#delivery-plan`, "Open the delivery plan"),
       section("rules", "The rules", Boolean(policy), "CODING_POLICY", `${base}/build#engineering-review`, "Open the coding rules"),
   ];
-  const technicalNow = technicalState({ featuresDrafted: outcomes.length > 0 || items.length > 0, ...have, running: technical.running, failure: technicalFailure });
+  const contextGap = (await developmentContextGap(productId)) ?? "";
+  const technicalInput = { featuresDrafted: outcomes.length > 0 || items.length > 0, ...have, running: technical.running, failure: technicalFailure, contextGap };
+  const technicalNow = technicalState(technicalInput);
   const offered = technicalNow === "DRAFTED" && sections.some((item) => item.state !== "APPROVED");
   const planApproval = { offered, blockers: offered ? await planApprovalBlockers(productId) : [] };
   return {
@@ -89,8 +92,8 @@ export async function getPlanView(productId: string): Promise<PlanView | null> {
       reason: failure,
     },
     technical: {
-      state: technicalState({ featuresDrafted: outcomes.length > 0 || items.length > 0, ...have, running: technical.running, failure: technicalFailure }),
-      reason: technicalFailure,
+      state: technicalNow,
+      reason: technicalNow === "NEEDS_CONTEXT" ? contextGap : technicalFailure,
       steps: technicalSteps({ ...have, running: technical.running }),
     },
     sections,

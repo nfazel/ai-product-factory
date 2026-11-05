@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useActionState, useEffect } from "react";
 
 import { FormMessage, SubmitButton } from "@/components/forms/fields";
+import { buttonVariants } from "@/components/ui/button";
 import { idleState, type ActionState } from "@/lib/action-state";
 import type { PlanView } from "@/modules/plan/view";
 import { approveBriefAndDraftAction, confirmFeaturesAction, draftFeaturesAction } from "@/server/actions/plan";
@@ -81,6 +82,17 @@ export function PlanPrepareCard({ plan }: { plan: PlanView }) {
 /** After the features: the one pause to confirm them, then the progress of drafting the design, the work and the rules. */
 function TechnicalCard({ plan, confirm, confirmState, hidden }: { plan: PlanView; confirm: (formData: FormData) => void; confirmState: ActionState; hidden: React.ReactNode }) {
   const { state, reason, steps } = plan.technical;
+  if (state === "NEEDS_CONTEXT") {
+    return (
+      <section aria-label="Next step" className="space-y-3 rounded-2xl border border-indigo-200 bg-indigo-50 p-4 text-indigo-950">
+        <h2 className="text-base font-semibold">One thing before the design</h2>
+        <p className="text-sm leading-6">{reason}</p>
+        <Link href={`/products/${plan.productId}/build#context`} className={buttonVariants({ size: "sm" })}>
+          Set the development context
+        </Link>
+      </section>
+    );
+  }
   if (state === "CONFIRM" || state === "PARTIAL" || state === "FAILED") {
     return (
       <section aria-label="Next step" className="space-y-3 rounded-2xl border border-indigo-200 bg-indigo-50 p-4 text-indigo-950">

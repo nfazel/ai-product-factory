@@ -41,6 +41,8 @@ describe("where drafting the technical plan stands", () => {
   it("waits for the features, then pauses for the person to confirm them", () => {
     expect(technicalState({ ...base, featuresDrafted: false })).toBe("NOT_YET");
     expect(technicalState(base)).toBe("CONFIRM");
+    expect(technicalState({ ...base, contextGap: "Describe the codebase." })).toBe("NEEDS_CONTEXT");
+    expect(technicalState({ ...base, design: true, contextGap: "Describe the codebase." })).toBe("PARTIAL");
   });
   it("is running, failed, partly done or done, with done taking priority", () => {
     expect(technicalState({ ...base, running: true })).toBe("RUNNING");

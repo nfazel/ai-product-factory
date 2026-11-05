@@ -109,6 +109,14 @@ describe("the card that says what to do about drafting the features", () => {
     expect(technical("DRAFTED")).toContain("says whether it is approved");
   });
 
+  it("asks for the development context, with a link, before the design is drafted", () => {
+    const html = technical("NEEDS_CONTEXT", { reason: "Describe that codebase so the design starts from it." });
+    expect(html).toContain("One thing before the design");
+    expect(html).toContain("Describe that codebase");
+    expect(html).toContain('href="/products/p/build#context"');
+    expect(html).not.toContain("<button");
+  });
+
   const offered = (blockers: PlanView["planApproval"]["blockers"] = []) =>
     renderToStaticMarkup(createElement(PlanPage, { plan: plan({ planApproval: { offered: true, blockers } }) }));
 

@@ -42,6 +42,20 @@ describe("drafting the technical chain ahead of approval", () => {
     expect(await nextTechnicalAction(setup.product.id)).toEqual({ kind: "done" });
   }, 60_000);
 
+  it("waits for the development context before the design, and drafts once an existing codebase is described", async () => {
+    const setup = await draftedFeaturesProduct();
+    setAIProviderForTests(chainProvider(setup));
+    await db.product.update({ where: { id: setup.product.id }, data: { developmentContext: null } });
+    expect(await nextTechnicalAction(setup.product.id)).toMatchObject({ kind: "needs-you", step: "context" });
+
+    await db.product.update({ where: { id: setup.product.id }, data: { developmentContext: "EXISTING_SYSTEM" } });
+    expect(await nextTechnicalAction(setup.product.id)).toMatchObject({ kind: "needs-you", step: "context", reason: expect.stringContaining("existing application") });
+    expect(await db.solutionArchitecture.count({ where: { productId: setup.product.id } })).toBe(0);
+
+    await db.codebaseContext.create({ data: { productId: setup.product.id, repositoryName: "claims-app", architectureSummary: "A Next.js app.", source: "MANUAL", systemKind: "EXISTING_SYSTEM" } });
+    expect(await prepareTechnical(setup.product.id)).toEqual({ status: "DRAFTED" });
+  }, 60_000);
+
   it("starts again from what exists and does not ask the agents twice", async () => {
     const setup = await draftedFeaturesProduct();
     let calls = 0;

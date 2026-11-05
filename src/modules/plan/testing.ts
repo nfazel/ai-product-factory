@@ -10,7 +10,7 @@ export const originalKey = process.env.OPENAI_API_KEY;
 export async function draftedFeaturesProduct(stage: "DEFINE" | "BUILD" = "DEFINE") {
   process.env.OPENAI_API_KEY = "test-key";
   const product = await db.product.create({
-    data: { name: `Technical run ${crypto.randomUUID()}`, description: "Temporary", vision: "Temporary", problemStatement: "Temporary", targetUsers: "Testers", status: "ACTIVE", currentStage: stage },
+    data: { name: `Technical run ${crypto.randomUUID()}`, description: "Temporary", vision: "Temporary", problemStatement: "Temporary", targetUsers: "Testers", status: "ACTIVE", currentStage: stage, developmentContext: "GREENFIELD" },
   });
   const session = await db.discoverySession.create({ data: { productId: product.id, status: "APPROVED" } });
   await db.productBrief.create({

@@ -20,6 +20,7 @@ import {
   generateGovernanceReview,
   markGovernanceReady,
 } from "@/modules/governance/service";
+import { codebaseCaptured } from "@/modules/architecture/development-context";
 import { DomainError } from "@/modules/shared/errors";
 
 /**
@@ -39,12 +40,26 @@ const MAX_RETRIES = 2;
 const MAX_TURNS = 20;
 const AHEAD = { draftAhead: true } as const;
 
+/**
+ * What the design still needs to know about where the product is built. A new application needs nothing. An existing one needs its
+ * codebase described, or the design would be drafted without it. Returns the reason drafting must wait, or null.
+ */
+export async function developmentContextGap(productId: string): Promise<string | null> {
+  const product = await db.product.findUnique({ where: { id: productId }, select: { developmentContext: true } });
+  if (product?.developmentContext === "GREENFIELD") return null;
+  if (product?.developmentContext !== "EXISTING_SYSTEM") return "Say whether this is a new application or builds on an existing one. The design depends on it.";
+  const context = await db.codebaseContext.findUnique({ where: { productId } });
+  return codebaseCaptured(context) ? null : "This builds on an existing application. Describe that codebase so the design starts from it.";
+}
+
 export async function nextTechnicalAction(productId: string): Promise<Next> {
   const features = (await db.productOutcome.count({ where: { productId } })) > 0 && (await db.workItem.count({ where: { productId, type: "FEATURE" } })) > 0;
   if (!features) return { kind: "needs-you", step: "features", reason: "The features need to be drafted before the design can be." };
 
   const architecture = await db.solutionArchitecture.findFirst({ where: { productId }, orderBy: { version: "desc" }, select: { status: true } });
   if (!architecture) {
+    const gap = await developmentContextGap(productId);
+    if (gap) return { kind: "needs-you", step: "context", reason: gap };
     if (await findOpenProposal(productId, "ARCHITECTURE")) return { kind: "accept-architecture" };
     return { kind: "generate-architecture" };
   }
